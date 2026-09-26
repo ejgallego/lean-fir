@@ -22,9 +22,10 @@ W6's accumulated `_build` validation trees have been retired; their old receipts
 cannot be replayed after deletion. Source checkpoints, packages and lightweight
 logs remain. Fresh `make check` and Talos checks retain their existing gates;
 W6 proof work was explicitly resumed by the maintainer on 2026-09-22. The
-retained-initializer input prerequisite is now integrated on RC2; downstream
-W6 proof consumption remains open. Other parked proof work requires an explicit
-resume. See `docs/validation.md`.
+retained-initializer input prerequisite and first checked-body source proof are
+now integrated on RC2; production external refinement and return/pop remain
+open. Other parked proof work requires an explicit resume. See
+`docs/validation.md`.
 
 `fir/root` (the meta lane) is the maintainer-appointed standing integration
 owner from 2026-09-09 until explicitly reassigned. Root owns serial green
@@ -57,9 +58,26 @@ it from the exact source/toolchain recipe in
 portable package. The source/setup recipe and boundary limitations are recorded
 there. Root reran the focused corpus build, `make check`, `make talos-setup`,
 `make talos-check`, and the full W7 artifact gate on the refreshed candidate;
-all pass. This makes the proof input available, not the W6 retained-initializer
-theorem itself. The historical 4.33 artifact remains provenance only; matching
-Wasm bytes do not assert cross-version AST or proof identity.
+all pass. The historical 4.33 artifact remains provenance only; matching Wasm
+bytes do not assert cross-version AST or proof identity.
+
+W6's actual-body source checkpoint is now integrated on RC2. The primitive
+empty-Array/tagged-push composition from exact producer checkpoint `2f586a575`
+(refreshed on accepted main as `280bcf2a`) and the checked-initializer successor
+`ef02b155` landed as `f10220d1` and `0fc76892`; the final tree matches the
+successor checkpoint. W6 independently rebuilt the exact lean-zip/zip-common
+source objects, and root repeated the retained-initializer gate: checked
+program readback in a fresh process, exact body lookup, direct Lean elaboration
+and axiom audits all pass. The initializer reaches its published singleton
+Array containing tagged zero in 12 source steps, and the companion derives
+saved-caller token preservation from existing facts/witness/live-heap inputs.
+The two Array external behaviors remain an explicit primitive contract with an
+executable source-model witness; production external admission/refinement,
+generated Wasm, destination bind/return-pop, and hereditary suspended-stack
+closure remain open. Exact-head `make check`, `make talos-setup`, and
+`make talos-check` pass; the trust inventory has 257 endpoints. No new axiom or
+shared contract was introduced. This is source-level execution, not end-to-end
+Array helper or Wasm correctness.
 
 ## Integration queue settled (2026-09-09)
 
