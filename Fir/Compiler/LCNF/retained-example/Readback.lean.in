@@ -1,0 +1,17 @@
+import RetainedRC2
+import Fir.Compiler.LCNF.Reify
+import Lean.Elab.Command
+
+open Lean Elab Command Fir.Compiler.Lcnf
+
+set_option maxRecDepth 8192 in
+set_option maxHeartbeats 0 in
+run_cmd do
+  let program ← liftCoreM <| Reify.readDefinition `RetainedRC2.program
+  let target := `Zip.Spec.DeflateStoredCorrect.deflateStoredPure._closed_0
+  unless (program.findDecl? target).isSome do throwError "imported checked target missing"
+  liftTermElabM <| Reify.defineDeclEquations `RetainedRC2.program target `Readback.initializer
+  logInfo m!"Fresh-process readback: {program.decls.size} declarations"
+
+#print axioms Readback.initializer.findDecl
+#print axioms Readback.initializer.body

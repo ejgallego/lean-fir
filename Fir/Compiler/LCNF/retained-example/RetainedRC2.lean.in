@@ -1,0 +1,62 @@
+import Fir.Compiler.LCNF.Reify
+import Fir.Wasm.Emit.ResidentLinker
+import Zip.Wasm.Stored
+import Lean.Elab.Command
+
+open Lean Elab Command
+open Fir.Compiler.Lcnf Fir.Wasm.Emit
+
+set_option maxRecDepth 8192 in
+set_option maxHeartbeats 0 in
+run_cmd do
+  let captured ← liftCoreM <|
+    Source.compileEntriesFinalCapturedInternalized #[``Zip.Wasm.compressStored]
+      ResidentLinker.closedApplicationRetainedExternalNames
+  let target := `Zip.Spec.DeflateStoredCorrect.deflateStoredPure._closed_0
+  unless (captured.program.findDecl? target).isSome do
+    throwError "required retained initializer absent under RC2: {target}"
+  -- The sole program passed to both proof and production paths is read from
+  -- the kernel-checked definition, never the transient capture above.
+  let checked ← liftCoreM <| Reify.defineArtifact `RetainedRC2.program captured
+  liftTermElabM <| Reify.defineDeclEquations `RetainedRC2.program target `RetainedRC2.initializer
+  for (n, expected) in [(`RetainedRC2.program, #[]),
+      (`RetainedRC2.initializer, #[]),
+      (`RetainedRC2.initializer.findDecl, #[`propext]),
+      (`RetainedRC2.initializer.body, #[])] do
+    let axioms ← liftCoreM <| collectAxioms n
+    unless axioms == expected do throwError "unexpected axiom dependencies for {n}: {axioms}"
+  let some decl := checked.program.findDecl? target | throwError "readback lost target"
+  logInfo (← liftCoreM <| Lean.Compiler.LCNF.ppDecl' decl .impure)
+  let ordinary ← liftCoreM <| Source.compileModuleArtifact checked
+  let closed ← liftCoreM <| Source.compileClosedClosureModuleArtifact checked
+  let resident := closed.bind fun artifact =>
+    ResidentLinker.prepareArenaAndLinkArtifact
+      (fun module => ResidentLinker.closedApplicationAvailablePolicy
+        module #[``Zip.Wasm.compressStored]) artifact
+  let mut rows := #[]
+  for (label, result) in [("ordinary", ordinary), ("closed", closed), ("resident", resident)] do
+    let artifact ← match result with
+      | .ok a => pure a
+      | .error e => throwError "{label} lowering failed: {repr e}"
+    match ← liftCoreM <| artifact.write s!"{label}.wasm" with
+    | .error e => throwError "{label} write: {repr e}"
+    | .ok () => pure ()
+    rows := rows.push <| Json.mkObj [
+      ("route", toJson label), ("bytes", toJson artifact.bytes.size),
+      ("functions", toJson artifact.module.functions.size),
+      ("imports", toJson artifact.module.imports.size),
+      ("runtimeOperations", toJson artifact.module.runtimeOperations.size)]
+  let report := Json.mkObj [
+    ("programDefinition", toJson "RetainedRC2.program"),
+    ("target", toJson target.toString),
+    ("declarations", toJson checked.program.decls.size),
+    ("externalNames", toJson (checked.externalNames.map Name.toString)),
+    ("closureFlowSafeProgram", toJson (Fir.Wasm.closureFlowSafeProgram checked.program)),
+    ("routes", Json.arr rows)]
+  liftCoreM <| IO.FS.writeFile "checked-lowering.json" (report.pretty ++ "\n")
+
+#check RetainedRC2.program
+#check RetainedRC2.initializer.findDecl
+#check RetainedRC2.initializer.body
+#print axioms RetainedRC2.initializer.findDecl
+#print axioms RetainedRC2.initializer.body
