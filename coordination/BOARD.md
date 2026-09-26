@@ -7328,8 +7328,9 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
-- `W6-PROOF-STACK-20260925` is linked/accepted at exact local main
-  `57eb8dfc2eccd086234f0413cb92ea0ee483d4ff`. Root replayed the six-commit W6
+- `W6-PROOF-STACK-20260925` was linked/accepted at exact main
+  `57eb8dfc2eccd086234f0413cb92ea0ee483d4ff`, now an ancestor of current
+  main. Root replayed the six-commit W6
   checkpoint `f5bcf3fd` over the separately landed autonomy/frontier docs
   `f06eba8f`. The stack lands the facts-aware retained-caller pop, derived
   fresh-leaf publication safety, and allocation-local fresh-region closure
@@ -7341,6 +7342,20 @@ identities.
   the checked structural reification and same-input RC2 capture requested by
   `ROOT-W7-20260925-001`; historical 4.33 or synthetic inputs are not
   substitutes. Local integration only; no push or package publication.
+
+- `W6-ARRAY-PUBLICATION-REGION` is linked/accepted at exact main
+  `4bfd51f9d27e426a851f86d262ac60711b83e948`, based directly on `6fe70322`.
+  Region preservation now composes through actual `setCell`, resident raw
+  in-place Array push, and copied-push retain/allocate/recursive-release
+  operations. Positive regressions preserve a nonempty caller-token map; an
+  older-token insertion is rejected. The five-file W6 proof/test/trust/docs
+  slice changes no shared contract and adds no axiom. The concrete raw-push
+  extension retains exactly the existing `assembleByte32` native dependency;
+  new source laws and regressions use standard axioms only. Root independently
+  passed the focused `ConcreteLazyPublicationTests` build, `git diff --check`,
+  `make check`, `make talos-setup`, and `make talos-check` with the 247-endpoint
+  audit. Actual initializer-body execution and general lazy-miss admission
+  remain open behind W7's checked RC2 structural reification/capture task.
 
 - `ELIMDEAD-ARBITRARY-LIVE-PREFIX` is linked/accepted through functional head
   `7fc463c2` and clean tracked handoff `f8998324`, based exactly on prior
