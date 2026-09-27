@@ -65,6 +65,14 @@ the central validated non-heap dispatcher. Its pre-publication callee scope and
 represented result remain premises; it does not prove the target callee prefix,
 destination bind, full stack assembly or central heap-result admission.
 
+`executes_publicationSuffix` additionally proves the seven generated Wasm
+steps from initializer return through cache host publication, value/flag writes,
+conditional exit and value reload. The compiler-supported caller is for the
+same `RetainedRC2.program`; import contract alignment and physical global-lane
+existence are derived. The source publication step and restored caller scope
+are retained. The target initializer prefix and following destination bind are
+still outside this theorem, as is complete source/target stack assembly.
+
 The two source external contracts are uniform primitive laws, not a
 per-program invariant. `FreshArrayExternalContract` specifies empty allocation
 and the fresh/non-full tagged-push branch. `freshArrayExternals_contract`
@@ -104,4 +112,5 @@ The concrete publication endpoint additionally inherits the existing
 `LinearMemory.assembleByte32` native bitvector axiom through recursive cache
 persistence. Its separate exact audit records that dependency; the source-only
 endpoints keep their narrower inventory. The full-scope consumer inherits the
-same exact dependencies. There are twelve consumer endpoints.
+same exact dependencies, as does the executable-suffix consumer. There are
+thirteen consumer endpoints.

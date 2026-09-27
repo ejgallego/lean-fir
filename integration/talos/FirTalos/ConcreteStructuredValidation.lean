@@ -1,4 +1,4 @@
-import FirTalos.ConcretePublicationScope
+import FirTalos.ConcretePublicationExecution
 
 /-!
 # Residual source validation for the structured W6 simulation
@@ -6684,25 +6684,11 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
           cacheSetStep declaration kind targetStore [physical] =
             .Return [physical] afterCache := by
         simpa [afterCache] using operation
-      obtain ⟨oldFlag, oldValue, flagBefore, valueBefore⟩ :=
-        currentScope.1.1.2.1.slotLanesPresent initializerFound signature
-      have valueAfterCache :
-          afterCache.globals.globals[2 * cacheIndex + 1]? = some oldValue := by
-        rw [cacheSetStep_preserves_wasmGlobals operationEq]
-        exact valueBefore
-      have flagAfterCache :
-          afterCache.globals.globals[2 * cacheIndex]? = some oldFlag := by
-        rw [cacheSetStep_preserves_wasmGlobals operationEq]
-        exact flagBefore
       let valueStore :=
         writeWasmGlobal afterCache (2 * cacheIndex + 1) physical
       have valueStoreEq :
           valueStore =
             writeWasmGlobal afterCache (2 * cacheIndex + 1) physical := rfl
-      have flagAfterValue :
-          valueStore.globals.globals[2 * cacheIndex]? = some oldFlag := by
-        rw [valueStoreEq, writeWasmGlobal_get_ne (by omega)]
-        exact flagAfterCache
       let nextStore :=
         writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)
       let nextRuntime := sourceRuntime.setGlobal declaration sourceValue
@@ -6728,9 +6714,6 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
       have sourceAfterEq : sourceAfter = sourcePublished := by
         rw [sourceStep] at computedStep
         exact ExecResult.next.inj computedStep
-      obtain ⟨imp, importFound, importInBounds, contractFound,
-          parameterCount, resultCount⟩ :=
-        callerSpec.cacheSetCall cacheSetCall
       let targetAfter : StructuredWasmState Host := {
         store := nextStore
         control := .running
@@ -6751,22 +6734,11 @@ theorem ConcreteStructuredValidatedReturnedOutcome.advance_lazyCacheWithSpine_of
         subst stateControl
         change stateFrames = _ at targetFramesEq
         subst stateFrames
-        simpa [targetAfter, nextStore] using
-          structuredWasmLazyMissPublicationFinitePath
-            (module := targetModule.wasmModule) (hostEnv := hosts.env)
-            (spec := hosts.spec) (cacheSetId := cacheSetId) (imp := imp)
-            (declaration := declaration) (kind := kind)
-            (afterCall := targetStore) (afterCache := afterCache)
-            (valueStore := valueStore) (callerLocals := callerLocals)
-            (calleeLocals := targetLocals) (physical := physical)
-            (oldValue := oldValue) (oldFlag := oldFlag)
-            (flagIndex := 2 * cacheIndex)
-            (valueIndex := 2 * cacheIndex + 1)
-            (resultIndex := resultIndex) (rest := targetRest)
-            (frames := targetFrames) callerLocals.values importFound
-            callerSpec.hostsSatisfy importInBounds contractFound
-            parameterCount resultCount operationEq valueAfterCache valueStoreEq
-            flagAfterValue (by omega)
+        simpa [targetAfter, nextStore, valueStore] using
+          currentScope.1.1.2.1.publicationFinitePath_of_compiler
+            (callerLocals := callerLocals) (calleeLocals := targetLocals)
+            (resultIndex := resultIndex) (rest := targetRest) (frames := targetFrames)
+            callerSpec initializerFound signature cacheSetCall operationEq
       have nonHeap : IsNonHeapReference sourceValue :=
         valueRelated.isNonHeapReference_of_kind notObject notTObject
       have publicationOrdinary :

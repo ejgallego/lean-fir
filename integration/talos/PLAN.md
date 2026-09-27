@@ -69,6 +69,7 @@ bytes, or the complete lean-zip application.
 | First actual lean-zip initializer | Kernel-checked RC2 program; source execution and caller-binding proof | Production Array contracts and preceding target execution |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
 | Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; `RetainedInitializer.executes_and_restoresCallerScope` supplies the checked source publication and graph shape | Wire construction provenance into central lazy-miss admission; target prefix and complete destination-bind/stack assembly remain separate |
+| Executable publication suffix | `RetainedInitializer.executes_publicationSuffix` pairs source publication with seven target steps and the restored caller scope; import alignment and global lanes are derived | Target callee prefix, destination bind and complete stack relation |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
 In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
@@ -138,6 +139,19 @@ the checked source publication with full scope restoration, without asking for
 graph closure, a disjointness certificate, or blanket ordinaryness. It still
 assumes the related pre-publication callee scope and represented result; it does
 not derive the target prefix or close the suspended stack/destination bind.
+
+`ConcretePublicationExecution` discharges the next executable boundary:
+`LazyCacheGlobalsRel.publicationFinitePath_of_compiler` derives the seven-step
+return/cache-host/global-write/reload path from production import alignment and
+the current cache-table relation. It is result-kind independent and is shared
+by the existing validated non-heap dispatcher and the real initializer consumer.
+`RetainedInitializer.executes_publicationSuffix` combines it with checked source
+execution and caller-scope restoration; its supported caller is explicitly for
+`RetainedRC2.program`. It assumes neither the target suffix path nor existence
+of either physical global lane. Its starting target state still represents an
+already-returned initializer; this does not prove target initializer execution
+or compiler admission for heap lazy misses. Source and target suffixes are
+exposed together, not packaged as the complete source/target stack relation.
 
 The fresh-region proof checkpoint `f5bcf3fd3` is based on accepted main
 `97c257cc4`. Its proof sources are unchanged from reviewed `c67c6ed21`;
