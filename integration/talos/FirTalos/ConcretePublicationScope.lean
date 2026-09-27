@@ -130,7 +130,7 @@ theorem ConcreteStructuredResourceScope.publishFreshCache
         (writeWasmGlobal (writeWasmGlobal (replaceRuntime store runtimeAfter)
           (2 * cacheIndex + 1) physical) (2 * cacheIndex) (.i32 1)) callerLocals witness := by
   obtain ⟨slot, found, kindEq⟩ := currentScope.1.1.2.1.hostSlot initializerFound signature
-  obtain ⟨runtimeAfter, operation, related, history⟩ :=
+  obtain ⟨runtimeAfter, operation, related, history, _region⟩ :=
     currentScope.transports.publishFreshCache callerScope.stateRelated.1.heap
       currentScope.stateRelated.1 valueRelated found kindEq currentScope.1.1.1.2
       closed rootBound cacheIndex

@@ -209,6 +209,20 @@ existing rooted finite-prefix and terminal-result proofs, under their remaining
 admission/resource premises. It does not establish the central relation at
 every intermediate heap-result lazy frame.
 
+The body now returns its construction-region evidence as well. The six-step
+prefix establishes `HeapRegionClosed` when the empty Array is allocated;
+`HeapRegionClosed.pushFreshTagged` preserves it through the actual in-place
+push. `body_publishes_and_resumesCaller` consumes that evidence instead of
+reconstructing closure by treating the final singleton Array as a new
+allocation. This is internal producer evidence, not an added client premise.
+
+The reusable `ConcreteRegionTransport` module also transports region closure
+through ownership-graph-preserving updates and recursive cache persistence.
+`RetainedCodeEntryTransports.publishFreshCache` now returns region closure
+alongside the restored caller transport. Publication may change ordinary cells
+to persistent cells: preserving owned edges is not blanket ordinaryness
+preservation or proof that an arbitrary published root is fresh.
+
 Remaining premises are the supported caller and its current validated relation,
 the initializer call's identity, empty cache, source primitive contracts,
 installed handler laws and finite headroom. No independent call-admission,

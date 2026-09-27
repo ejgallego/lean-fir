@@ -196,7 +196,7 @@ theorem executes_and_publishesCache
       (object := .array #[.object (.tagged 0)] 5) (persistent := false)
       (after := semanticArrayResult runtime #[.object (.tagged 0)] 5) rfl
     simp [HeapObject.ownedValues]
-  obtain ⟨runtimeAfter, operation, runtimeRelated, transported⟩ :=
+  obtain ⟨runtimeAfter, operation, runtimeRelated, transported, _region⟩ :=
     history.publishFreshCache entryRelated currentRelated valueRelated found
       kindEq descriptorsEq closed (Nat.le_refl _) cacheIndex
   obtain ⟨before, execution, runtimeEq, control, frames, _⟩ :=

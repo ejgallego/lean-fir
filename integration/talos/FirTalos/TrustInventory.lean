@@ -222,6 +222,10 @@ def taggedBoxPolicyNativeDebt : Array String := #[
   "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_9"]
 
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  (`FirTalos.Concrete.HeapRegionClosed.ofOwnershipFrame, #["propext"]),
+  (`FirTalos.Concrete.HeapRegionClosed.markPersistent, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.setGlobal, standardAxioms),
+  (`FirTalos.Concrete.HeapRegionClosed.pushFreshTagged, standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredAlignedValidationState.afterLet, standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredAlignedValidationState.lazyCall_of_selected, standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredCodeFocus.stageLazyCall, standardAxioms),

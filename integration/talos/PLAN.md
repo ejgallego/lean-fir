@@ -315,6 +315,17 @@ entry-indexed fresh-region/resource transport already used by the block,
 with its construction provenance retained across intermediate callee states.
 This is the next structural obligation, not another root-index wrapper.
 
+**Construction-region transport (W6, 2026-09-27).** The retained body now
+produces region closure compositionally: empty allocation establishes it,
+the in-place tagged push preserves it, and the publication consumer uses the
+body's proof. `ConcreteRegionTransport` reuses `HeapOwnershipFrame` for
+metadata-only updates and proves that recursive persistence/`setGlobal`
+preserve every existing region cutoff. `RetainedCodeEntryTransports.publishFreshCache`
+returns the surviving region with its caller transport. No new caller premise
+or axiom is introduced. The remaining central change is to retain this
+producer evidence in intermediate lazy states; no lazy-stack constructor or
+object/tobject admission restriction has changed yet.
+
 The target callee prefix, represented Array requests and destination binding
 are now composed. Installed handler equations remain explicit; connecting
 them to emitted resident helpers is a separate implementation/linking

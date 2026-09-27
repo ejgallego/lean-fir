@@ -1,4 +1,5 @@
 import FirTalos.ConcreteRetainedTransports
+import FirTalos.ConcreteRegionTransport
 
 /-! Publication at the original initializer entry, rather than at the current
 witness that already represents the result. Region closure is a construction
@@ -55,10 +56,12 @@ theorem RetainedCodeEntryTransports.publishFreshCache
         (current.setGlobal declaration (.object (.heap root))) ∧
       RetainedCodeEntryTransports entry
         (current.setGlobal declaration (.object (.heap root)))
-        entryStore nextStore entryWitness witness := by
+        entryStore nextStore entryWitness witness ∧
+      HeapRegionClosed entry.nextLocation
+        (current.setGlobal declaration (.object (.heap root))).heap := by
   obtain ⟨runtimeAfter, operation, runtimeRelated, _, capacity⟩ :=
     cacheSetStep_of_refines currentRelated valueRelated found kindEq descriptorsEq
-  refine ⟨runtimeAfter, operation, ?_, ?_⟩
+  refine ⟨runtimeAfter, operation, ?_, ?_, closed.setGlobal declaration _⟩
   · simpa [writeWasmGlobal] using runtimeRelated
   · refine {
       witness := history.witness

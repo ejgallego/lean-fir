@@ -8,6 +8,7 @@ import FirTalos.ConcreteLazyBodyEntry
 import FirTalos.ConcreteGeneratedLocals
 import FirTalos.ConcreteValidatedLet
 import FirTalos.ConcreteRootedDispatch
+import FirTalos.ConcreteRegionTransport
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -532,7 +533,8 @@ theorem literals_mkEmpty_stage_call_bind
   simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using path1.trans (path2.trans path)
 
 /-- The six-step real body prefix constructs both Array-push operands. Boxing
-preserves the freshly allocated Array, the exact witness, and residual budget. -/
+preserves the freshly allocated Array, the exact witness, residual budget and
+the region established at allocation. -/
 theorem literals_mkEmpty_box
     {context : Context} (programEq : context.program = RetainedRC2.program)
     {rootCode : LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
@@ -571,7 +573,8 @@ theorem literals_mkEmpty_box
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
       nextStore.host.externals = store.host.externals ∧
-      RuntimeStepTransports runtime (afterMkEmpty runtime) store nextStore witness nextWitness := by
+      RuntimeStepTransports runtime (afterMkEmpty runtime) store nextStore witness nextWitness ∧
+      HeapRegionClosed runtime.nextLocation (afterMkEmpty runtime).heap := by
   obtain ⟨prefixLength, nextStore, nextWitness, sourceMid, targetMid, midLocals,
       midCode, prefixSteps, prefixPath, focus, residual, joins, frames, targetFrames,
       externalsEq, transports⟩ :=
@@ -594,10 +597,15 @@ theorem literals_mkEmpty_box
       joins', frames', targetFrames'⟩ := focus.advance_boxUInt8 spec rfl valueKind
     (by simp [getLocal, scalarKind]) literalAbiTypes.1
     (by simp [getLocal, boxKind]) scalarLookup (externals := externals)
+  have entryClosed : HeapRegionClosed runtime.nextLocation (arrayEntry runtime).heap :=
+    HeapRegionClosed.of_liveHeapRel related.stateRelated.1.heap
+  have region : HeapRegionClosed runtime.nextLocation (afterMkEmpty runtime).heap := by
+    apply entryClosed.alloc (object := .array #[] 5) (persistent := false) rfl
+    simp [HeapObject.ownedValues]
   refine ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
     rest, execSteps_trans_exact prefixSteps (.step step (.refl _)), ?_, next, residual,
     joins'.trans joins, frames'.trans frames, targetFrames'.trans targetFrames,
-    externalsEq, transports⟩
+    externalsEq, transports, region⟩
   simpa [Nat.add_assoc] using prefixPath.trans path
 
 def bodyResultEnv (env : Env) (runtime : RuntimeState) : Env :=
@@ -653,10 +661,11 @@ theorem body_returns
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
       nextStore.host.externals = store.host.externals ∧
-      RuntimeStepTransports runtime (afterPush runtime) store nextStore witness nextWitness := by
+      RuntimeStepTransports runtime (afterPush runtime) store nextStore witness nextWitness ∧
+      HeapRegionClosed runtime.nextLocation (afterPush runtime).heap := by
   obtain ⟨prefixLength, midStore, nextWitness, sourceMid, targetMid, midLocals,
       midCode, prefixSteps, prefixPath, focus, residual, joins, frames, targetFrames,
-      externalsEq, prefixTransports⟩ := literals_mkEmpty_box programEq spec contract scalarKind capacityKind
+      externalsEq, prefixTransports, prefixRegion⟩ := literals_mkEmpty_box programEq spec contract scalarKind capacityKind
         arrayKind boxKind related emptyHandler budget fits
   have arrayValue : lookup
       (bind (bind (literalEnv env) mkEmptySite.fvarId
@@ -688,7 +697,8 @@ theorem body_returns
     prefixPath.trans (pushPath.trans returnPath), yielded, finalBudget,
     returnJoins.trans (pushJoins.trans joins), returnFrames.trans (pushFrames.trans frames),
     returnTargetFrames.trans (pushTargetFrames.trans targetFrames),
-    pushExternals.trans externalsEq, prefixTransports.trans pushTransports⟩
+    pushExternals.trans externalsEq, prefixTransports.trans pushTransports,
+    prefixRegion.pushFreshTagged (entry := arrayEntry runtime) (payload := 0)⟩
 
 /-- Execute the actual retained body, publish its fresh Array, and resume the
 saved caller. The post-body resource scope and publication input are derived,
@@ -771,16 +781,11 @@ theorem body_publishes_and_resumesCaller
   have budget := initialScope.budgetedPureExternal.1.2
   obtain ⟨bodySteps, bodyStore, nextWitness, bodyLocals, physical, sourceReturned,
       targetReturned, sourceBody, targetBody, yielded, residual, _joins,
-      sourceFramesEq, targetFramesEq, externalsEq, transports⟩ :=
+      sourceFramesEq, targetFramesEq, externalsEq, transports, closed⟩ :=
     body_returns spec.contextProgram spec contract scalarKind capacityKind arrayKind
       boxKind resultKind related emptyHandler pushHandler budget fits
   have bodyScope := initialScope.afterBody_withoutReuseFacts transports externalsEq
     yielded.stateRelated yielded.frameAligned residual
-  have closed : HeapRegionClosed runtime.nextLocation (afterPush runtime).heap := by
-    apply (HeapRegionClosed.of_liveHeapRel initialScope.stateRelated.1.heap).alloc
-      (object := .array #[.object (.tagged 0)] 5) (persistent := false)
-      (after := semanticArrayResult runtime #[.object (.tagged 0)] 5) rfl
-    simp [HeapObject.ownedValues]
   obtain ⟨runtimeAfter, sourceAfter, targetAfter, resumedLocals, sourceSuffix,
       targetSuffix, core, joins, sourceFrames', targetFrames'⟩ :=
     callerScope.publishFreshCache_bind callerSpec bodyScope
