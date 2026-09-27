@@ -223,6 +223,20 @@ alongside the restored caller transport. Publication may change ordinary cells
 to persistent cells: preserving owned edges is not blanket ordinaryness
 preservation or proof that an arbitrary published root is fresh.
 
+The generic publication suffix is now split at its real intermediate state.
+`ConcreteStructuredResourceScope.publishFreshCache_step` proves one source
+publication step and seven target steps to `ConcreteStructuredExternalBindCoreRel`,
+including restored caller resources and surviving region closure. The existing
+two-source-step publication/bind theorem composes that result with the ordinary
+bind rule; retained executions therefore use the same factored transition.
+
+`ConcreteStructuredValidatedCodeOutcome.publishFreshCacheAtRoot` attaches the
+saved caller's continuation validation and checked stack/root agreement, yielding
+the existing rooted global `.externalBind` outcome before destination binding.
+This is a reusable proof-side boundary, not yet a new global constructor for
+the pre-publication heap-return state. Its current callee scope and fresh-region
+evidence still have to be carried through those intermediate states.
+
 Remaining premises are the supported caller and its current validated relation,
 the initializer call's identity, empty cache, source primitive contracts,
 installed handler laws and finite headroom. No independent call-admission,

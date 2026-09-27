@@ -68,7 +68,7 @@ bytes, or the complete lean-zip application.
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
 | First actual lean-zip initializer | `rootedLet_publishes_and_resumesCaller`: fourteen source steps and matching target path to validated continuation and rooted global relation at the original export ABI; admission/cache/callee/local facts derived | Installed Array handlers, intermediate heap-result lazy-frame closure, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
-| Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; the checked initializer composition derives its publication input and graph shape | Wire construction provenance into central lazy-miss admission |
+| Fresh heap cache publication | `ConcreteStructuredValidatedCodeOutcome.publishFreshCacheAtRoot` proves one-step publication to the rooted global bind outcome; producer region and saved caller restore resources/validation | Construct pre-publication heap-return state and wire central lazy-miss admission |
 | Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
@@ -325,6 +325,20 @@ returns the surviving region with its caller transport. No new caller premise
 or axiom is introduced. The remaining central change is to retain this
 producer evidence in intermediate lazy states; no lazy-stack constructor or
 object/tobject admission restriction has changed yet.
+
+**One-step publication re-entry (W6, 2026-09-27).**
+`ConcreteStructuredResourceScope.publishFreshCache_step` exposes the actual
+publication/bind boundary: one source step, seven target steps, the named bind
+core, restored resources and surviving region closure. The old two-step
+theorem now composes this with ordinary binding, so retained executions use
+the factored transition. `ConcreteStructuredValidatedCodeOutcome.publishFreshCacheAtRoot`
+reuses the saved caller's residual validation, stack agreement and root index
+to construct the existing rooted global `.externalBind` outcome at this boundary.
+No post-state, future execution, new invariant or nonheap-result premise is
+introduced. The outstanding central work is the *input* side: retain the
+callee scope and producer region evidence in the pre-publication heap-return
+state and derive that state through the initializer. The general lazy-stack
+constructor/admission restrictions remain unchanged.
 
 The target callee prefix, represented Array requests and destination binding
 are now composed. Installed handler equations remain explicit; connecting

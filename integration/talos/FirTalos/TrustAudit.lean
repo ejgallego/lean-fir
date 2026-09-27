@@ -26,6 +26,7 @@ import FirTalos.ConcreteArrayPushExternalEvidence
 import FirTalos.ConcreteRetainedTransports
 import FirTalos.ConcreteRetainedPublication
 import FirTalos.ConcretePublicationBind
+import FirTalos.ConcretePublicationValidation
 import FirTalos.ConcreteResumableWasm
 import FirTalos.ConcretePassComposition
 import FirTalos.ConcreteCompilerCorrectness
