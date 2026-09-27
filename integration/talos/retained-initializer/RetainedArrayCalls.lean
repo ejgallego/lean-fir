@@ -9,6 +9,7 @@ import FirTalos.ConcreteGeneratedLocals
 import FirTalos.ConcreteValidatedLet
 import FirTalos.ConcreteRootedDispatch
 import FirTalos.ConcreteRegionTransport
+import FirTalos.ConcreteFreshYield
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -615,8 +616,9 @@ def bodyResultEnv (env : Env) (runtime : RuntimeState) : Env :=
 
 /-- The actual kernel-retained initializer body returns the represented
 singleton Array. Neither source execution nor a target path is a premise.
-This is the body-to-yield theorem, not yet lazy entry/publication or resident
-linking. Both handler equations and finite allocation headroom stay explicit. -/
+The returned relation retains the original entry scope and the construction
+region, ready for publication. This is not yet generic intermediate-state
+admission or resident linking. Handler equations and headroom stay explicit. -/
 theorem body_returns
     {context : Context} (programEq : context.program = RetainedRC2.program)
     {rootCode : LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
@@ -647,22 +649,21 @@ theorem body_returns
       request.name = `Array.push →
       request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
       ArrayPushInPlaceHandlerAt store.host.externals request before address word)
-    (budget : store.host.runtime.heap.AddressSpaceBudget remainingBytes)
+    (bodyFrame : ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+      externals [] remainingBytes runtime env store locals witness)
     (fits : residentArrayAllocationBytes 5 ≤ remainingBytes) :
     ∃ targetSteps nextStore nextWitness resultLocals physical sourceAfter targetAfter,
       ExecSteps externals 10 source sourceAfter ∧
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
         targetSteps target targetAfter ∧
-      ConcreteStructuredYieldFocus context sourceFunction (afterPush runtime)
-        (bodyResultEnv env runtime) (.object (.heap runtime.nextLocation))
-        nextStore resultLocals nextWitness .object physical sourceAfter targetAfter ∧
-      nextStore.host.runtime.heap.AddressSpaceBudget
-        (remainingBytes - residentArrayAllocationBytes 5) ∧
+      ConcreteStructuredFreshYieldCore context sourceModule sourceFunction externals
+        runtime store witness [] (remainingBytes - residentArrayAllocationBytes 5)
+        (afterPush runtime) (bodyResultEnv env runtime) nextStore resultLocals nextWitness
+        .object runtime.nextLocation physical sourceAfter targetAfter ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
-      targetAfter.frames = target.frames ∧
-      nextStore.host.externals = store.host.externals ∧
-      RuntimeStepTransports runtime (afterPush runtime) store nextStore witness nextWitness ∧
-      HeapRegionClosed runtime.nextLocation (afterPush runtime).heap := by
+      targetAfter.frames = target.frames := by
+  have initialScope := ConcreteStructuredResourceScope.root bodyFrame
+  have budget := initialScope.budgetedPureExternal.1.2
   obtain ⟨prefixLength, midStore, nextWitness, sourceMid, targetMid, midLocals,
       midCode, prefixSteps, prefixPath, focus, residual, joins, frames, targetFrames,
       externalsEq, prefixTransports, prefixRegion⟩ := literals_mkEmpty_box programEq spec contract scalarKind capacityKind
@@ -694,11 +695,14 @@ theorem body_returns
   refine ⟨_, nextStore, nextWitness, resultLocals, physical, sourceAfter, targetAfter,
     execSteps_trans_exact prefixSteps
       (execSteps_trans_exact pushSteps (.step returnStep (.refl _))),
-    prefixPath.trans (pushPath.trans returnPath), yielded, finalBudget,
+    prefixPath.trans (pushPath.trans returnPath),
+    ConcreteStructuredFreshYieldCore.of_body initialScope
+      (prefixTransports.trans pushTransports) (pushExternals.trans externalsEq)
+      yielded finalBudget
+      (prefixRegion.pushFreshTagged (entry := arrayEntry runtime) (payload := 0))
+      (Nat.le_refl _),
     returnJoins.trans (pushJoins.trans joins), returnFrames.trans (pushFrames.trans frames),
-    returnTargetFrames.trans (pushTargetFrames.trans targetFrames),
-    pushExternals.trans externalsEq, prefixTransports.trans pushTransports,
-    prefixRegion.pushFreshTagged (entry := arrayEntry runtime) (payload := 0)⟩
+    returnTargetFrames.trans (pushTargetFrames.trans targetFrames)⟩
 
 /-- Execute the actual retained body, publish its fresh Array, and resume the
 saved caller. The post-body resource scope and publication input are derived,
@@ -777,20 +781,17 @@ theorem body_publishes_and_resumesCaller
         nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
       sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
       targetAfter.frames = frames := by
-  have initialScope := ConcreteStructuredResourceScope.root bodyFrame
-  have budget := initialScope.budgetedPureExternal.1.2
   obtain ⟨bodySteps, bodyStore, nextWitness, bodyLocals, physical, sourceReturned,
-      targetReturned, sourceBody, targetBody, yielded, residual, _joins,
-      sourceFramesEq, targetFramesEq, externalsEq, transports, closed⟩ :=
+      targetReturned, sourceBody, targetBody, returned, _joins,
+      sourceFramesEq, targetFramesEq⟩ :=
     body_returns spec.contextProgram spec contract scalarKind capacityKind arrayKind
-      boxKind resultKind related emptyHandler pushHandler budget fits
-  have bodyScope := initialScope.afterBody_withoutReuseFacts transports externalsEq
-    yielded.stateRelated yielded.frameAligned residual
+      boxKind resultKind related emptyHandler pushHandler bodyFrame fits
+  have yielded := returned.focus
   obtain ⟨runtimeAfter, sourceAfter, targetAfter, resumedLocals, sourceSuffix,
       targetSuffix, core, joins, sourceFrames', targetFrames'⟩ :=
-    callerScope.publishFreshCache_bind callerSpec bodyScope
+    callerScope.publishFreshCache_bind callerSpec returned.scope
       (spec.contextProgram.trans callerSpec.contextProgram.symm)
-      initializerFound signature cacheSetCall yielded.valueRelated closed (Nat.le_refl _)
+      initializerFound signature cacheSetCall yielded.valueRelated returned.region returned.rootBound
       (yielded.sourceProgramEq.trans (spec.contextProgram.trans callerSpec.contextProgram.symm))
       yielded.sourceControlEq yielded.sourceRuntimeEq (sourceFramesEq.trans sourceStack)
       adapted resultFound kindAt tail

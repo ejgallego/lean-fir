@@ -234,8 +234,18 @@ bind rule; retained executions therefore use the same factored transition.
 saved caller's continuation validation and checked stack/root agreement, yielding
 the existing rooted global `.externalBind` outcome before destination binding.
 This is a reusable proof-side boundary, not yet a new global constructor for
-the pre-publication heap-return state. Its current callee scope and fresh-region
-evidence still have to be carried through those intermediate states.
+the pre-publication heap-return state.
+
+`body_returns` now produces `ConcreteStructuredFreshYieldCore`: the represented
+heap result, current resource scope at the original initializer entry, region
+closure and fresh-root bound are retained together. The scope is derived from
+the actual body transports and the entry frame already available to the caller.
+The twelve-/fourteen-step consumers have no additional premises and use this
+state directly. `ConcreteStructuredFreshYieldCore.publishAtRoot` consumes it
+with the saved validated caller to derive publication into the existing rooted
+global relation, starting at the actual related target state. The remaining
+gap is general intermediate lazy-state closure, not another independent
+publication or post-body resource premise.
 
 Remaining premises are the supported caller and its current validated relation,
 the initializer call's identity, empty cache, source primitive contracts,
@@ -275,6 +285,10 @@ dependency checking only the closed `Expr` ABI classifications for `lcErased`,
 evaluation. Its proof-only captured projections are noncomputable; the observed
 upstream executable-projection failure is recorded in
 `FIR-BUG-wasm-none-retained-projection-codegen`.
+Forced batch checking can still print that compiler panic while exiting zero:
+the accepted `b25df81ce` source and the fresh-result successor both reproduce
+the same panic sites. The kernel endpoint audit passes; this is not a claim
+that upstream native compilation is diagnostic-free.
 The body-prefix endpoint additionally records one closed native check for the
 UInt8/tagged literal ABI classifications. The full body additionally inherits
 the existing seven scalar-box policy comparison axioms and UInt8 result-kind

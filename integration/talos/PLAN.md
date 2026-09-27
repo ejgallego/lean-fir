@@ -38,7 +38,7 @@ This layering separates three claims:
 The concrete layout and many runtime refinements already exist. The original
 implementation sequence below is history, not an instruction to restart it.
 
-## Current verification frontier — 2026-09-27
+## Current verification frontier — 2026-09-28
 
 This section, ending at **Implementation history**, is the live W6 priority.
 Later chronological uses of "next", "remaining", "queue", or "immediate" are
@@ -68,7 +68,7 @@ bytes, or the complete lean-zip application.
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
 | First actual lean-zip initializer | `rootedLet_publishes_and_resumesCaller`: fourteen source steps and matching target path to validated continuation and rooted global relation at the original export ABI; admission/cache/callee/local facts derived | Installed Array handlers, intermediate heap-result lazy-frame closure, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
-| Fresh heap cache publication | `ConcreteStructuredValidatedCodeOutcome.publishFreshCacheAtRoot` proves one-step publication to the rooted global bind outcome; producer region and saved caller restore resources/validation | Construct pre-publication heap-return state and wire central lazy-miss admission |
+| Fresh heap cache publication | `ConcreteStructuredFreshYieldCore` is produced by the actual retained body and consumed by `publishAtRoot` to rejoin the rooted global relation | Carry this dynamic evidence through general intermediate lazy states and wire central admission |
 | Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
@@ -339,6 +339,24 @@ introduced. The outstanding central work is the *input* side: retain the
 callee scope and producer region evidence in the pre-publication heap-return
 state and derive that state through the initializer. The general lazy-stack
 constructor/admission restrictions remain unchanged.
+
+**Fresh-result relation (W6, 2026-09-28).** `ConcreteFreshYield` packages the
+pre-publication yield focus, entry-indexed resource scope, closed construction
+region and fresh-root bound. `of_body` derives the scope from actual operation
+transports and the existing entry scope; it does not assume the post-body scope.
+`RetainedInitializer.body_returns` now produces this relation, using the entry
+frame already supplied by its caller. Its publication/bind consumer no longer
+reassembles the scope from separate outputs. The end-to-end fourteen-step API
+has no added premise. `ConcreteStructuredFreshYieldCore.publishAtRoot` consumes
+the relation and the saved validated caller, deriving the one-source/seven-target
+publication path into the existing rooted global relation. The target start is
+the related actual state, not an independently supplied execution path.
+
+This is a dynamic return-boundary relation, not yet an added constructor of the
+central global relation. The next obligation is to retain the saved caller and
+region evidence through active initializer states and lazy-call entry, then
+connect their return state here. General nested heap-valued initializers and
+the object/tobject exclusions remain unchanged. No new trusted axiom is added.
 
 The target callee prefix, represented Array requests and destination binding
 are now composed. Installed handler equations remain explicit; connecting

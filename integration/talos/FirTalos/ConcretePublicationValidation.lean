@@ -1,6 +1,7 @@
 import FirTalos.ConcretePublicationBind
 import FirTalos.ConcreteValidatedLet
 import FirTalos.ConcreteRootedDispatch
+import FirTalos.ConcreteFreshYield
 
 namespace FirTalos.Concrete
 
@@ -106,5 +107,79 @@ theorem ConcreteStructuredValidatedCodeOutcome.publishFreshCacheAtRoot
       next.agrees next.frames.validation := rooted
   exact ⟨runtimeAfter, published, targetPublished, step, path, next, nextRooted,
     .externalBind next nextRooted, region⟩
+
+/-- Consume a fresh-result state produced by initializer execution. Source and
+target controls, current resources and separation are read from that state;
+the caller supplies only its saved validated relation and the generated frame
+layout. Publication restores the original root ABI, never the callee's ABI. -/
+theorem ConcreteStructuredFreshYieldCore.publishAtRoot
+    {program : Fir.LeanIR.ImpureProgram} {callerContext calleeContext : Context}
+    {callerCode : Compiler.LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts} {externals : ExternalImpl}
+    {callerEntryRuntime activeEntryRuntime current : RuntimeState}
+    {callerEntryStore activeEntryStore store : Wasm.Store Host}
+    {callerEntryWitness activeEntryWitness witness : RefinementWitness}
+    {callerFacts calleeFacts : ReuseCapacityFacts} {callerBytes remainingBytes : Nat}
+    {callerEnv calleeEnv : Env} {callerLocals calleeLocals : Wasm.Locals}
+    {declaration : Name} {kind functionResult rootResult : AbiKind} {physical : Wasm.Value}
+    {root : Location} {cacheIndex cacheSetId resultIndex : Nat}
+    {decl : Compiler.LCNF.LetDecl .impure} {continuation : Compiler.LCNF.Code .impure}
+    {labels : LabelContext} {callerJoins : JoinEnv} {callerTargetCode rest : Wasm.Program}
+    {callerExpectedResult : Option AbiKind} {callerSource source : MachineState}
+    {callerTarget target : StructuredWasmState Host}
+    {spec : ConcreteSupportedFunction program callerContext callerCode sourceModule
+      callerFunction targetModule hosts}
+    (returned : ConcreteStructuredFreshYieldCore calleeContext sourceModule calleeFunction
+      externals activeEntryRuntime activeEntryStore activeEntryWitness calleeFacts
+      remainingBytes current calleeEnv store calleeLocals witness kind root physical source target)
+    (saved : ConcreteStructuredValidatedCodeOutcome program callerContext callerCode
+      sourceModule callerFunction targetModule hosts spec externals labels
+      callerEntryRuntime callerEntryStore callerEntryWitness functionResult callerExpectedResult
+      callerFacts callerBytes activeEntryRuntime callerEnv (.let decl continuation)
+      activeEntryStore callerLocals callerTargetCode activeEntryWitness callerSource callerTarget)
+    (activeResult : spec.sourceResultKind = functionResult)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      saved.agrees saved.frames.validation)
+    (programEq : calleeContext.program = callerContext.program)
+    (initializerFound : sourceModule.initializers[cacheIndex]? = some declaration)
+    (signature : (sourceModule.callSignature? (.declaration declaration)).bind
+      (·.results[0]?) = some kind)
+    (cacheSetCall : callIndex? sourceModule (.runtime (.cacheSet declaration kind)) =
+      some cacheSetId)
+    (sourceStack : source.frames = .cache declaration ::
+      .bind decl.fvarId continuation callerEnv callerJoins :: callerSource.frames)
+    (targetStack : target.frames =
+      .call 1 callerLocals.values callerLocals
+        [.call cacheSetId, .globalSet (2 * cacheIndex + 1),
+          .const 1, .globalSet (2 * cacheIndex)] ::
+      .label 0 callerLocals.values
+        ([.globalGet (2 * cacheIndex + 1), .localSet resultIndex] ++ rest) ::
+      callerTarget.frames)
+    (adapted : CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels
+      continuation rest)
+    (resultFound : findFVar? (functionBindings callerFunction) decl.fvarId = some resultIndex)
+    (kindAt : (functionBindings callerFunction)[resultIndex]?.map Prod.snd = some kind) :
+    ∃ published targetPublished,
+      executeStep externals source = .next published ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 7
+        target targetPublished ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt program sourceModule targetModule
+        hosts externals rootResult witness published targetPublished ∧
+      HeapRegionClosed activeEntryRuntime.nextLocation published.runtime.heap := by
+  obtain ⟨_, published, targetPublished, step, path, _, _, global, region⟩ :=
+    saved.publishFreshCacheAtRoot activeResult rooted returned.scope programEq
+      initializerFound signature cacheSetCall returned.focus.valueRelated
+      returned.region returned.rootBound (returned.focus.sourceProgramEq.trans programEq)
+      returned.focus.sourceControlEq returned.focus.sourceRuntimeEq sourceStack
+      adapted resultFound kindAt
+  have targetEq : target =
+      ⟨store, .returning (physical :: calleeLocals.values), target.frames⟩ := by
+    cases target
+    rw [StructuredWasmState.mk.injEq]
+    exact ⟨returned.focus.targetStoreEq, returned.focus.targetControlEq, rfl⟩
+  refine ⟨published, targetPublished, step, ?_, global, region⟩
+  rw [targetEq, targetStack]
+  exact path
 
 end FirTalos.Concrete

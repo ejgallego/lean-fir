@@ -9,17 +9,17 @@ owner: fir/wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: active
-base: 503e9088357c96cd267fe280f77b66264b8f8dcb
-functional-head: 503e90883
+base: b25df81ce519f090229e488e8bf0a2e1a111f52c
+functional-head: b25df81ce
 contract-base: 2504f9f74817c38279e0ed3b7b0b8c12196a7c35
 clean-at-update: false
-slice: Expose the one-step heap-cache publication boundary and reconstruct the validated rooted bind successor from the saved caller.
-files: ConcretePublicationBind.lean; ConcretePublicationValidation.lean; trust inventory/audit; W6 plans/README and this snapshot.
-contracts: One source publication step and seven target steps yield the existing rooted global externalBind outcome; old two-step consumer factors through this core step. No new invariant or central admission-policy change; shared semantics/ABI and emitter unchanged.
-checks: Beam checks, fresh batch proof cone, make check, Talos setup/check, exact-source retained reconstruction/readback/direct consumers pass. Exact clean checkpoint and forced trust result are published in the mailbox.
-trust: No new native evaluation or axiom. Both new endpoints retain the existing cache-publication byte-assembly dependency; retained execution keeps its exact inventory.
+slice: Construct the fresh-result return relation from actual initializer execution and consume it at rooted publication.
+files: ConcreteFreshYield.lean; ConcretePublicationValidation.lean; RetainedArrayCalls.lean; trust inventory; W6 plans/README and this snapshot.
+contracts: Dynamic return relation stores original entry scope, represented heap result and producer region evidence. Actual retained body constructs it; generic publication rejoins the existing rooted global relation. Central admission policy, shared semantics/ABI and emitter unchanged.
+checks: Beam, focused batch cone, forced direct new modules/310-endpoint audit, make check and Talos setup/check pass. Retained reconstruction/readback and 25 exact audits exit 0; accepted predecessor and candidate both emit the existing RC2 projection panic diagnostic. Exact checkpoint in mailbox.
+trust: No new native evaluation or axiom. Return constructor uses propext/Quot.sound; publication inherits existing byte-assembly debt. Retained endpoint inventory unchanged.
 bug-cards: FIR-BUG-wasm-none-retained-projection-codegen; independently reproduced upstream unknown-join-point/native-compilation failure. Proof-only projections are noncomputable and kernel-check.
 blockers: Installed handler conformance/resident linking and central heap-result lazy-miss closure remain explicit separate obligations.
-handoff: Construction-region checkpoint 503e90883 is accepted main. One-step publication re-entry is the separate successor; exact gates are in the mailbox.
-next: Construct the pre-publication heap-return state retaining callee scope and producer region evidence, then wire central admission without dropping object/tobject exclusions by fiat. Installed handlers and whole compressStored/encoded-byte correctness remain separate.
+handoff: One-step publication checkpoint b25df81ce is accepted main. Fresh-result state is a separate successor; exact gates go in the mailbox.
+next: Retain saved caller and construction-region evidence through general intermediate initializer states and lazy entry, connecting the fresh return state without dropping object/tobject exclusions by fiat. Installed handlers and whole compressStored/encoded-byte correctness remain separate.
 ```
