@@ -91,7 +91,12 @@ and the fresh/non-full tagged-push branch. `freshArrayExternals_contract`
 provides an executable consistency witness; other requests are rejected by
 that deliberately limited model. This is **not** the production external
 implementation. Its connection to concrete external admission and resident
-helper execution remains to be proved. No whole lean-zip or Wasm artifact
+helper execution remains to be proved. The generic
+`mkEmptyExternalCallEvidence_of_budget` now derives concrete empty-allocation
+call evidence from headroom, request refinement and an installed-handler law,
+using this source contract. It derives allocation success and the full response
+relation, not the installed law itself. Fresh tagged-push evidence and target
+callee execution remain next. No whole lean-zip or Wasm artifact
 correctness follows from this source endpoint.
 
 ## Reproduce

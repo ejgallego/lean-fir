@@ -213,6 +213,14 @@ def literalExampleNativeDebt : Array String := #[
   "FirTalos.Correctness.abiLiteralSupportedExport._native.native_decide.ax_1"]
 
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  (`FirTalos.Concrete.emptyArrayAllocation_of_budget,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteRuntimeRel.emptyArrayExternalResponse,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.emptyArrayExternalCallEvidence_of_budget,
+    standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.mkEmptyExternalCallEvidence_of_budget,
+    standardAxioms ++ referenceCountNativeDebt),
   -- Static production-row construction and positional resolver facts introduce
   -- no generated native-evaluation dependencies.
   (`FirTalos.Concrete.resolveHosts_preserves_import_keys, standardAxioms),

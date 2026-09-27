@@ -175,6 +175,20 @@ and `git diff --check` passed on the rebased checkpoint. This is producer-side
 validation, not a claim of main landing. Subsequent documentation edits do not
 constitute new proof progress or new exact-head Talos validation.
 
+**Empty Array external evidence (W6, 2026-09-27).**
+`mkEmptyExternalCallEvidence_of_budget` now constructs the existing
+`ConcreteExternalCallEvidence` for arbitrary tagged capacity from the source
+primitive contract, request representation, installed-handler equation, and
+exact `residentArrayAllocationBytes` headroom. Allocation success, capacity
+field bounds, response refinement, witness extension, old-object capacity and
+ordinaryness transport, unchanged world, exact appended event and residual
+budget are derived. No successful allocation or post-heap relation is a client
+premise. The installed handler equation (`EmptyArrayHandlerAt`) remains an
+explicit deployment contract: this proves the canonical concrete allocator's
+host boundary, not execution of W7's emitted helper or a JavaScript handler.
+The four endpoints retain only the existing byte-assembly native debt in
+addition to standard Lean axioms. No central admission change is made.
+
 ### Next meaningful proof result
 
 Connect the checked singleton-Array initializer to heap-result cache
@@ -187,10 +201,13 @@ graph-separation invariant. The generic host rule and actual-body instance
 are available; the central dispatcher has not been broadened. Do not simply
 delete the object/tobject exclusions before proving that rule's closure.
 
-In parallel proof order, discharge `FreshArrayExternalContract` against the
-production primitive implementation and construct the generated target callee
-prefix. Keep witness/capacity, physical result and historical-frame obligations
-visible until derived. The source input is the delivered RC2
+In parallel proof order, establish the matching external evidence for fresh,
+non-full tagged `Array.push`, then compose the generated target callee prefix.
+Empty allocation's evidence constructor is now available. Keep installed
+handler equations explicit; their connection to emitted resident helpers is
+a separate implementation/linking obligation. Keep request representation,
+physical result and historical-frame obligations visible until derived.
+The source input is the delivered RC2
 `RetainedRC2.program`, reproduced from exact source Git objects; no copied AST,
 historical 4.33 olean or substituted capture is a proof input. This remains an
 initializer milestone, not a full `compressStored` or encoded-artifact theorem.

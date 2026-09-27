@@ -9,17 +9,17 @@ owner: fir/wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: active
-base: 2504f9f74817c38279e0ed3b7b0b8c12196a7c35
-functional-head: 870e70aa7281a8df1a9192e26eab0b6be6f2c6e6
+base: 1054ca39d9aed69a32e3f1fc253798dd97bd82f7
+functional-head: 14d1caa84
 contract-base: 2504f9f74817c38279e0ed3b7b0b8c12196a7c35
 clean-at-update: false
-slice: Compose fresh publication and destination binding into the ordinary code core with the original caller entry and suspended resource stack.
-files: integration/talos/FirTalos/ConcretePublicationBind.lean; TrustAudit.lean; TrustInventory.lean; retained-initializer consumer/gate; W6 plans; this snapshot.
-contracts: W6 proof helpers only. No shared semantic or ABI change. Two source steps match eight target suffix steps. The intermediate bind focus is constructed, the saved join environment restored and only the destination reuse fact erased. Central heap-miss admission remains unchanged.
-checks: Beam helper/consumer checks, fresh batch downstream cone and exact-source retained reproduction/direct consumer pass. Candidate-wide gates and exact clean head are reported in the mailbox.
-trust: 277 generic endpoints and fourteen checked-input consumer audits. Publication/bind composition retains the existing byte-assembly debt; the real-input endpoint additionally retains source-boxing debt. No new axiom.
+slice: Derive empty-Array external-call evidence from exact allocation headroom and the installed-handler law.
+files: integration/talos/FirTalos/ConcreteArrayExternalEvidence.lean; TrustAudit.lean; TrustInventory.lean; W6 plans/consumer README; this snapshot.
+contracts: W6 proof helpers only. No shared semantic or ABI change. Arbitrary tagged capacity; allocation success, response relation and all external evidence transports are derived. Installed handler law remains explicit; no emitted-helper execution or admission broadening is claimed.
+checks: Lean Beam, batch cone, make check, Talos setup/check and forced direct 281-endpoint audit pass. Rebased candidate gates and exact clean head are reported in the mailbox.
+trust: 281 generic endpoints; four additions retain the existing byte-assembly debt. Checked-input consumer unchanged (fourteen audits at predecessor). No new axiom.
 bug-cards: None new. Existing retained-token ordinaryness and native-audit debt are unchanged.
 blockers: Production Array external refinement, target callee execution and central heap-result lazy-miss closure remain separate obligations.
-handoff: Seven-step publication 870e70aa7 remains immutable on W6-ROOT-20260927-003. This publication/bind successor is separate from that review and retains its accepted contract base 2504f9f74.
-next: Connect production Array contracts and target callee prefix for RetainedRC2; retain/derive construction provenance and residual validation for central heap-miss admission. Publication/bind resource-stack assembly is now proved. No complete compressStored, resident-linking or encoded-byte theorem is claimed.
+handoff: Immutable publication/bind a51db8009 landed as patch-identical 14d1caa84 on main 1054ca39d (ROOT-W6-20260927-004). Empty-Array evidence is a separate successor on the same semantic contract base; exact clean candidate is published in the mailbox.
+next: Derive fresh non-full tagged Array.push external evidence, then target callee prefix for RetainedRC2. Retain/derive construction provenance and residual validation for central heap-miss admission. Handler installation/resident linking remain separate. No complete compressStored or encoded-byte theorem is claimed.
 ```
