@@ -66,7 +66,7 @@ bytes, or the complete lean-zip application.
 | Static supported-export assembly | `exists_ofSupportedPipeline` and pipeline alignment/uniqueness lemmas | Apply to the same checked captured program; closure-flow condition remains visible |
 | Saved-caller return/pop | `lazyMiss_publishes_and_resumesCaller` restores the caller scope/tail after the actual initializer's full target execution | General heap-result lazy-miss admission |
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
-| First actual lean-zip initializer | `let_publishes_and_resumesCaller`: fourteen source steps and whole matching target path from caller source let to resumed code; callee row and all five binding kinds derived | Call-site admission from validation; installed Array handlers, central admission, linking/encoding |
+| First actual lean-zip initializer | `validatedLet_publishes_and_resumesCaller`: fourteen source steps and matching target path from validated caller let to validated continuation; call admission, cache alignment, callee row and binding kinds derived | Installed Array handlers, central heap-result admission/precision closure, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
 | Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; the checked initializer composition derives its publication input and graph shape | Wire construction provenance into central lazy-miss admission |
 | Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
@@ -282,33 +282,31 @@ The generated callee row is now constructed internally from the pipeline.
 `let_publishes_and_resumesCaller` also composes the actual caller let's staging
 step, deriving fourteen source transitions and the complete matching Wasm
 path to caller code. Numeric indices and the residual target suffix are
-recovered from compilation/adaptation, not supplied. Current let focus,
-`LazyCacheCallSupported`, module-wide cache alignment, caller resource
-scope/tail, cold cache, primitive/installed-handler contracts and finite
-headroom remain explicit. Next derive call-site support from production
-validation; runtime handler conformance is a separate obligation. No
-whole-export or artifact claim follows.
+recovered from compilation/adaptation, not supplied.
+`validatedLet_publishes_and_resumesCaller` now derives current let focus,
+`LazyCacheCallSupported`, module-wide cache alignment and caller resource
+scope/tail from `ConcreteStructuredValidatedCodeOutcome`. The generic
+`ConcreteStructuredAlignedValidationState.afterLet` derives continuation
+validation from residual local alignment; existing `withSuccessor` transports
+the validated frame stack. Thus the fourteen-step block starts and ends in the
+validated relation. Only call identity, cold cache, primitive/installed-handler
+contracts and finite headroom supplement the supported caller and current
+relation. Runtime handler conformance remains separate; no whole-export or
+artifact claim follows.
 
-Connect the checked singleton-Array initializer to heap-result cache
-publication in the central relation. The body-level source execution and
-caller-specific publication/binding transport already exist, and the
-hereditary scope now accepts entry-indexed retained transport. The remaining
-publication consumer must now use the derived cumulative transport and retain
-the producer's construction provenance, without adding a public client
-graph-separation invariant. The generic host rule and actual-body instance
-are available; the central dispatcher has not been broadened. Do not simply
-delete the object/tobject exclusions before proving that rule's closure.
+Next connect this bounded validated-to-validated execution to the central
+simulation's root/precise-result boundary. The completed block transports
+resources through publication and bind, but does not prove the intermediate
+heap-result lazy frames satisfy the central one-step relation. Retain the
+producer's construction provenance without adding a public client
+graph-separation invariant. Do not simply delete the object/tobject exclusions
+before proving the relevant closure rule.
 
-In parallel proof order, compose the generated target callee prefix using the
-empty-allocation and fresh tagged-push external evidence constructors. Keep installed
-handler equations explicit; their connection to emitted resident helpers is
-a separate implementation/linking obligation. Keep request representation,
-physical result and historical-frame obligations visible until derived.
-The common staging/call rules now accept the representation-independent
-`ExternalCallShape`. Next derive those shape facts from the checked initializer's
-actual declaration and lowering, connect its represented request to the Array
-evidence, and compose destination binding. The central pure-result dispatcher
-still uses its original admission policy; do not silently broaden it.
+The target callee prefix, represented Array requests and destination binding
+are now composed. Installed handler equations remain explicit; connecting
+them to emitted resident helpers is a separate implementation/linking
+obligation. Neither this block theorem nor its static validation helpers
+broaden the central pure-result dispatcher.
 The source input is the delivered RC2
 `RetainedRC2.program`, reproduced from exact source Git objects; no copied AST,
 historical 4.33 olean or substituted capture is a proof input. This remains an

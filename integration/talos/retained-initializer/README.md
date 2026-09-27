@@ -188,12 +188,20 @@ matching Wasm execution to ordinary caller code, restoring the original joins
 and continuation stacks. No staging step, invocation focus, generated callee
 row, callee frame, installed stack, post-body scope or execution path is assumed.
 
-Remaining premises are the supported caller, current let focus, static
-`LazyCacheCallSupported` and module-wide `LazyCacheGeneratedEnvironment`, saved
-caller scope/stack, empty cache, source primitive contracts, installed handler
-laws and finite headroom. The next admission connection is to derive the
-call-site support from production validation at the consuming caller let;
-installed Array-handler conformance remains a separate runtime obligation.
+`validatedLet_publishes_and_resumesCaller` now starts and ends with
+`ConcreteStructuredValidatedCodeOutcome`. It derives lazy-call admission,
+module-wide cache alignment, the current focus and caller resource stack from
+that relation. The generic `ConcreteStructuredAlignedValidationState.afterLet`
+recovers continuation validation from residual local alignment, while
+`lazyCall_of_selected` identifies the compiler-selected declaration/result.
+Existing frame agreement is transported through the completed execution, not
+requested again from the client.
+
+Remaining premises are the supported caller and its current validated relation,
+the initializer call's identity, empty cache, source primitive contracts,
+installed handler laws and finite headroom. No independent call-admission,
+local-kind, cache-environment or continuation-validation premise remains.
+Installed Array-handler conformance remains a separate runtime obligation.
 Central heap-miss admission, resident linking and encoded-artifact correctness
 remain separate; this is not a theorem for the whole lean-zip application.
 
@@ -231,7 +239,7 @@ The body-prefix endpoint additionally records one closed native check for the
 UInt8/tagged literal ABI classifications. The full body additionally inherits
 the existing seven scalar-box policy comparison axioms and UInt8 result-kind
 comparison axiom; this slice adds no native evaluation. The maintained gate
-audits all nine retained target/static endpoints independently (twenty-three consumer
+audits all ten retained target/static endpoints independently (twenty-four consumer
 endpoints including the fourteen source/publication endpoints).
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are

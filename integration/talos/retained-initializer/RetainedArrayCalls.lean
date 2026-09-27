@@ -6,6 +6,7 @@ import FirTalos.ConcreteArrayPushCall
 import FirTalos.ConcretePublicationBind
 import FirTalos.ConcreteLazyBodyEntry
 import FirTalos.ConcreteGeneratedLocals
+import FirTalos.ConcreteValidatedLet
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -937,6 +938,71 @@ theorem let_publishes_and_resumesCaller
   exact ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
     .step step sourceSteps, targetPath, core, joins, sourceFrames, targetFrames⟩
 
+/-- The retained initializer's cold-cache call is a closed validated-code
+transition. Admission, cache metadata, caller resources and continuation
+validation are derived from the existing relation; only operation/runtime
+contracts, the current cold-cache branch and finite headroom remain explicit. -/
+theorem validatedLet_publishes_and_resumesCaller
+    {context : Context} {functionCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction RetainedRC2.program context functionCode
+      sourceModule sourceFunction targetModule hosts)
+    {externals : ExternalImpl} (contract : FreshArrayExternalContract externals)
+    {entryRuntime runtime : RuntimeState} {entryStore store : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
+    {env : Env} {locals : Wasm.Locals} {labels : LabelContext}
+    {code : Wasm.Program} {source : MachineState} {target : StructuredWasmState Host}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {functionResult : AbiKind} {callerExpectedResult : Option AbiKind}
+    (related : ConcreteStructuredValidatedCodeOutcome RetainedRC2.program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels entryRuntime
+      entryStore entryWitness functionResult callerExpectedResult facts bytes runtime env
+      (.let decl continuation) store locals code witness source target)
+    (valueEq : decl.value = .fap RetainedRC2.initializer.name #[])
+    (empty : findGlobal? runtime.globals RetainedRC2.initializer.name = none)
+    (emptyHandler : ∀ request,
+      ConcreteExternalRequestRel witness request
+        (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
+      EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
+    (pushHandler : ∀ before nextWitness request address word,
+      ConcreteRuntimeRel before nextWitness (afterMkEmpty runtime) →
+      nextWitness.locations.lookup? runtime.nextLocation = some address →
+      ValueRel nextWitness .tobject (.word32 word) (.object (.tagged 0)) →
+      request.name = `Array.push →
+      request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
+      ArrayPushInPlaceHandlerAt store.host.externals request before address word)
+    (fits : residentArrayAllocationBytes 5 ≤ bytes) :
+    ∃ targetSteps nextStore nextWitness resumedLocals rest sourceAfter targetAfter,
+      ExecSteps externals 14 source sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetSteps target targetAfter ∧
+      ConcreteStructuredValidatedCodeOutcome RetainedRC2.program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels entryRuntime
+        entryStore entryWitness functionResult callerExpectedResult
+        (eraseReuseCapacityFact facts decl.fvarId) (bytes - residentArrayAllocationBytes 5)
+        ((afterPush runtime).setGlobal RetainedRC2.initializer.name (.object (.heap runtime.nextLocation)))
+        (bind env decl.fvarId (.object (.heap runtime.nextLocation))) continuation
+        nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
+      sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames := by
+  have selected : effectiveDeclarationResultKind? RetainedRC2.initializer = some .object := by
+    have classified : abiKind? RetainedRC2.initializer.type = .ok (some .object) :=
+      mkEmptyAbiTypes.2.2
+    simp [effectiveDeclarationResultKind?, classified]
+  have call := related.core.validation.lazyCall_of_selected spec.contextProgram valueEq
+    RetainedRC2.initializer.findDecl selected
+  have generated := spec.lazyCacheGeneratedEnvironment related.contextCaches
+  obtain ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
+      sourceSteps, targetPath, core, joins, sourceFrames, targetFrames⟩ :=
+    let_publishes_and_resumesCaller spec contract related.core.core.focus call generated
+      related.core.core.resources.current empty emptyHandler pushHandler fits
+      related.core.core.resources.suspended
+  have next := related.withSuccessor ⟨core, related.core.validation.afterLet⟩
+    sourceFrames targetFrames
+  exact ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
+    sourceSteps, targetPath, next, joins, sourceFrames, targetFrames⟩
+
 end
 
 end RetainedInitializer
@@ -964,7 +1030,8 @@ run_cmd do
   for endpoint in #[`RetainedInitializer.literals_mkEmpty_box, `RetainedInitializer.body_returns,
       `RetainedInitializer.body_publishes_and_resumesCaller,
       `RetainedInitializer.lazyMiss_publishes_and_resumesCaller,
-      `RetainedInitializer.let_publishes_and_resumesCaller] do
+      `RetainedInitializer.let_publishes_and_resumesCaller,
+      `RetainedInitializer.validatedLet_publishes_and_resumesCaller] do
     FirTalos.TrustAudit.check endpoint
       (FirTalos.TrustAudit.standardAxioms ++ #[
         "RetainedInitializer.literalAbiTypes._native.native_decide.ax_1_8",
