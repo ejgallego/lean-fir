@@ -163,13 +163,23 @@ scope, transports, state relation, local alignment and residual budget. Arbitrar
 older caller facts are preserved through the cumulative entry transport; they
 are not erased. The new generic algebra uses only `propext` and `Quot.sound`.
 
-Remaining premises include supported compilation/current body focus, the five
-compiler local-kind rows, source primitive contracts, installed handler laws,
-and finite headroom. The publication endpoint additionally consumes the initial
-callee resource frame (empty reuse-fact map), suspended caller scope/stack, and
-compiler-generated cache/call-frame layout. Deriving those at the actual lazy
-miss entry is the next connection. No whole lean-zip, resident-linking or
-encoded-artifact correctness follows yet.
+`RetainedInitializer.lazyMiss_publishes_and_resumesCaller` now starts at the
+staged cold-cache invocation and derives thirteen source transitions and the
+whole matching target path back to caller code. The reusable `enterBody` rule
+derives the initial body focus, empty callee resource frame and both installed
+continuation stacks in one source / three target steps. It works for heap
+results without using or weakening the central restricted lazy-stack rule.
+The callee's supported-function package is inherited from the caller's pipeline
+and the generated declaration row, not supplied independently.
+
+Remaining premises are the supported caller and production declaration row,
+five compiler local-kind rows, staged-call focus, saved caller scope/stack,
+empty cache, source primitive contracts, installed handler laws and finite
+headroom. No callee entry state, callee frame, installed stack, post-body scope
+or execution path is assumed. The next static connection is to derive the
+five local-kind rows from production lowering of this checked declaration.
+Central heap-miss admission, resident linking and encoded-artifact correctness
+remain separate; this is not a theorem for the whole lean-zip application.
 
 ## Reproduce
 
@@ -205,7 +215,7 @@ The body-prefix endpoint additionally records one closed native check for the
 UInt8/tagged literal ABI classifications. The full body additionally inherits
 the existing seven scalar-box policy comparison axioms and UInt8 result-kind
 comparison axiom; this slice adds no native evaluation. The maintained gate
-audits all six retained target endpoints independently (twenty consumer
+audits all seven retained target endpoints independently (twenty-one consumer
 endpoints including the fourteen source/publication endpoints).
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are

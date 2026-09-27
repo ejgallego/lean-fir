@@ -222,6 +222,7 @@ def taggedBoxPolicyNativeDebt : Array String := #[
   "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_9"]
 
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  (`FirTalos.Concrete.ConcreteStructuredLazyCallReadyFocus.enterBody, standardAxioms),
   (`FirTalos.Concrete.RuntimeStepTransports.trans, #["propext", "Quot.sound"]),
   (`FirTalos.Concrete.ConcreteExternalCallEvidence.transports, #["propext", "Quot.sound"]),
   (`FirTalos.Concrete.ConcreteStructuredResourceScope.afterBody_withoutReuseFacts,

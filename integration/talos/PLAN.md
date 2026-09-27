@@ -38,7 +38,7 @@ This layering separates three claims:
 The concrete layout and many runtime refinements already exist. The original
 implementation sequence below is history, not an instruction to restart it.
 
-## Current verification frontier — 2026-09-26
+## Current verification frontier — 2026-09-27
 
 This section, ending at **Implementation history**, is the live W6 priority.
 Later chronological uses of "next", "remaining", "queue", or "immediate" are
@@ -64,12 +64,12 @@ bytes, or the complete lean-zip application.
 | --- | --- | --- |
 | Exact-root executable return | `terminatesWith_of_rootedExecEvaluates` | Discharge compiler-owned admission; retain explicit execution/resource contracts |
 | Static supported-export assembly | `exists_ofSupportedPipeline` and pipeline alignment/uniqueness lemmas | Apply to the same checked captured program; closure-flow condition remains visible |
-| Saved-caller return/pop | `RetainedInitializer.return_pop_preservesCaller` connects the checked source body to the existing target return/bind suffix | Target callee prefix and heap-result lazy-miss admission |
+| Saved-caller return/pop | `lazyMiss_publishes_and_resumesCaller` restores the caller scope/tail after the actual initializer's full target execution | General heap-result lazy-miss admission |
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
-| First actual lean-zip initializer | Kernel-checked RC2 program; source execution and caller-binding proof | Production Array contracts and preceding target execution |
+| First actual lean-zip initializer | `lazyMiss_publishes_and_resumesCaller`: thirteen source steps and whole matching target path from staged cold-cache invocation to caller code | Derive five compiler binding-kind rows; installed Array handlers, central admission, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
-| Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; `RetainedInitializer.executes_and_restoresCallerScope` supplies the checked source publication and graph shape | Wire construction provenance into central lazy-miss admission; target callee prefix |
-| Executable publication and bind | `RetainedInitializer.publication_bind_resumesCode`: thirteen source steps and eight target suffix steps reach the ordinary code core, with original caller scope and suspended stack | Target callee prefix, production external contracts, central heap-miss admission and residual validation |
+| Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; the checked initializer composition derives its publication input and graph shape | Wire construction provenance into central lazy-miss admission |
+| Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
 In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
@@ -265,9 +265,19 @@ The post-body resource scope is reconstructed from the initial empty-reuse-fact
 callee frame and the existing operation transports; older caller facts and the
 original outer entry remain intact. The actual result representation and closed
 fresh region are derived. No new global invariant or native dependency is added.
-The remaining entry connection is the lazy miss: derive its callee frame,
-body focus, and cache/call-frame layout from the production entry rule. The
-body-to-publication resource-transport obligation above is now discharged.
+The body-to-publication resource-transport obligation above is now discharged.
+
+**Cold-cache entry through caller resumption (W6, 2026-09-27).**
+`lazyMiss_publishes_and_resumesCaller` composes the reusable `enterBody` proof
+with body execution and publication/bind: thirteen source transitions and a
+matching target path. Callee state, frame and installed stacks are derived;
+the supported callee package inherits pipeline evidence from the caller and
+the generated declaration row. Heap results are supported by this local
+composition without weakening the central lazy-stack admission restriction.
+Five compiler binding-kind rows remain explicit static premises; derive these
+from the checked declaration's production lowering next. Staged caller focus,
+caller resource scope/tail, cold cache, primitive/installed-handler contracts
+and finite headroom remain explicit. No whole-export or artifact claim follows.
 
 Connect the checked singleton-Array initializer to heap-result cache
 publication in the central relation. The body-level source execution and

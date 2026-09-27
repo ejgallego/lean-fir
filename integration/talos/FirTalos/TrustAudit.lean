@@ -17,6 +17,7 @@ import FirTalos.ConcreteArrayExternalCall
 import FirTalos.ConcreteLiteralPrefix
 import FirTalos.ConcreteBoxPrefix
 import FirTalos.ConcreteBodyResources
+import FirTalos.ConcreteLazyBodyEntry
 import FirTalos.ConcreteArrayPushCall
 import FirTalos.ConcreteArrayPushExternalEvidence
 import FirTalos.ConcreteRetainedTransports
