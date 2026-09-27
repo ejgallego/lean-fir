@@ -172,12 +172,20 @@ results without using or weakening the central restricted lazy-stack rule.
 The callee's supported-function package is inherited from the caller's pipeline
 and the generated declaration row, not supplied independently.
 
+`initializer_bindingKinds` now derives all five binding-kind lookups from the
+actual production collection/refinement equations. The reusable
+`ConcreteGeneratedInternalDeclaration.loweredLocals` recovers those equations
+for the same generated function using compiler-derived name uniqueness. The
+cold-cache theorem consumes this result internally: none of the five lookups
+is a caller premise. No new native evaluation or axiom is introduced.
+
 Remaining premises are the supported caller and production declaration row,
-five compiler local-kind rows, staged-call focus, saved caller scope/stack,
+staged-call focus, saved caller scope/stack,
 empty cache, source primitive contracts, installed handler laws and finite
 headroom. No callee entry state, callee frame, installed stack, post-body scope
-or execution path is assumed. The next static connection is to derive the
-five local-kind rows from production lowering of this checked declaration.
+or execution path is assumed. The next static connection is to construct the
+initializer's generated declaration row internally from the supported pipeline,
+then connect the staged invocation back to the caller's source let.
 Central heap-miss admission, resident linking and encoded-artifact correctness
 remain separate; this is not a theorem for the whole lean-zip application.
 
@@ -215,7 +223,7 @@ The body-prefix endpoint additionally records one closed native check for the
 UInt8/tagged literal ABI classifications. The full body additionally inherits
 the existing seven scalar-box policy comparison axioms and UInt8 result-kind
 comparison axiom; this slice adds no native evaluation. The maintained gate
-audits all seven retained target endpoints independently (twenty-one consumer
+audits all eight retained target/static endpoints independently (twenty-two consumer
 endpoints including the fourteen source/publication endpoints).
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are

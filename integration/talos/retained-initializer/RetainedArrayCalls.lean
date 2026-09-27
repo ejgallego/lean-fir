@@ -5,6 +5,7 @@ import FirTalos.ConcreteBoxPrefix
 import FirTalos.ConcreteArrayPushCall
 import FirTalos.ConcretePublicationBind
 import FirTalos.ConcreteLazyBodyEntry
+import FirTalos.ConcreteGeneratedLocals
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -378,6 +379,88 @@ theorem literalAbiTypes :
     | error e => simp at checked
     | ok kind => cases kind <;> simp_all
 
+/-- Exact source-order binding row of the checked declaration. Only identifiers
+are projected from retained syntax; all kinds are proved below from lowering. -/
+def initializerBindings : LocalKinds :=
+  [(scalarSite.fvarId, .uint8), (capacityId, .tagged), (mkEmptySite.fvarId, .object),
+    (boxSite.fvarId, .tagged), (pushSite.fvarId, .object)]
+
+theorem initializer_rawLocals :
+    collectLocals [] initializerBody = .ok initializerBindings.reverse := by
+  have byteBox : boxResultKind (.const `UInt8 []) .tobject = .tagged :=
+    boxResultKind_uint8_tobject
+  have objectKind : checkedAbiKind (.const `obj []) = .ok .object := by
+    simp [checkedAbiKind, abiKind, mkEmptyAbiTypes.2.2, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  have carrierKind : checkedAbiKind (.const `tobj []) = .ok .tobject := by
+    simp [checkedAbiKind, abiKind, mkEmptyAbiTypes.2.1, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  change collectLocals [] (.let scalarSite (.let capacitySite (.let mkEmptySite
+    (.let boxSite (.let pushSite pushContinuation))))) = _
+  simp only [collectLocals, collectLocalKindInsertions, letValueKind,
+    scalarSite, capacitySite, mkEmptySite, boxSite, pushSite, pushContinuation,
+    initializerBody, mkEmptyContinuation, pushCode, RetainedRC2.initializer.body]
+  simp only [literalAbiTypes.1, literalAbiTypes.2, objectKind, carrierKind,
+    byteBox, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  rfl
+
+theorem initializer_effectiveUpdates :
+    collectEffectiveLocalKindUpdates RetainedRC2.program initializerBody =
+      .ok initializerBindings := by
+  have byteBox : boxResultKind (.const `UInt8 []) .tobject = .tagged :=
+    boxResultKind_uint8_tobject
+  have objectKind : checkedAbiKind (.const `obj []) = .ok .object := by
+    simp [checkedAbiKind, abiKind, mkEmptyAbiTypes.2.2, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  have carrierKind : checkedAbiKind (.const `tobj []) = .ok .tobject := by
+    simp [checkedAbiKind, abiKind, mkEmptyAbiTypes.2.1, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  change collectEffectiveLocalKindUpdates RetainedRC2.program
+    (.let scalarSite (.let capacitySite (.let mkEmptySite
+      (.let boxSite (.let pushSite pushContinuation))))) = _
+  simp only [collectEffectiveLocalKindUpdates, effectiveLetValueKind, letValueKind,
+    scalarSite, capacitySite, mkEmptySite, boxSite, pushSite, pushContinuation,
+    initializerBody, mkEmptyContinuation, pushCode, RetainedRC2.initializer.body]
+  simp only [literalAbiTypes.1, literalAbiTypes.2, objectKind, carrierKind,
+    byteBox, Bind.bind, Except.bind, Pure.pure, Except.pure,
+    mkEmptyDecl.findDecl, pushDecl.findDecl]
+  simp [effectiveDeclarationResultKind?, mkEmptyDecl, pushDecl, mkEmptyAbiTypes.2.2,
+    AbiKind.leanCompatible, AbiKind.refines, initializerBindings, scalarSite,
+    capacityId, mkEmptySite, boxSite, pushSite, initializerBody, mkEmptyContinuation, pushCode,
+    RetainedRC2.initializer.body]
+
+theorem initializer_bindingKinds
+    {context : Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {target : AdaptedModule}
+    (row : ConcreteGeneratedInternalDeclaration RetainedRC2.program RetainedRC2.initializer
+      context initializerBody sourceModule sourceFunction target)
+    (unique : RetainedRC2.program.NamesUnique)
+    (lowered : lowerSupported RetainedRC2.program = .ok sourceModule) :
+    findLocalKind? context.localKinds scalarSite.fvarId = some .uint8 ∧
+    findLocalKind? context.localKinds capacityId = some .tagged ∧
+    findLocalKind? context.localKinds mkEmptySite.fvarId = some .object ∧
+    findLocalKind? context.localKinds boxSite.fvarId = some .tagged ∧
+    findLocalKind? context.localKinds pushSite.fvarId = some .object := by
+  obtain ⟨actual, kinds⟩ := row.loweredLocals unique lowered
+  have params : actual.paramLocals = [] := by
+    have h := actual.paramsAdded
+    change Except.ok [] = Except.ok actual.paramLocals at h
+    exact (Except.ok.inj h).symm
+  have raw : actual.rawBodyLocals = initializerBindings.reverse :=
+    (Except.ok.inj (actual.localsCollected.symm.trans initializer_rawLocals))
+  have refined : actual.bodyLocals = initializerBindings.reverse := by
+    have h := actual.localsRefined
+    rw [raw, refineNamedCallLocalKinds, initializer_effectiveUpdates] at h
+    have unchanged : applyEffectiveLocalKindUpdates initializerBindings.reverse initializerBindings =
+        initializerBindings.reverse := by rfl
+    simpa [Bind.bind, Except.bind, Pure.pure, Except.pure, unchanged] using h.symm
+  have exactKinds : context.localKinds = initializerBindings := by
+    rw [kinds]
+    change actual.paramLocals.reverse ++ actual.bodyLocals.reverse = _
+    simp [params, refined]
+  rw [exactKinds]
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+
 def literalEnv (env : Env) : Env :=
   bind (bind env scalarSite.fvarId (.scalar (.uint8 0))) capacityId (.object (.tagged 5))
 
@@ -717,8 +800,9 @@ theorem body_publishes_and_resumesCaller
 /-- A real cold-cache invocation enters the checked initializer, executes its
 body, publishes the fresh result, and resumes the saved caller. No body-entry
 state, installed stack, callee frame, execution path or post-body scope is a
-premise. The five static binding rows and Array host contracts remain explicit.
-The generated declaration row is ordinary production compiler evidence. -/
+premise. The five binding kinds are derived from production lowering; Array
+host contracts remain explicit. The generated declaration row is ordinary
+production compiler evidence. -/
 theorem lazyMiss_publishes_and_resumesCaller
     {callerContext context : Context} {callerCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module} {callerFunction sourceFunction : Fir.Wasm.Function}
@@ -745,11 +829,6 @@ theorem lazyMiss_publishes_and_resumesCaller
     (scope : ConcreteStructuredResourceScope callerContext sourceModule callerFunction externals
       outerRuntime outerStore outerWitness facts bytes runtime callerEnv store callerLocals witness)
     (empty : findGlobal? runtime.globals RetainedRC2.initializer.name = none)
-    (scalarKind : findLocalKind? context.localKinds scalarSite.fvarId = some .uint8)
-    (capacityKind : findLocalKind? context.localKinds capacityId = some .tagged)
-    (arrayKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
-    (boxKind : findLocalKind? context.localKinds boxSite.fvarId = some .tagged)
-    (resultKind : findLocalKind? context.localKinds pushSite.fvarId = some .object)
     (emptyHandler : ∀ request,
       ConcreteExternalRequestRel witness request
         (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
@@ -776,6 +855,8 @@ theorem lazyMiss_publishes_and_resumesCaller
         nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
       sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
       targetAfter.frames = frames := by
+  obtain ⟨scalarKind, capacityKind, arrayKind, boxKind, resultKind⟩ :=
+    initializer_bindingKinds row callerSpec.programNamesUnique callerSpec.lowered
   obtain ⟨sourceEntry, targetEntry, sourceStep, targetPath, focus, bodyFrame,
       _joins, sourceStack, targetStack⟩ :=
     ready.enterBody scope callerSpec.contextProgram row empty
@@ -794,6 +875,11 @@ end RetainedInitializer
 
 open Lean.Elab.Command in
 run_cmd do
+  FirTalos.TrustAudit.check `RetainedInitializer.initializer_bindingKinds
+    (FirTalos.TrustAudit.standardAxioms ++ #[
+      "RetainedInitializer.literalAbiTypes._native.native_decide.ax_1_8",
+      "RetainedInitializer.mkEmptyAbiTypes._native.native_decide.ax_1_1",
+      "Fir.Wasm.boxResultKind_uint8_tobject._native.native_decide.ax_1_1"])
   FirTalos.TrustAudit.check `RetainedInitializer.mkEmpty_stage_call_bind
     (FirTalos.TrustAudit.standardAxioms ++ #[
       "RetainedInitializer.mkEmptyAbiTypes._native.native_decide.ax_1_1",
