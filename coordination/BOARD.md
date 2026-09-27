@@ -28,9 +28,10 @@ The entry-indexed retained-token transport is now used by the active and
 suspended structured resource scopes, composing through nested return/pop.
 The checked initializer also has a bounded fresh-cache publication consumer
 with cumulative entry transport, full saved-caller-scope restoration, and the
-seven-step generated publication suffix. The validated non-heap lazy-return
-path consumes the common restoration and executable suffix; central heap
-lazy-miss admission remains separate.
+seven-step generated publication suffix, now composed through destination bind
+to the ordinary code-core relation. The validated non-heap lazy-return path
+consumes the common restoration and executable suffix; central heap lazy-miss
+admission remains separate.
 Production external refinement, target callee execution, and full
 `compressStored` closure remain open. Other parked proof work requires an
 explicit resume. See `docs/validation.md`.
@@ -139,9 +140,9 @@ replayed exact lean-zip sources/readback/direct consumer (12 exact endpoint
 audits), `make check`, `make talos-setup`, `make talos-check`, and direct RC2
 TrustAudit (275 endpoints); all pass. No new axioms; the concrete publication
 retains the existing `assembleByte32` debt and the consumer its existing source
-boxing debt. Target callee prefix, destination bind/full stack assembly,
-central heap lazy-miss admission, and production Array external refinement
-remain open; no admission exclusions were lifted.
+boxing debt. At that checkpoint the target callee prefix and following
+destination bind/full stack assembly were still open; no admission exclusions
+were lifted.
 
 The executable-suffix successor `870e70aa` is landed on its exact accepted
 base `2504f9f74`. `LazyCacheGlobalsRel.publicationFinitePath_of_compiler`
@@ -150,14 +151,33 @@ path from production import alignment and cache-table refinement, including
 both physical cache lanes. The validated non-heap dispatcher now uses this
 common suffix. `RetainedInitializer.executes_publicationSuffix` composes the
 checked source publication, generated target suffix and full caller-scope
-restoration for `RetainedRC2.program`; it still starts after the target
-initializer has returned, and does not prove the target callee prefix or
-following destination bind/full stack relation. Root independently reran the
-exact-source reconstruction, fresh readback and direct consumer (13 exact
-endpoint audits), `make check`, `make talos-setup`, `make talos-check`, and
-direct RC2 TrustAudit (276 endpoints); all pass. No new axiom; existing
+restoration for `RetainedRC2.program`; it starts after the target initializer
+has returned. At this checkpoint, target callee execution and the following
+destination bind/full stack relation were not yet proved. Root independently
+reran the exact-source reconstruction, fresh readback and direct consumer (13
+exact endpoint audits), `make check`, `make talos-setup`, `make talos-check`,
+and direct RC2 TrustAudit (276 endpoints); all pass. No new axiom; existing
 boxing/`assembleByte32` debt is unchanged. Heap-result admission and production
 Array external refinement remain separate.
+
+The publication/bind successor `a51db800` is also landed. Its producer commit
+was based on `870e70aa`; the root copy `14d1caa84` applies the identical stable
+patch on top of the intervening board-only commit `9be1c7f9`. Generic
+`ConcreteStructuredResourceScope.publishFreshCache_bind` matches publication
+and binding with eight target steps, constructs the bind focus, and concludes
+the ordinary code-core relation with the original caller entry and supplied
+suspended tail preserved. Only the overwritten destination reuse fact is
+erased. `RetainedInitializer.publication_bind_resumesCode` composes the actual
+11-step checked source prefix into 13 source steps and the same eight target
+steps. It still assumes the pre-publication target scope/result relation,
+compiler continuation/local alignment, and suspended tail; the target starts
+at initializer return. Target callee execution, production Array external
+refinement, residual validation, and central heap lazy-miss admission remain
+separate; this is not a whole-application simulation. Root's exact-source
+reconstruction/readback/direct consumer passes with 14 endpoint audits;
+`make check`, `make talos-setup`, `make talos-check`, and direct RC2 TrustAudit
+(277 endpoints) pass. No new axiom; existing `assembleByte32`/source-boxing
+dependencies are unchanged.
 
 ## Integration queue settled (2026-09-09)
 
