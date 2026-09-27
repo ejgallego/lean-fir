@@ -14,6 +14,7 @@ import FirTalos.ConcreteLazyPublicationTests
 import FirTalos.ConcreteArrayExternal
 import FirTalos.ConcreteRetainedTransports
 import FirTalos.ConcreteRetainedPublication
+import FirTalos.ConcretePublicationBind
 import FirTalos.ConcreteResumableWasm
 import FirTalos.ConcretePassComposition
 import FirTalos.ConcreteCompilerCorrectness

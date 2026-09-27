@@ -357,6 +357,8 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
   (`FirTalos.Concrete.ConcreteStructuredResourceScope.publishFreshCache,
     standardAxioms ++ referenceCountNativeDebt),
   (`FirTalos.Concrete.LazyCacheGlobalsRel.publicationFinitePath_of_compiler, standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredResourceScope.publishFreshCache_bind,
+    standardAxioms ++ referenceCountNativeDebt),
   (`FirTalos.Concrete.SourceLazyLetResult.miss_ordinaryBindTransport_of_internalCompiler,
     standardAxioms),
   (`FirTalos.Concrete.SourceLazyLetResult.miss_ordinaryBindTransport_of_publicationInduction,

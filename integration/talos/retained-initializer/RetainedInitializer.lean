@@ -5,6 +5,7 @@ import FirTalos.ConcreteRetainedTransports
 import FirTalos.ConcreteRetainedPublication
 import FirTalos.ConcretePublicationScope
 import FirTalos.ConcretePublicationExecution
+import FirTalos.ConcretePublicationBind
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.LeanIR.Impure Fir.Wasm.Concrete FirTalos.Concrete
@@ -372,6 +373,89 @@ theorem resumesCaller
     (execSteps_of_run_outOfFuel execution) (.step pop (.refl _)),
     (freshEmptyArray_pushTagged_publication saved transport related 5 0 name).eraseBind⟩
 
+/-- Execute the actual checked initializer under a waiting caller, then match
+publication and binding with eight target steps. The final ordinary code core
+includes the original caller entry and its suspended resource stack. Target
+initializer execution and general heap-miss admission remain separate. -/
+theorem publication_bind_resumesCode
+    (externals : ExternalImpl) (contract : FreshArrayExternalContract externals)
+    (runtime : RuntimeState) (cold : findGlobal? runtime.globals name = none)
+    {callerContext calleeContext : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {callerCode : LCNF.Code .impure} {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : FirTalos.AdaptedModule} {hosts : ResolvedHosts}
+    {callerEntryRuntime : RuntimeState} {callerEntryStore entryStore store : Wasm.Store Host}
+    {callerEntryWitness entryWitness witness : RefinementWitness}
+    {callerFacts calleeFacts : Fir.Wasm.ReuseCapacityFacts} {callerBytes remainingBytes : Nat}
+    {callerEnv calleeEnv : Env} {callerLocals calleeLocals : Wasm.Locals}
+    {kind functionResult : Fir.Wasm.AbiKind} {physical : Wasm.Value}
+    {cacheIndex cacheSetId resultIndex : Nat} {result : FVarId}
+    {continuation : LCNF.Code .impure} {labels : FirTalos.LabelContext}
+    {callerJoins : JoinEnv} {sourceFrames : List Frame}
+    {rest : Wasm.Program} {frames : List StructuredWasmFrame}
+    {callerExpectedResult : Option Fir.Wasm.AbiKind}
+    (spec : ConcreteSupportedFunction RetainedRC2.program callerContext callerCode
+      sourceModule callerFunction targetModule hosts)
+    (callerScope : ConcreteStructuredResourceScope callerContext sourceModule
+      callerFunction externals callerEntryRuntime callerEntryStore callerEntryWitness
+      callerFacts callerBytes runtime callerEnv entryStore callerLocals entryWitness)
+    (currentScope : ConcreteStructuredResourceScope calleeContext sourceModule
+      calleeFunction externals runtime entryStore entryWitness calleeFacts remainingBytes
+      (publicationInput runtime) calleeEnv store calleeLocals witness)
+    (programEq : calleeContext.program = callerContext.program)
+    (initializerFound : sourceModule.initializers[cacheIndex]? = some name)
+    (signature : (sourceModule.callSignature? (.declaration name)).bind
+      (·.results[0]?) = some kind)
+    (cacheSetCall : FirTalos.callIndex? sourceModule (.runtime (.cacheSet name kind)) =
+      some cacheSetId)
+    (valueRelated : PhysicalValueRel witness kind physical
+      (.object (.heap runtime.nextLocation)))
+    (adapted : CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels
+      continuation rest)
+    (resultFound : FirTalos.findFVar? (functionBindings callerFunction) result = some resultIndex)
+    (kindAt : (functionBindings callerFunction)[resultIndex]?.map Prod.snd = some kind)
+    (tail : ConcreteStructuredSuspendedResourceStack externals RetainedRC2.program
+      callerEntryRuntime callerEntryStore callerEntryWitness functionResult callerExpectedResult
+      sourceFrames frames) :
+    ∃ runtimeAfter sourceAfter targetAfter resumedLocals,
+      ExecSteps externals 13
+        { initialState RetainedRC2.program name #[] runtime with
+          frames := .bind result continuation callerEnv callerJoins :: sourceFrames }
+        sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 8
+        ⟨store, .returning (physical :: calleeLocals.values),
+          .call 1 callerLocals.values callerLocals
+            [.call cacheSetId, .globalSet (2 * cacheIndex + 1),
+              .const 1, .globalSet (2 * cacheIndex)] ::
+          .label 0 callerLocals.values
+            ([.globalGet (2 * cacheIndex + 1), .localSet resultIndex] ++ rest) :: frames⟩
+        targetAfter ∧
+      ConcreteStructuredCodeCoreRel RetainedRC2.program callerContext sourceModule
+        callerFunction externals labels callerEntryRuntime callerEntryStore callerEntryWitness
+        functionResult callerExpectedResult (Fir.Wasm.eraseReuseCapacityFact callerFacts result)
+        remainingBytes (resultRuntime runtime)
+        (bind callerEnv result (.object (.heap runtime.nextLocation))) continuation
+        (writeWasmGlobal (writeWasmGlobal (replaceRuntime store runtimeAfter)
+          (2 * cacheIndex + 1) physical) (2 * cacheIndex) (.i32 1))
+        resumedLocals rest witness sourceAfter targetAfter ∧
+      sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
+      targetAfter.frames = frames := by
+  obtain ⟨before, execution, runtimeEq, control, sourceStack, program⟩ :=
+    reaches_publicationInput_withFrames externals contract runtime cold
+      (.bind result continuation callerEnv callerJoins :: sourceFrames)
+  have closed : HeapRegionClosed runtime.nextLocation (publicationInput runtime).heap := by
+    apply (HeapRegionClosed.of_liveHeapRel callerScope.stateRelated.1.heap).alloc
+      (object := .array #[.object (.tagged 0)] 5) (persistent := false)
+      (after := semanticArrayResult runtime #[.object (.tagged 0)] 5) rfl
+    simp [HeapObject.ownedValues]
+  obtain ⟨runtimeAfter, sourceAfter, targetAfter, resumedLocals, sourceSuffix,
+      targetPath, codeCore, sourceJoinsEq, sourceFramesEq, targetFramesEq⟩ :=
+    callerScope.publishFreshCache_bind spec currentScope programEq initializerFound signature
+      cacheSetCall valueRelated closed (Nat.le_refl _) (program.trans spec.contextProgram.symm)
+      control runtimeEq sourceStack adapted resultFound kindAt tail
+  exact ⟨runtimeAfter, sourceAfter, targetAfter, resumedLocals,
+    execSteps_trans_exact (execSteps_of_run_outOfFuel execution) sourceSuffix,
+    targetPath, codeCore, sourceJoinsEq, sourceFramesEq, targetFramesEq⟩
+
 /-- Connect execution of the checked body to the existing concrete caller-pop
 consumer. The target is already at its return boundary: target callee execution,
 its final frame and representation transports are still independent premises.
@@ -510,6 +594,8 @@ run_cmd do
   FirTalos.TrustAudit.check `RetainedInitializer.executes_and_restoresCallerScope
     (expected ++ #["_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
   FirTalos.TrustAudit.check `RetainedInitializer.executes_publicationSuffix
+    (expected ++ #["_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
+  FirTalos.TrustAudit.check `RetainedInitializer.publication_bind_resumesCode
     (expected ++ #["_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
   FirTalos.TrustAudit.check `RetainedInitializer.example_result_contents #["propext"]
   FirTalos.TrustAudit.check `RetainedInitializer.example_not_blanketOrdinary #["propext"]

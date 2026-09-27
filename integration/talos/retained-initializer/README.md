@@ -73,6 +73,18 @@ existence are derived. The source publication step and restored caller scope
 are retained. The target initializer prefix and following destination bind are
 still outside this theorem, as is complete source/target stack assembly.
 
+`publication_bind_resumesCode` closes that destination-bind suffix. It runs
+the checked source initializer for thirteen steps under a waiting caller and
+matches publication/binding with eight target steps, ending in the ordinary
+`ConcreteStructuredCodeCoreRel`. The returned value is bound, the saved join
+environment restored, and the original caller scope/suspended resource tail
+retained; the overwritten destination's reuse fact is erased. The proof
+constructs the intermediate bind relation rather than requiring it. The
+pre-publication callee scope and represented result, compiler continuation/local
+alignment, and suspended resource tail remain premises. Target callee execution,
+production Array external refinement, residual validation and general heap-miss
+admission are still separate obligations.
+
 The two source external contracts are uniform primitive laws, not a
 per-program invariant. `FreshArrayExternalContract` specifies empty allocation
 and the fresh/non-full tagged-push branch. `freshArrayExternals_contract`
@@ -113,4 +125,4 @@ The concrete publication endpoint additionally inherits the existing
 persistence. Its separate exact audit records that dependency; the source-only
 endpoints keep their narrower inventory. The full-scope consumer inherits the
 same exact dependencies, as does the executable-suffix consumer. There are
-thirteen consumer endpoints.
+fourteen consumer endpoints, including the publication/bind code-core result.

@@ -68,8 +68,8 @@ bytes, or the complete lean-zip application.
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
 | First actual lean-zip initializer | Kernel-checked RC2 program; source execution and caller-binding proof | Production Array contracts and preceding target execution |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
-| Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; `RetainedInitializer.executes_and_restoresCallerScope` supplies the checked source publication and graph shape | Wire construction provenance into central lazy-miss admission; target prefix and complete destination-bind/stack assembly remain separate |
-| Executable publication suffix | `RetainedInitializer.executes_publicationSuffix` pairs source publication with seven target steps and the restored caller scope; import alignment and global lanes are derived | Target callee prefix, destination bind and complete stack relation |
+| Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; `RetainedInitializer.executes_and_restoresCallerScope` supplies the checked source publication and graph shape | Wire construction provenance into central lazy-miss admission; target callee prefix |
+| Executable publication and bind | `RetainedInitializer.publication_bind_resumesCode`: thirteen source steps and eight target suffix steps reach the ordinary code core, with original caller scope and suspended stack | Target callee prefix, production external contracts, central heap-miss admission and residual validation |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
 In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
@@ -152,6 +152,21 @@ of either physical global lane. Its starting target state still represents an
 already-returned initializer; this does not prove target initializer execution
 or compiler admission for heap lazy misses. Source and target suffixes are
 exposed together, not packaged as the complete source/target stack relation.
+
+The successor `ConcreteStructuredResourceScope.publishFreshCache_bind` now
+assembles that missing suffix relation. It constructs the post-publication bind
+focus/resources, consumes the source bind frame and target `local.set`, and
+returns `ConcreteStructuredCodeCoreRel` with the original caller entry and
+unchanged suspended resource tail. Only the overwritten destination's reuse
+fact is erased. Two source steps match eight target steps, and the saved join
+environment is restored. `RetainedInitializer.publication_bind_resumesCode`
+precomposes the checked eleven-step source prefix and derives graph closure
+from its singleton-Array result. It takes no bind-focus, target-path,
+post-publication scope or graph-disjointness premise. Compiler continuation/local
+alignment, pre-publication scope/result representation and suspended tail
+remain explicit. This closes publication/bind resource-stack assembly, not the
+target callee prefix, residual source-validation relation or general heap-miss
+admission. The existing non-heap admission policy is unchanged.
 
 The fresh-region proof checkpoint `f5bcf3fd3` is based on accepted main
 `97c257cc4`. Its proof sources are unchanged from reviewed `c67c6ed21`;
