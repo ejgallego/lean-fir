@@ -132,11 +132,29 @@ they preserve the exact source runtime, target store and witness. The natural
 rule requires the value to fit the wasm32 immediate payload; it does not coerce
 arbitrary naturals to tagged values. Both use only standard Lean axioms.
 
-The unconnected body suffix is now UInt8 boxing, Array.push, and return. Entry
-through the lazy-call frame, hereditary resource-scope transport and composition
-with the already-proved publication suffix are separate from body execution.
-No whole lean-zip or Wasm artifact
-correctness follows from this source endpoint.
+`RetainedInitializer.body_returns` now connects **the complete captured body**:
+two literals, `Array.mkEmpty`, UInt8 boxing, `Array.push`, and return. It derives
+ten source transitions and a finite target execution ending in a precise
+`.object` yield related to the singleton tagged-zero Array. Neither a source
+execution nor a target path is a premise. The final heap retains the original
+headroom minus the five-slot Array allocation; boxing and the selected fresh,
+non-full push allocate nothing. Both control stacks and joins are preserved.
+
+The reusable `advance_boxUInt8` leaves runtime/store/witness unchanged.
+`arrayPushOperands` reconstructs the actual words from parameter refinement;
+`advance_pushFreshTagged_bind` composes the existing primitive refinement with
+call and destination binding. Allocation's unchanged external implementation is
+now exposed, allowing one installed implementation to serve both Array calls.
+The push handler law is restricted to states related to this fresh empty Array,
+represented operands and the exact named request; it does not assume that all
+Array pushes use the in-place branch.
+
+Remaining premises include supported compilation/current body focus, the five
+compiler local-kind rows, source primitive contracts, installed handler laws,
+and finite headroom. Entry through the lazy-call frame, hereditary resource-scope
+transport and composition with the already-proved publication suffix remain
+separate. No whole lean-zip, resident-linking or encoded-artifact correctness
+follows yet.
 
 ## Reproduce
 
@@ -169,8 +187,11 @@ evaluation. Its proof-only captured projections are noncomputable; the observed
 upstream executable-projection failure is recorded in
 `FIR-BUG-wasm-none-retained-projection-codegen`.
 The body-prefix endpoint additionally records one closed native check for the
-UInt8/tagged literal ABI classifications. The maintained gate audits both
-retained target endpoints independently.
+UInt8/tagged literal ABI classifications. The full body additionally inherits
+the existing seven scalar-box policy comparison axioms and UInt8 result-kind
+comparison axiom; this slice adds no native evaluation. The maintained gate
+audits all five retained target endpoints independently (nineteen consumer
+endpoints including the fourteen source/publication endpoints).
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are
 also in the ordinary Talos trust inventory.

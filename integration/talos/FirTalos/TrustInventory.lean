@@ -212,7 +212,21 @@ def literalExampleNativeDebt : Array String := #[
   "FirTalos.Correctness.abiLiteralSourceModule_lowered._native.native_decide.ax_1_1",
   "FirTalos.Correctness.abiLiteralSupportedExport._native.native_decide.ax_1"]
 
+def taggedBoxPolicyNativeDebt : Array String := #[
+  "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_10",
+  "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_11",
+  "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_12",
+  "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_13",
+  "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_14",
+  "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_15",
+  "Fir.Wasm.Concrete.boxUsesTaggedRepresentation_boxedScalar._native.native_decide.ax_1_9"]
+
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  (`FirTalos.Concrete.ConcreteStructuredCodeFocus.advance_boxUInt8,
+    standardAxioms ++ taggedBoxPolicyNativeDebt),
+  (`FirTalos.Concrete.ConstructorArgumentsRelated.arrayPushOperands, #["propext", "Quot.sound"]),
+  (`FirTalos.Concrete.ConcreteStructuredExternalCallControl.advance_pushFreshTagged_bind,
+    standardAxioms ++ referenceCountNativeDebt),
   (`FirTalos.Concrete.ConcreteStructuredCodeFocus.advance_immediateLiteral,
     standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredCodeFocus.advance_smallTaggedNatural,

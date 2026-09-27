@@ -245,6 +245,19 @@ part of the preceding queue, not the remaining suffix obligations.
 
 ### Next meaningful proof result
 
+**Complete retained body connection (W6, 2026-09-27).**
+`RetainedInitializer.body_returns` derives ten source transitions from the actual
+kernel-retained initializer body and a matching finite Wasm path ending in a
+precisely represented singleton Array result. UInt8 boxing is heap-neutral;
+fresh tagged Array push reconstructs its receiver and element from argument
+refinement, then reuses the existing runtime/call/bind theorems. The final budget
+subtracts only the five-slot Array allocation. Source/target execution paths are
+conclusions, not client premises. This discharges the preceding body-suffix
+queue, not entry admission, hereditary resource-scope transport, publication
+composition, installed resident handlers, or encoded-byte correspondence.
+The exact generic/retained axiom inventories record inherited opaque-expression
+and byte-assembly dependencies; no new native evaluation or axiom was added.
+
 Connect the checked singleton-Array initializer to heap-result cache
 publication in the central relation. The body-level source execution and
 caller-specific publication/binding transport already exist, and the

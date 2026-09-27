@@ -53,7 +53,8 @@ theorem ConcreteStructuredExternalCallControl.advance_emptyArray_bind
       nextStore.host.runtime.heap.AddressSpaceBudget
         (remainingBytes - residentArrayAllocationBytes capacity) ∧
       sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
-      targetAfter.frames = targetFrames := by
+      targetAfter.frames = targetFrames ∧
+      nextStore.host.externals = targetStore.host.externals := by
   have resolved : resolvedResultKind = .object := by
     have h := congrArg (fun results : Array AbiKind => results[0]?)
       related.resultSignature
@@ -90,6 +91,6 @@ theorem ConcreteStructuredExternalCallControl.advance_emptyArray_bind
   exact ⟨nextStore, nextWitness, physicalResult, sourceAfter, targetAfter, updated,
     resumedLocals, .step sourceCall (.step sourceBind (.refl _)),
     targetCall.trans targetBind, set, resumed, focus, residual, joins, frames,
-    targetFrames⟩
+    targetFrames, evidence.externalsPreserved⟩
 
 end FirTalos.Concrete
