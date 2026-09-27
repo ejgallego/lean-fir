@@ -1,5 +1,6 @@
 import FirTalos.ConcreteArrayPushExternalEvidence
 import FirTalos.ConcreteExternalCallRequest
+import FirTalos.ConcreteBodyResources
 
 namespace FirTalos.Concrete
 
@@ -85,7 +86,10 @@ theorem ConcreteStructuredExternalCallControl.advance_pushFreshTagged_bind
         nextStore resumedLocals targetRest witness sourceAfter targetAfter ∧
       nextStore.host.runtime.heap.AddressSpaceBudget remainingBytes ∧
       sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
-      targetAfter.frames = targetFrames := by
+      targetAfter.frames = targetFrames ∧
+      nextStore.host.externals = targetStore.host.externals ∧
+      RuntimeStepTransports (semanticArrayResult entry #[] capacity) nextRuntime
+        targetStore nextStore witness witness := by
   have resolved : resolvedResultKind = .object := by
     have h := congrArg (fun results : Array AbiKind => results[0]?) related.resultSignature
     simpa [related.parameterSignature, resultKind] using h.symm
@@ -134,6 +138,7 @@ theorem ConcreteStructuredExternalCallControl.advance_pushFreshTagged_bind
       (module := targetModule.wasmModule) (hostEnv := hosts.env)
   exact ⟨nextStore, physicalResult, sourceAfter, targetAfter, updated, resumedLocals,
     .step sourceCall (.step sourceBind (.refl _)), targetCall.trans targetBind,
-    set, resumed, focus, residual, joins, frames, targetFrames⟩
+    set, resumed, focus, residual, joins, frames, targetFrames,
+    evidence'.externalsPreserved, evidence'.transports⟩
 
 end FirTalos.Concrete

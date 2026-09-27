@@ -258,6 +258,17 @@ composition, installed resident handlers, or encoded-byte correspondence.
 The exact generic/retained axiom inventories record inherited opaque-expression
 and byte-assembly dependencies; no new native evaluation or axiom was added.
 
+**Body-to-caller publication (W6, 2026-09-27).**
+`body_publishes_and_resumesCaller` derives twelve source transitions and matching
+Wasm execution from the actual body through publication and destination binding.
+The post-body resource scope is reconstructed from the initial empty-reuse-fact
+callee frame and the existing operation transports; older caller facts and the
+original outer entry remain intact. The actual result representation and closed
+fresh region are derived. No new global invariant or native dependency is added.
+The remaining entry connection is the lazy miss: derive its callee frame,
+body focus, and cache/call-frame layout from the production entry rule. The
+body-to-publication resource-transport obligation above is now discharged.
+
 Connect the checked singleton-Array initializer to heap-result cache
 publication in the central relation. The body-level source execution and
 caller-specific publication/binding transport already exist, and the

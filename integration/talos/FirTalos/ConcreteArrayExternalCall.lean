@@ -1,5 +1,6 @@
 import FirTalos.ConcreteArrayExternalEvidence
 import FirTalos.ConcreteExternalCallRequest
+import FirTalos.ConcreteBodyResources
 
 namespace FirTalos.Concrete
 
@@ -54,7 +55,8 @@ theorem ConcreteStructuredExternalCallControl.advance_emptyArray_bind
         (remainingBytes - residentArrayAllocationBytes capacity) ∧
       sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
       targetAfter.frames = targetFrames ∧
-      nextStore.host.externals = targetStore.host.externals := by
+      nextStore.host.externals = targetStore.host.externals ∧
+      RuntimeStepTransports sourceRuntime nextRuntime targetStore nextStore witness nextWitness := by
   have resolved : resolvedResultKind = .object := by
     have h := congrArg (fun results : Array AbiKind => results[0]?)
       related.resultSignature
@@ -91,6 +93,6 @@ theorem ConcreteStructuredExternalCallControl.advance_emptyArray_bind
   exact ⟨nextStore, nextWitness, physicalResult, sourceAfter, targetAfter, updated,
     resumedLocals, .step sourceCall (.step sourceBind (.refl _)),
     targetCall.trans targetBind, set, resumed, focus, residual, joins, frames,
-    targetFrames, evidence.externalsPreserved⟩
+    targetFrames, evidence.externalsPreserved, evidence'.transports⟩
 
 end FirTalos.Concrete

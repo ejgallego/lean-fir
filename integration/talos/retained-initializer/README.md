@@ -149,12 +149,27 @@ The push handler law is restricted to states related to this fresh empty Array,
 represented operands and the exact named request; it does not assume that all
 Array pushes use the in-place branch.
 
+`RetainedInitializer.body_publishes_and_resumesCaller` now composes this body
+with cache publication and the caller's destination bind. It derives twelve
+source transitions and a matching target path, ending in ordinary caller code
+with the full hereditary resource scope and suspended stack restored. The
+post-body scope, represented publication value, closed fresh region, and both
+execution paths are conclusions, not premises.
+
+This uses the existing `RuntimeStepTransports` package, now composed and exposed
+by the Array call/bind rules. `afterBody_withoutReuseFacts` reconstructs the
+active scope for a region with no retained reuse-token facts from its entry
+scope, transports, state relation, local alignment and residual budget. Arbitrary
+older caller facts are preserved through the cumulative entry transport; they
+are not erased. The new generic algebra uses only `propext` and `Quot.sound`.
+
 Remaining premises include supported compilation/current body focus, the five
 compiler local-kind rows, source primitive contracts, installed handler laws,
-and finite headroom. Entry through the lazy-call frame, hereditary resource-scope
-transport and composition with the already-proved publication suffix remain
-separate. No whole lean-zip, resident-linking or encoded-artifact correctness
-follows yet.
+and finite headroom. The publication endpoint additionally consumes the initial
+callee resource frame (empty reuse-fact map), suspended caller scope/stack, and
+compiler-generated cache/call-frame layout. Deriving those at the actual lazy
+miss entry is the next connection. No whole lean-zip, resident-linking or
+encoded-artifact correctness follows yet.
 
 ## Reproduce
 
@@ -190,7 +205,7 @@ The body-prefix endpoint additionally records one closed native check for the
 UInt8/tagged literal ABI classifications. The full body additionally inherits
 the existing seven scalar-box policy comparison axioms and UInt8 result-kind
 comparison axiom; this slice adds no native evaluation. The maintained gate
-audits all five retained target endpoints independently (nineteen consumer
+audits all six retained target endpoints independently (twenty consumer
 endpoints including the fourteen source/publication endpoints).
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are

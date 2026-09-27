@@ -3,6 +3,7 @@ import FirTalos.ConcreteArrayExternalCall
 import FirTalos.ConcreteLiteralPrefix
 import FirTalos.ConcreteBoxPrefix
 import FirTalos.ConcreteArrayPushCall
+import FirTalos.ConcretePublicationBind
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -258,7 +259,8 @@ theorem mkEmpty_stage_call_bind
         (remainingBytes - residentArrayAllocationBytes 5) ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
-      nextStore.host.externals = store.host.externals := by
+      nextStore.host.externals = store.host.externals ∧
+      RuntimeStepTransports runtime (afterMkEmpty runtime) store nextStore witness nextWitness := by
   let site := mkEmptyCallShape context programEq externals contract runtime env
     capacityKind resultKind capacityValue
   obtain ⟨physicalArgs, operation, resolvedKind, targetImport, callIndex, resultIndex,
@@ -276,7 +278,7 @@ theorem mkEmpty_stage_call_bind
       control.operationMatches.resultType, site, mkEmptyCallShape, mkEmptyDecl]
   obtain ⟨nextStore, nextWitness, physicalResult, sourceAfter, targetAfter, updated,
       resumedLocals, steps, path, _set, _resumed, focus, residual, joins,
-      frames, targetFrames, externalsEq⟩ :=
+      frames, targetFrames, externalsEq, transports⟩ :=
     control.advance_emptyArray_bind (capacity := 5) rfl rfl
       (fun args decode => by
         have same : args = concreteArgs := Except.ok.inj (decode.symm.trans decoded)
@@ -285,7 +287,7 @@ theorem mkEmpty_stage_call_bind
       budget fits
   exact ⟨targetArguments.length, nextStore, nextWitness, sourceAfter, targetAfter,
     resumedLocals, rest, .step staged steps, argumentPath.trans path, focus, residual,
-    joins, frames, targetFrames, externalsEq⟩
+    joins, frames, targetFrames, externalsEq, transports⟩
 
 /-- The actual push call executes with reconstructed receiver/element words.
 The deployment law is restricted to the named three-argument push request. -/
@@ -324,7 +326,10 @@ theorem push_stage_call_bind
         pushContinuation nextStore resumedLocals rest witness sourceAfter targetAfter ∧
       nextStore.host.runtime.heap.AddressSpaceBudget remainingBytes ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
-      targetAfter.frames = target.frames := by
+      targetAfter.frames = target.frames ∧
+      nextStore.host.externals = store.host.externals ∧
+      RuntimeStepTransports (afterMkEmpty runtime) (afterPush runtime)
+        store nextStore witness witness := by
   let site := pushCallShape context programEq externals contract runtime env
     arrayKind boxKind resultKind arrayValue boxValue
   change ConcreteStructuredCodeFocus _ _ _ _ _ _ (.let pushSite pushContinuation)
@@ -333,7 +338,8 @@ theorem push_stage_call_bind
       targetArguments, rest, sourceStaged, targetStaged, staged, argumentPath, control⟩ :=
     related.advance_external_stage_of_shape spec site spec.localsAligned
   obtain ⟨nextStore, physicalResult, sourceAfter, targetAfter, updated, resumedLocals,
-      steps, path, _set, _resumed, focus, residual, joins, frames, targetFrames⟩ :=
+      steps, path, _set, _resumed, focus, residual, joins, frames, targetFrames,
+      externalsEq, transports⟩ :=
     control.advance_pushFreshTagged_bind (entry := arrayEntry runtime) (payload := 0)
       rfl rfl rfl rfl contract (by decide)
       (fun address word args physicalEq decoded mapped tagged => by
@@ -349,7 +355,7 @@ theorem push_stage_call_bind
           rfl) budget
   exact ⟨targetArguments.length, nextStore, sourceAfter, targetAfter, resumedLocals,
     rest, .step staged steps, argumentPath.trans path, focus, residual, joins, frames,
-    targetFrames⟩
+    targetFrames, externalsEq, transports⟩
 
 /-- Closed type classification only, following the same audited opaque-Expr
 boundary as mkEmptyAbiTypes. No source or target execution is evaluated. -/
@@ -412,7 +418,8 @@ theorem literals_mkEmpty_stage_call_bind
         (remainingBytes - residentArrayAllocationBytes 5) ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
-      nextStore.host.externals = store.host.externals := by
+      nextStore.host.externals = store.host.externals ∧
+      RuntimeStepTransports runtime (afterMkEmpty runtime) store nextStore witness nextWitness := by
   change ConcreteStructuredCodeFocus _ _ _ _ _ _
     (.let scalarSite (.let capacitySite (.let mkEmptySite mkEmptyContinuation)))
     _ _ _ _ _ _ at related
@@ -429,13 +436,13 @@ theorem literals_mkEmpty_stage_call_bind
     (externals := externals)
   obtain ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter,
       resumedLocals, rest, steps, path, focus, residual, joins, frames, targetFrames,
-      externalsEq⟩ :=
+      externalsEq, transports⟩ :=
     mkEmpty_stage_call_bind programEq spec contract capacityKind resultKind
       (by simp [lookupValue, capacityIdEq]) spec.localsAligned focus2 handler budget fits
   refine ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
     rest, .step step1 (.step step2 steps), ?_, focus, residual,
     joins.trans (joins2.trans joins1), frames.trans (frames2.trans frames1),
-    targetFrames.trans (targetFrames2.trans targetFrames1), externalsEq⟩
+    targetFrames.trans (targetFrames2.trans targetFrames1), externalsEq, transports⟩
   simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using path1.trans (path2.trans path)
 
 /-- The six-step real body prefix constructs both Array-push operands. Boxing
@@ -477,10 +484,11 @@ theorem literals_mkEmpty_box
         (remainingBytes - residentArrayAllocationBytes 5) ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
-      nextStore.host.externals = store.host.externals := by
+      nextStore.host.externals = store.host.externals ∧
+      RuntimeStepTransports runtime (afterMkEmpty runtime) store nextStore witness nextWitness := by
   obtain ⟨prefixLength, nextStore, nextWitness, sourceMid, targetMid, midLocals,
       midCode, prefixSteps, prefixPath, focus, residual, joins, frames, targetFrames,
-      externalsEq⟩ :=
+      externalsEq, transports⟩ :=
     literals_mkEmpty_stage_call_bind programEq spec contract scalarKind capacityKind
       arrayKind related handler budget fits
   change ConcreteStructuredCodeFocus _ _ _ _ _ _ (.let boxSite pushCode)
@@ -502,7 +510,8 @@ theorem literals_mkEmpty_box
     (by simp [getLocal, boxKind]) scalarLookup (externals := externals)
   refine ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
     rest, execSteps_trans_exact prefixSteps (.step step (.refl _)), ?_, next, residual,
-    joins'.trans joins, frames'.trans frames, targetFrames'.trans targetFrames, externalsEq⟩
+    joins'.trans joins, frames'.trans frames, targetFrames'.trans targetFrames,
+    externalsEq, transports⟩
   simpa [Nat.add_assoc] using prefixPath.trans path
 
 def bodyResultEnv (env : Env) (runtime : RuntimeState) : Env :=
@@ -556,10 +565,12 @@ theorem body_returns
       nextStore.host.runtime.heap.AddressSpaceBudget
         (remainingBytes - residentArrayAllocationBytes 5) ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
-      targetAfter.frames = target.frames := by
+      targetAfter.frames = target.frames ∧
+      nextStore.host.externals = store.host.externals ∧
+      RuntimeStepTransports runtime (afterPush runtime) store nextStore witness nextWitness := by
   obtain ⟨prefixLength, midStore, nextWitness, sourceMid, targetMid, midLocals,
       midCode, prefixSteps, prefixPath, focus, residual, joins, frames, targetFrames,
-      externalsEq⟩ := literals_mkEmpty_box programEq spec contract scalarKind capacityKind
+      externalsEq, prefixTransports⟩ := literals_mkEmpty_box programEq spec contract scalarKind capacityKind
         arrayKind boxKind related emptyHandler budget fits
   have arrayValue : lookup
       (bind (bind (literalEnv env) mkEmptySite.fvarId
@@ -568,7 +579,8 @@ theorem body_returns
     simp [Fir.LeanIR.Impure.bind, lookup, boxSite, mkEmptyContinuation, mkEmptySite,
       RetainedRC2.initializer]
   obtain ⟨pushLength, nextStore, sourcePushed, targetPushed, resultLocals, returnCode,
-      pushSteps, pushPath, returnFocus, finalBudget, pushJoins, pushFrames, pushTargetFrames⟩ :=
+      pushSteps, pushPath, returnFocus, finalBudget, pushJoins, pushFrames, pushTargetFrames,
+      pushExternals, pushTransports⟩ :=
     push_stage_call_bind programEq spec contract arrayKind boxKind resultKind arrayValue
       (lookup_bind_self _ _ _) focus
       (fun request address word mapped tagged named args => by
@@ -589,7 +601,117 @@ theorem body_returns
       (execSteps_trans_exact pushSteps (.step returnStep (.refl _))),
     prefixPath.trans (pushPath.trans returnPath), yielded, finalBudget,
     returnJoins.trans (pushJoins.trans joins), returnFrames.trans (pushFrames.trans frames),
-    returnTargetFrames.trans (pushTargetFrames.trans targetFrames)⟩
+    returnTargetFrames.trans (pushTargetFrames.trans targetFrames),
+    pushExternals.trans externalsEq, prefixTransports.trans pushTransports⟩
+
+/-- Execute the actual retained body, publish its fresh Array, and resume the
+saved caller. The post-body resource scope and publication input are derived,
+not premises. Entry still starts after the lazy miss has installed its frames;
+connecting that entry is separate from this body-to-caller result. -/
+theorem body_publishes_and_resumesCaller
+    {callerContext context : Context}
+    {callerCode rootCode : LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
+    {callerFunction sourceFunction : Fir.Wasm.Function} {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (callerSpec : ConcreteSupportedFunction RetainedRC2.program callerContext callerCode
+      sourceModule callerFunction targetModule hosts)
+    (spec : ConcreteSupportedFunction RetainedRC2.program context rootCode
+      sourceModule sourceFunction targetModule hosts)
+    {externals : ExternalImpl} (contract : FreshArrayExternalContract externals)
+    {outerRuntime runtime : RuntimeState} {outerStore store : Wasm.Store Host}
+    {outerWitness witness : RefinementWitness} {callerFacts : ReuseCapacityFacts}
+    {callerBytes remainingBytes : Nat} {callerEnv env : Env}
+    {callerLocals locals : Wasm.Locals} {labels callerLabels : LabelContext}
+    {code rest : Wasm.Program} {source : MachineState} {target : StructuredWasmState Host}
+    {cacheIndex cacheSetId resultIndex : Nat} {result : FVarId}
+    {continuation : LCNF.Code .impure} {callerJoins : JoinEnv}
+    {sourceFrames : List Frame} {frames : List StructuredWasmFrame}
+    {functionResult : AbiKind} {callerExpectedResult : Option AbiKind}
+    (callerScope : ConcreteStructuredResourceScope callerContext sourceModule callerFunction
+      externals outerRuntime outerStore outerWitness callerFacts callerBytes
+      runtime callerEnv store callerLocals witness)
+    (bodyFrame : ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+      externals [] remainingBytes runtime env store locals witness)
+    (scalarKind : findLocalKind? context.localKinds scalarSite.fvarId = some .uint8)
+    (capacityKind : findLocalKind? context.localKinds capacityId = some .tagged)
+    (arrayKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
+    (boxKind : findLocalKind? context.localKinds boxSite.fvarId = some .tagged)
+    (resultKind : findLocalKind? context.localKinds pushSite.fvarId = some .object)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      runtime env initializerBody store locals code witness source target)
+    (emptyHandler : ∀ request,
+      ConcreteExternalRequestRel witness request
+        (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
+      EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
+    (pushHandler : ∀ before nextWitness request address word,
+      ConcreteRuntimeRel before nextWitness (afterMkEmpty runtime) →
+      nextWitness.locations.lookup? runtime.nextLocation = some address →
+      ValueRel nextWitness .tobject (.word32 word) (.object (.tagged 0)) →
+      request.name = `Array.push →
+      request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
+      ArrayPushInPlaceHandlerAt store.host.externals request before address word)
+    (fits : residentArrayAllocationBytes 5 ≤ remainingBytes)
+    (initializerFound : sourceModule.initializers[cacheIndex]? = some RetainedRC2.initializer.name)
+    (signature : (sourceModule.callSignature? (.declaration RetainedRC2.initializer.name)).bind
+      (·.results[0]?) = some .object)
+    (cacheSetCall : FirTalos.callIndex? sourceModule
+      (.runtime (.cacheSet RetainedRC2.initializer.name .object)) = some cacheSetId)
+    (sourceStack : source.frames = .cache RetainedRC2.initializer.name ::
+      .bind result continuation callerEnv callerJoins :: sourceFrames)
+    (targetStack : target.frames =
+      .call 1 callerLocals.values callerLocals
+        [.call cacheSetId, .globalSet (2 * cacheIndex + 1), .const 1, .globalSet (2 * cacheIndex)] ::
+      .label 0 callerLocals.values
+        ([.globalGet (2 * cacheIndex + 1), .localSet resultIndex] ++ rest) :: frames)
+    (adapted : CodeAdaptedWithSuffix callerContext sourceModule callerFunction callerLabels
+      continuation rest)
+    (resultFound : FirTalos.findFVar? (functionBindings callerFunction) result = some resultIndex)
+    (kindAt : (functionBindings callerFunction)[resultIndex]?.map Prod.snd = some .object)
+    (tail : ConcreteStructuredSuspendedResourceStack externals RetainedRC2.program
+      outerRuntime outerStore outerWitness functionResult callerExpectedResult sourceFrames frames) :
+    ∃ targetSteps nextStore nextWitness resumedLocals sourceAfter targetAfter,
+      ExecSteps externals 12 source sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetSteps target targetAfter ∧
+      ConcreteStructuredCodeCoreRel RetainedRC2.program callerContext sourceModule callerFunction
+        externals callerLabels outerRuntime outerStore outerWitness functionResult callerExpectedResult
+        (eraseReuseCapacityFact callerFacts result) (remainingBytes - residentArrayAllocationBytes 5)
+        ((afterPush runtime).setGlobal RetainedRC2.initializer.name (.object (.heap runtime.nextLocation)))
+        (bind callerEnv result (.object (.heap runtime.nextLocation))) continuation
+        nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
+      sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
+      targetAfter.frames = frames := by
+  have initialScope := ConcreteStructuredResourceScope.root bodyFrame
+  have budget := initialScope.budgetedPureExternal.1.2
+  obtain ⟨bodySteps, bodyStore, nextWitness, bodyLocals, physical, sourceReturned,
+      targetReturned, sourceBody, targetBody, yielded, residual, _joins,
+      sourceFramesEq, targetFramesEq, externalsEq, transports⟩ :=
+    body_returns spec.contextProgram spec contract scalarKind capacityKind arrayKind
+      boxKind resultKind related emptyHandler pushHandler budget fits
+  have bodyScope := initialScope.afterBody_withoutReuseFacts transports externalsEq
+    yielded.stateRelated yielded.frameAligned residual
+  have closed : HeapRegionClosed runtime.nextLocation (afterPush runtime).heap := by
+    apply (HeapRegionClosed.of_liveHeapRel initialScope.stateRelated.1.heap).alloc
+      (object := .array #[.object (.tagged 0)] 5) (persistent := false)
+      (after := semanticArrayResult runtime #[.object (.tagged 0)] 5) rfl
+    simp [HeapObject.ownedValues]
+  obtain ⟨runtimeAfter, sourceAfter, targetAfter, resumedLocals, sourceSuffix,
+      targetSuffix, core, joins, sourceFrames', targetFrames'⟩ :=
+    callerScope.publishFreshCache_bind callerSpec bodyScope
+      (spec.contextProgram.trans callerSpec.contextProgram.symm)
+      initializerFound signature cacheSetCall yielded.valueRelated closed (Nat.le_refl _)
+      (yielded.sourceProgramEq.trans (spec.contextProgram.trans callerSpec.contextProgram.symm))
+      yielded.sourceControlEq yielded.sourceRuntimeEq (sourceFramesEq.trans sourceStack)
+      adapted resultFound kindAt tail
+  have targetEq : targetReturned =
+      ⟨bodyStore, .returning (physical :: bodyLocals.values), target.frames⟩ := by
+    cases targetReturned
+    rw [StructuredWasmState.mk.injEq]
+    exact ⟨yielded.targetStoreEq, yielded.targetControlEq, targetFramesEq⟩
+  rw [targetEq, targetStack] at targetBody
+  exact ⟨_, _, nextWitness, resumedLocals, sourceAfter, targetAfter,
+    execSteps_trans_exact sourceBody sourceSuffix, targetBody.trans targetSuffix,
+    core, joins, sourceFrames', targetFrames'⟩
 
 end
 
@@ -610,7 +732,8 @@ run_cmd do
     (FirTalos.TrustAudit.standardAxioms ++ #[
       "RetainedInitializer.mkEmptyAbiTypes._native.native_decide.ax_1_1",
       "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
-  for endpoint in #[`RetainedInitializer.literals_mkEmpty_box, `RetainedInitializer.body_returns] do
+  for endpoint in #[`RetainedInitializer.literals_mkEmpty_box, `RetainedInitializer.body_returns,
+      `RetainedInitializer.body_publishes_and_resumesCaller] do
     FirTalos.TrustAudit.check endpoint
       (FirTalos.TrustAudit.standardAxioms ++ #[
         "RetainedInitializer.literalAbiTypes._native.native_decide.ax_1_8",
