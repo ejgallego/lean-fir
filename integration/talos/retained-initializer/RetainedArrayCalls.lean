@@ -7,6 +7,7 @@ import FirTalos.ConcretePublicationBind
 import FirTalos.ConcreteLazyBodyEntry
 import FirTalos.ConcreteGeneratedLocals
 import FirTalos.ConcreteValidatedLet
+import FirTalos.ConcreteRootedDispatch
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -1003,6 +1004,78 @@ theorem validatedLet_publishes_and_resumesCaller
   exact ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
     sourceSteps, targetPath, next, joins, sourceFrames, targetFrames⟩
 
+/-- The completed heap-result lazy call rejoins the existing rooted simulation
+with the original export ABI, not the initializer's object result ABI. This is
+a bounded block theorem: it does not assume current-step admission for its
+intermediate lazy frames and does not relax the global heap-miss restriction. -/
+theorem rootedLet_publishes_and_resumesCaller
+    {context : Context} {functionCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction RetainedRC2.program context functionCode
+      sourceModule sourceFunction targetModule hosts)
+    {externals : ExternalImpl} (contract : FreshArrayExternalContract externals)
+    {entryRuntime runtime : RuntimeState} {entryStore store : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
+    {env : Env} {locals : Wasm.Locals} {labels : LabelContext}
+    {code : Wasm.Program} {source : MachineState} {target : StructuredWasmState Host}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {functionResult rootResult : AbiKind} {callerExpectedResult : Option AbiKind}
+    (related : ConcreteStructuredValidatedCodeOutcome RetainedRC2.program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels entryRuntime
+      entryStore entryWitness functionResult callerExpectedResult facts bytes runtime env
+      (.let decl continuation) store locals code witness source target)
+    (activeResult : spec.sourceResultKind = functionResult)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (valueEq : decl.value = .fap RetainedRC2.initializer.name #[])
+    (empty : findGlobal? runtime.globals RetainedRC2.initializer.name = none)
+    (emptyHandler : ∀ request,
+      ConcreteExternalRequestRel witness request
+        (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
+      EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
+    (pushHandler : ∀ before nextWitness request address word,
+      ConcreteRuntimeRel before nextWitness (afterMkEmpty runtime) →
+      nextWitness.locations.lookup? runtime.nextLocation = some address →
+      ValueRel nextWitness .tobject (.word32 word) (.object (.tagged 0)) →
+      request.name = `Array.push →
+      request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
+      ArrayPushInPlaceHandlerAt store.host.externals request before address word)
+    (fits : residentArrayAllocationBytes 5 ≤ bytes) :
+    ∃ targetSteps nextStore nextWitness resumedLocals rest sourceAfter targetAfter,
+      ExecSteps externals 14 source sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetSteps target targetAfter ∧
+      ∃ next : ConcreteStructuredValidatedCodeOutcome RetainedRC2.program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels entryRuntime
+        entryStore entryWitness functionResult callerExpectedResult
+        (eraseReuseCapacityFact facts decl.fvarId) (bytes - residentArrayAllocationBytes 5)
+        ((afterPush runtime).setGlobal RetainedRC2.initializer.name (.object (.heap runtime.nextLocation)))
+        (bind env decl.fvarId (.object (.heap runtime.nextLocation))) continuation
+        nextStore resumedLocals rest nextWitness sourceAfter targetAfter,
+      ConcreteStructuredValidationAgreesAtRoot rootResult next.agrees next.frames.validation ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt RetainedRC2.program sourceModule
+        targetModule hosts externals rootResult nextWitness sourceAfter targetAfter ∧
+      sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames := by
+  obtain ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
+      sourceSteps, targetPath, next, joins, sourceFrames, targetFrames⟩ :=
+    validatedLet_publishes_and_resumesCaller spec contract related valueEq empty
+      emptyHandler pushHandler fits
+  have nextRooted := rooted.reindex sourceFrames targetFrames next.agrees next.frames.validation
+  have nextGlobal : ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt RetainedRC2.program
+      sourceModule targetModule hosts externals rootResult nextWitness sourceAfter targetAfter :=
+    .code activeResult next nextRooted
+  -- The initializer returned an object, but the original export may not.
+  -- Regression: the resumed relation cannot be relabelled at the callee ABI.
+  fail_if_success
+    have : ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt RetainedRC2.program
+        sourceModule targetModule hosts externals .object nextWitness sourceAfter targetAfter := by
+      exact nextGlobal
+  exact ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
+    sourceSteps, targetPath, next, nextRooted, nextGlobal,
+    joins, sourceFrames, targetFrames⟩
+
 end
 
 end RetainedInitializer
@@ -1031,7 +1104,8 @@ run_cmd do
       `RetainedInitializer.body_publishes_and_resumesCaller,
       `RetainedInitializer.lazyMiss_publishes_and_resumesCaller,
       `RetainedInitializer.let_publishes_and_resumesCaller,
-      `RetainedInitializer.validatedLet_publishes_and_resumesCaller] do
+      `RetainedInitializer.validatedLet_publishes_and_resumesCaller,
+      `RetainedInitializer.rootedLet_publishes_and_resumesCaller] do
     FirTalos.TrustAudit.check endpoint
       (FirTalos.TrustAudit.standardAxioms ++ #[
         "RetainedInitializer.literalAbiTypes._native.native_decide.ax_1_8",

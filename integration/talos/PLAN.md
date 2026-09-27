@@ -66,7 +66,7 @@ bytes, or the complete lean-zip application.
 | Static supported-export assembly | `exists_ofSupportedPipeline` and pipeline alignment/uniqueness lemmas | Apply to the same checked captured program; closure-flow condition remains visible |
 | Saved-caller return/pop | `lazyMiss_publishes_and_resumesCaller` restores the caller scope/tail after the actual initializer's full target execution | General heap-result lazy-miss admission |
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
-| First actual lean-zip initializer | `validatedLet_publishes_and_resumesCaller`: fourteen source steps and matching target path from validated caller let to validated continuation; call admission, cache alignment, callee row and binding kinds derived | Installed Array handlers, central heap-result admission/precision closure, linking/encoding |
+| First actual lean-zip initializer | `rootedLet_publishes_and_resumesCaller`: fourteen source steps and matching target path to validated continuation and rooted global relation at the original export ABI; admission/cache/callee/local facts derived | Installed Array handlers, intermediate heap-result lazy-frame closure, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
 | Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; the checked initializer composition derives its publication input and graph shape | Wire construction provenance into central lazy-miss admission |
 | Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
@@ -294,13 +294,26 @@ contracts and finite headroom supplement the supported caller and current
 relation. Runtime handler conformance remains separate; no whole-export or
 artifact claim follows.
 
-Next connect this bounded validated-to-validated execution to the central
-simulation's root/precise-result boundary. The completed block transports
-resources through publication and bind, but does not prove the intermediate
+`rootedLet_publishes_and_resumesCaller` retains the original root ABI through
+that completed block and constructs `ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt`
+at its endpoint, with the evolved witness. Existing root-stack reindexing
+suffices; no new invariant or root-equals-object assumption is introduced.
+The result can feed the existing rooted prefix/terminal proofs. This is not
+closure of the central relation at each intermediate lazy-call state.
+
+Next discharge the intermediate heap-result lazy-frame closure obligation.
+The completed rooted block transports resources through publication and bind,
+but does not prove the intermediate
 heap-result lazy frames satisfy the central one-step relation. Retain the
 producer's construction provenance without adding a public client
 graph-separation invariant. Do not simply delete the object/tobject exclusions
 before proving the relevant closure rule.
+Concretely, the central lazy resource-stack constructor still excludes heap
+results, and its publication producer obtains `OrdinaryPersistenceTransport`
+from `setGlobal_heap_eq_of_nonHeapReference`. Heap publication needs the
+entry-indexed fresh-region/resource transport already used by the block,
+with its construction provenance retained across intermediate callee states.
+This is the next structural obligation, not another root-index wrapper.
 
 The target callee prefix, represented Array requests and destination binding
 are now composed. Installed handler equations remain explicit; connecting

@@ -197,6 +197,18 @@ recovers continuation validation from residual local alignment, while
 Existing frame agreement is transported through the completed execution, not
 requested again from the client.
 
+`rootedLet_publishes_and_resumesCaller` further returns the existing
+`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt` at the resumed caller,
+with the original export result kind and the evolved heap witness. The proof
+uses the unchanged outer source/target frame stacks to transport the existing
+root agreement. The initializer's `.object` result does not replace the
+caller's or export's ABI. Active-result/root evidence is the same evidence
+already stored in the input rooted relation; no future return, target path or
+new invariant is assumed. This makes the block's endpoint usable by the
+existing rooted finite-prefix and terminal-result proofs, under their remaining
+admission/resource premises. It does not establish the central relation at
+every intermediate heap-result lazy frame.
+
 Remaining premises are the supported caller and its current validated relation,
 the initializer call's identity, empty cache, source primitive contracts,
 installed handler laws and finite headroom. No independent call-admission,
@@ -239,7 +251,7 @@ The body-prefix endpoint additionally records one closed native check for the
 UInt8/tagged literal ABI classifications. The full body additionally inherits
 the existing seven scalar-box policy comparison axioms and UInt8 result-kind
 comparison axiom; this slice adds no native evaluation. The maintained gate
-audits all ten retained target/static endpoints independently (twenty-four consumer
+audits all eleven retained target/static endpoints independently (twenty-five consumer
 endpoints including the fourteen source/publication endpoints).
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are
