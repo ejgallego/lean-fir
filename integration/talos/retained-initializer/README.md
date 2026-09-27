@@ -117,9 +117,24 @@ actual captured continuation with a related Array result, restored control
 stacks and exact residual allocation budget. Required entry facts are a supported
 compiler function, local alignment/current code focus, the two local-kind lookups
 and capacity value. Source primitive laws, installed-handler conformance and
-headroom remain explicit. Literal-prefix entry, the following push, hereditary
-resource-scope transport and publication composition remain to be connected;
-the central admission policy has not changed.
+headroom remain explicit. The literal entry premises are discharged by the
+composition below; the following push, hereditary resource-scope transport and
+publication composition remain separate. The central admission policy has not
+changed.
+
+`RetainedInitializer.literals_mkEmpty_stage_call_bind` now starts at the checked
+initializer **body** and composes both literal lets with that call. It derives
+five source transitions and the generated argument prefix plus six target
+transitions, with the same post-Array continuation and residual budget. The
+capacity lookup is now a conclusion of literal execution, not a premise.
+`advance_immediateLiteral` and `advance_smallTaggedNatural` are reusable rules:
+they preserve the exact source runtime, target store and witness. The natural
+rule requires the value to fit the wasm32 immediate payload; it does not coerce
+arbitrary naturals to tagged values. Both use only standard Lean axioms.
+
+The unconnected body suffix is now UInt8 boxing, Array.push, and return. Entry
+through the lazy-call frame, hereditary resource-scope transport and composition
+with the already-proved publication suffix are separate from body execution.
 No whole lean-zip or Wasm artifact
 correctness follows from this source endpoint.
 
@@ -153,6 +168,9 @@ dependency checking only the closed `Expr` ABI classifications for `lcErased`,
 evaluation. Its proof-only captured projections are noncomputable; the observed
 upstream executable-projection failure is recorded in
 `FIR-BUG-wasm-none-retained-projection-codegen`.
+The body-prefix endpoint additionally records one closed native check for the
+UInt8/tagged literal ABI classifications. The maintained gate audits both
+retained target endpoints independently.
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are
 also in the ordinary Talos trust inventory.

@@ -230,6 +230,19 @@ equation and headroom remain explicit. This is not export-entry execution or
 resident linking. Next connect literal entry and the following push, then carry
 the hereditary resource scope into the existing publication suffix.
 
+**Literal-prefix connection (W6, 2026-09-27).**
+`literals_mkEmpty_stage_call_bind` starts at the checked initializer body and
+derives five source transitions through both literal lets and mkEmpty binding.
+It removes the client capacity-value lookup and retains the exact post-Array
+runtime and budget. Two reusable rules, `advance_immediateLiteral` and
+`advance_smallTaggedNatural`, preserve store/witness/runtime exactly; the latter
+covers precise tagged natural literals only within the immediate payload bound.
+These generic rules have no native-evaluation dependencies. The retained
+instantiation adds one audited closed ABI-classification check. Next connect
+UInt8 boxing, fresh tagged push, and return; the lazy-entry/resource-stack and
+publication composition remain separate. This supersedes the literal-entry
+part of the preceding queue, not the remaining suffix obligations.
+
 ### Next meaningful proof result
 
 Connect the checked singleton-Array initializer to heap-result cache

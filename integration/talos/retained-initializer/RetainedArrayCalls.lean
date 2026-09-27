@@ -1,5 +1,6 @@
 import RetainedDeclarations
 import FirTalos.ConcreteArrayExternalCall
+import FirTalos.ConcreteLiteralPrefix
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -17,6 +18,21 @@ LCNF syntax or a new program-specific execution invariant. -/
 def capacityId : FVarId :=
   match RetainedRC2.initializer.value with
   | .code (.let _ (.let capacity _)) => capacity.fvarId
+  | _ => default
+
+def initializerBody : LCNF.Code .impure :=
+  match RetainedRC2.initializer.value with
+  | .code code => code
+  | _ => default
+
+def scalarSite : LCNF.LetDecl .impure :=
+  match initializerBody with
+  | .let site _ => site
+  | _ => default
+
+def capacitySite : LCNF.LetDecl .impure :=
+  match initializerBody with
+  | .let _ (.let site _) => site
   | _ => default
 
 def mkEmptySite : LCNF.LetDecl .impure :=
@@ -178,6 +194,91 @@ theorem mkEmpty_stage_call_bind
     resumedLocals, rest, .step staged steps, argumentPath.trans path, focus, residual,
     joins, frames, targetFrames⟩
 
+/-- Closed type classification only, following the same audited opaque-Expr
+boundary as mkEmptyAbiTypes. No source or target execution is evaluated. -/
+theorem literalAbiTypes :
+    checkedAbiKind (.const `UInt8 []) = .ok .uint8 ∧
+    checkedAbiKind (.const `tagged []) = .ok .tagged := by
+  have checked :
+      (match checkedAbiKind (.const `UInt8 []) with
+        | .ok .uint8 => true | _ => false) = true ∧
+      (match checkedAbiKind (.const `tagged []) with
+        | .ok .tagged => true | _ => false) = true := by native_decide
+  constructor
+  · generalize h : checkedAbiKind (.const `UInt8 []) = result at checked ⊢
+    cases result with
+    | error e => simp at checked
+    | ok kind => cases kind <;> simp_all
+  · generalize h : checkedAbiKind (.const `tagged []) = result at checked ⊢
+    cases result with
+    | error e => simp at checked
+    | ok kind => cases kind <;> simp_all
+
+def literalEnv (env : Env) : Env :=
+  bind (bind env scalarSite.fvarId (.scalar (.uint8 0))) capacityId (.object (.tagged 5))
+
+/-- Start at the checked initializer body rather than at the Array call. The
+literal prefix constructs the capacity value and leaves the heap, witness and
+handler state unchanged; clients no longer provide the capacity lookup. -/
+theorem literals_mkEmpty_stage_call_bind
+    {context : Context} (programEq : context.program = RetainedRC2.program)
+    {rootCode : LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction RetainedRC2.program context rootCode
+      sourceModule sourceFunction targetModule hosts)
+    {externals : ExternalImpl} (contract : FreshArrayExternalContract externals)
+    {runtime : RuntimeState} {env : Env} {labels : LabelContext}
+    {store : Wasm.Store Host} {locals : Wasm.Locals} {code : Wasm.Program}
+    {witness : RefinementWitness} {source : MachineState}
+    {target : StructuredWasmState Host} {remainingBytes : Nat}
+    (scalarKind : findLocalKind? context.localKinds scalarSite.fvarId = some .uint8)
+    (capacityKind : findLocalKind? context.localKinds capacityId = some .tagged)
+    (resultKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels runtime env initializerBody store locals code witness source target)
+    (handler : ∀ request,
+      ConcreteExternalRequestRel witness request
+        (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
+      EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
+    (budget : store.host.runtime.heap.AddressSpaceBudget remainingBytes)
+    (fits : residentArrayAllocationBytes 5 ≤ remainingBytes) :
+    ∃ prefixLength nextStore nextWitness sourceAfter targetAfter resumedLocals rest,
+      ExecSteps externals 5 source sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        (prefixLength + 6) target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        (afterMkEmpty runtime)
+        (bind (literalEnv env) mkEmptySite.fvarId (.object (.heap runtime.nextLocation)))
+        mkEmptyContinuation nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
+      nextStore.host.runtime.heap.AddressSpaceBudget
+        (remainingBytes - residentArrayAllocationBytes 5) ∧
+      sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames := by
+  change ConcreteStructuredCodeFocus _ _ _ _ _ _
+    (.let scalarSite (.let capacitySite (.let mkEmptySite mkEmptyContinuation)))
+    _ _ _ _ _ _ at related
+  have scalarValueKind : letValueKind scalarSite = .ok .uint8 := literalAbiTypes.1
+  have capacityValueKind : letValueKind capacitySite = .ok .tagged := literalAbiTypes.2
+  have capacityIdEq : capacitySite.fvarId = capacityId := rfl
+  obtain ⟨source1, target1, locals1, rest1, step1, path1, focus1, joins1, frames1,
+      targetFrames1⟩ := related.advance_immediateLiteral (.uint8 0) rfl scalarValueKind
+    (by simp [getLocal, scalarKind]) spec.localsAligned
+    (module := targetModule.wasmModule) (hosts := hosts.env) (externals := externals)
+  obtain ⟨source2, target2, locals2, rest2, step2, path2, focus2, joins2, frames2,
+      targetFrames2⟩ := focus1.advance_smallTaggedNatural spec (value := 5)
+    (by decide) rfl capacityValueKind (by simp [getLocal, capacityIdEq, capacityKind])
+    (externals := externals)
+  obtain ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter,
+      resumedLocals, rest, steps, path, focus, residual, joins, frames, targetFrames⟩ :=
+    mkEmpty_stage_call_bind programEq spec contract capacityKind resultKind
+      (by simp [lookupValue, capacityIdEq]) spec.localsAligned focus2 handler budget fits
+  refine ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
+    rest, .step step1 (.step step2 steps), ?_, focus, residual,
+    joins.trans (joins2.trans joins1), frames.trans (frames2.trans frames1),
+    targetFrames.trans (targetFrames2.trans targetFrames1)⟩
+  simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using path1.trans (path2.trans path)
+
 end
 
 end RetainedInitializer
@@ -186,5 +287,10 @@ open Lean.Elab.Command in
 run_cmd do
   FirTalos.TrustAudit.check `RetainedInitializer.mkEmpty_stage_call_bind
     (FirTalos.TrustAudit.standardAxioms ++ #[
+      "RetainedInitializer.mkEmptyAbiTypes._native.native_decide.ax_1_1",
+      "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
+  FirTalos.TrustAudit.check `RetainedInitializer.literals_mkEmpty_stage_call_bind
+    (FirTalos.TrustAudit.standardAxioms ++ #[
+      "RetainedInitializer.literalAbiTypes._native.native_decide.ax_1_8",
       "RetainedInitializer.mkEmptyAbiTypes._native.native_decide.ax_1_1",
       "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
