@@ -13,6 +13,23 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Proof harness gate alignment (2026-09-28)
+
+Status: released. Maintainer-requested root tooling work on branch
+`tooling/proof-harness-gates` in `.worktrees/proof-harness-gates` is complete,
+based on `b25df81ce`. Its narrow audit-tool lease covered
+`integration/talos/check-proof-trust.py` and
+`integration/talos/test_proof_trust.py`, alongside root-owned Make/CI wiring,
+the Talos overlay check runner and public documentation. W6 coordination is
+recorded in `ROOT-W6-20260928-001`. Lean proofs, axiom inventories, and the
+retained consumer's reproduction script were outside this lease. Publication
+is local-only; the gate alignment introduces no semantic or runtime contract.
+Both proof entrypoints now prepare the official RC2 project and force its
+compiled audit. CI additionally fetches the exact retained source commits and
+checks the consumer; the source scan includes that proof directory.
+`make check`, `make talos-check`, `make retained-initializer-check`, ten audit
+regression tests, workflow lint and `git diff --check` pass locally.
+
 ## Standing integration owner
 
 Validation retention policy (maintainer decision, 2026-09-12): GitHub Actions

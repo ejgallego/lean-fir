@@ -1,6 +1,6 @@
 # FIR verification roadmap
 
-This is the live repository-wide verification roadmap for the Lean 4.33.0
+This is the live repository-wide verification roadmap for the Lean 4.34.0-rc2
 pipeline pinned by FIR. Detailed landed-proof chronology is archived in
 [`pass-correctness-history.md`](pass-correctness-history.md); historical uses
 of "next", "remaining", or "immediate" there, and in later chronological
@@ -42,8 +42,13 @@ The current `ConcreteFiniteTraceCorrect` interface exposes world and external
 trace agreement only. The W6 sensitivity theorem
 `finiteTraceCorrect_of_terminal_prefix` demonstrates that this interface alone
 does not constrain a terminal target result. Existing `RefinedReturnPost` and
-`RefinedFaultPost` provide the stronger contracts; attaching them to the closed
-compiler-derived export theorem remains part of PA3. The
+`RefinedFaultPost` provide the stronger contracts. The accepted
+`ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates` now derives
+executable successful return at the export's exact result ABI. Production
+validation constructs the initial rooted relation; general current-step
+admission, address-space safety, and the entry runtime relation remain explicit
+premises. Closing admission and the general fault counterpart remain part of
+PA3. The
 [W6 review](../integration/talos/W6-OBSERVABLE-CONTRACT-AND-TRUST.md) records the
 exact result/fault and styled pretty-trace sensitivity proofs.
 
@@ -151,7 +156,7 @@ roadmap and examples then reference only the closed endpoint.
 | PA0 (complete) | `ConcreteStructuredSourceAdmissionSafeAt`; `ConcreteStructuredSchemaSourceAdmissionSafeAt`; `ConcreteStructuredCodeStepAdmission` | None during audit | Existing compiler, semantic, and resource boundaries unchanged | W6 audit owner | Met: 20/20 branches classified; later PA1 discrepancies are explicitly tracked |
 | PA1 (active) | `SemanticEnvAtLocalKinds.ofStateRelated`; `SemanticBindingAtUseSite`; `SemanticArgumentsAtAbi`; `ConcreteStructuredDirectCallArgumentsAt`; `ConstructorArgumentsRelated.ofSemanticValuesAtAbi`; `ConcreteStructuredReturnUseSiteProvenanceAt`; `ConcreteResidualLocalAlignment`; `effectiveDeclarationResultKind?_declared_refines`; `ConcreteStructuredAlignedValidationState.directInternalCallBoundary`; `ConcreteStructuredValidatedCodeOutcome.admit_directCall_of_compiler`; `ConcreteStructuredValidatedCodeCoreRel.productionCasesSupported_of_validation`; `ConcreteStructuredValidatedCodeCoreRel.admit_cases_of_validated_step`; `lazyCacheValidatorSound`; operation-specific source-safety lemmas | Precise non-directional producer origin for 158 named-call argument uses, closure ingress, field, and layout provenance | Ordinary local typing, every directional call-argument row, residual compiler-local alignment, non-cached named-call result refinement and exact destination selection, direct-call current admission modulo its exact semantic argument row, call/cache publication, complete case admission, and lazy-cache validator soundness are compiler-derived | W6 result/object/case helper owners | All remaining class-C facts are compiler-derived without a public provenance map or universal source invariant; shared publication and case admission laws are factored |
 | PA2 | `ConcreteStructuredCompilerCurrentStepAdmission`; `ConcreteStructuredValidatedCodeOutcome.advance_of_admission` | `ConcreteStructuredSchemaSourceReadyAt` as a client-provided current-node law | `ConcreteStructuredCurrentStepFiniteRuntimeSafety`; `ConcreteStructuredCurrentStepAddressSpaceSafety` | W6 owner | Production compiler facts construct current-step admission from the exact validated outcome for every successful guarded source step |
-| PA3 | `ConcreteSupportedExport.finiteTraceCorrect_of_schemaSourceInvariant`; existing `RefinedReturnPost` / `RefinedFaultPost` | `SourceInvariant`, `sourceLaws`, `sourceInitialInvariant`, caller-selected `initialSchema` | Entry relation; runtime/external contracts; finite header/capture safety; allocation headroom | W6 owner | Closed compiler-derived prefix theorem plus executable terminal result/fault correspondence, with exact axiom regressions |
+| PA3 | `ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates` for successful returns; legacy `finiteTraceCorrect_of_schemaSourceInvariant` for prefixes | Caller-provided general current-step admission; legacy source-invariant/schema premises | Entry relation; runtime/external contracts; finite header/capture safety; allocation headroom | W6 owner | Closed compiler-derived prefix theorem plus executable terminal result/fault correspondence, with exact axiom regressions |
 | PA4a | Generic finite-stuttering/pass bridge, including `precomposeStutteringPass` | Any renamed form of the W6 source-invariant premise | The earlier pass's real semantic and well-formedness hypotheses | Composition owner | One existing pass theorem yields an earlier-LCNF-to-contracted-Wasm finite-prefix theorem |
 | PA4b | Helper-specific implementation-to-concrete-runtime refinements | Abstract runtime-operation implementations covered by resident helpers | External operations not yet resident; finite wasm32 resources | W6/W7 linking owners | A separately named contracted-Wasm-to-self-contained-Wasm theorem composes with W6 |
 | EDV-general | `ElimDeadSourceOwnedExactContract` and strict checked endpoints | Fixture-specific source-state and target-ledger classifications | Nullary full-application exclusion; foreign-spec compatibility | LCNF proof owner | Arbitrary checked compiler entries construct mapped-owner, source-only allocation, reset/reuse, and ledger interfaces |
@@ -190,20 +195,28 @@ Semantic exclusions and contracts kept visible:
 
 Measured proof trust:
 
-- The textual source registry contains one Lean 4.33 upstream-to-transparent
+- The textual source registry contains one upstream-to-transparent
   alpha-equivalence correspondence axiom in `AlphaEqvTrusted.lean`. Pinned
-  upstream source hashes and the expanded maintained-source scan run in
-  `make check`, including `integration/talos/FirTalos/`.
+  upstream source hashes are authenticated against the official Lean 4.34 RC2
+  compiler; the historical `lean433UpstreamBridge` name is retained. The
+  maintained-source scan runs in `make check`, including
+  `integration/talos/FirTalos/` and `integration/talos/retained-initializer/`.
 - This textual count does not measure transitive compiled axioms. The two
   public source-invariant W6 export endpoints each retain 57 generated axioms
   plus `propext`, `Classical.choice`, and `Quot.sound`. The sampled installed
   UInt64 theorem retains 20 generated axioms; the literal-export example
   retains 27. These are existing debt recorded in
   [TrustInventory.lean](../integration/talos/FirTalos/TrustInventory.lean).
-- `make talos-check` forces the exact 19-endpoint compiled inventory audit;
-  `make proof-trust` runs it independently. Changed dependencies, missing or
+- `make talos-check` forces the compiled endpoint inventory audit after building
+  the official 4.34 overlay; `make proof-trust` prepares and audits that same
+  project independently. `TrustInventory.lean` defines the maintained endpoint
+  set. Changed dependencies, missing or
   non-theorem endpoints, and placeholder axioms fail the audit. Removing a
   dependency also requires an explicit inventory update.
+- CI additionally reconstructs the immutable retained initializer input and
+  directly elaborates its proof consumers and separate exact inventories via
+  `make retained-initializer-check`. Local runs accept `LEAN_ZIP_REPO` and
+  `ZIP_COMMON_REPO` repositories containing the pinned source commits.
 - All ten new observation-sensitivity lemmas have only standard logical axioms
   or none. The native rejection fixture is isolated from production theorem
   dependencies. New public endpoints start with a standard-logical-axiom

@@ -14,6 +14,7 @@ python3 "$root/scripts/validate_trusted_assumptions.py" \
   --lean-project "$root/.deps/talos-434/project"
 lake -d "$root/.deps/talos-434/project" build FirTalos.ConcreteResidentFloat
 lake -d "$root/.deps/talos-434/project" build FirTalos
+python3 "$root/integration/talos/check-proof-trust.py"
 source "$root/tooling/talos-434/identity-checks.sh"
 check_revision 0e05edbcfbb105b33e90c60b4f50e2cf193d9254 \
   "$root/.deps/talos-434/talos" Talos

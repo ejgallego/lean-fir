@@ -1,25 +1,30 @@
 # Talos proof cone for Lean 4.34
 
-On the root-owned Lean 4.34 migration candidate, the standard targets use this
-tracked Talos overlay:
+The standard proof targets on accepted main use this tracked Talos overlay:
 
 ```sh
 make talos-setup
 make talos-check
+make proof-trust
 ```
 
-The scripts can also be run directly when debugging the migration gate.
+The scripts can also be run directly when debugging the proof gate.
 
 `check.sh` repeats the identity-checked setup, then builds
 `FirTalos.ConcreteResidentFloat` and the full `FirTalos` umbrella (including
-`TrustAudit`). Before building, it runs the fail-closed profile negatives and
+`TrustAudit`), then invokes the shared proof-trust runner to force direct
+elaboration of the audit even when Lake reuses the compiled module.
+`make proof-trust` uses the same runner independently: it refreshes the overlay,
+authenticates the compiler/source profile, builds the audit's dependency cone,
+and runs `lake env lean FirTalos/TrustAudit.lean` in the prepared project.
+Before building, `check.sh` runs the fail-closed profile negatives and
 the trusted-assumption validator against the overlay project's explicit
 toolchain. It authenticates the exact compiler version and commit plus the
 W6-reviewed upstream and local checker source hashes. The ordinary no-argument
 validator remains the Lean 4.33 audit. All mutable source and Lake state stays under
 `.deps/talos-434/` in this worktree. The historical `integration/talos` package
-manifest remains available for 4.33 compatibility work; the migration
-candidate's standard Talos targets select the authenticated 4.34 overlay.
+manifest is historical; the standard Talos and proof-trust targets select the
+authenticated 4.34 overlay.
 
 `setup.sh` mirrors the current complete `integration/talos/FirTalos` tree into
 the isolated project, deleting files removed upstream. It compares the source
@@ -51,7 +56,7 @@ digest. The Float source and umbrella entry point remain individually pinned;
 other proof-tree edits must be reviewed through the normal W6 handoff.
 
 This is audited compatibility evidence, not a kernel proof of the universal
-bridge proposition. It is the migration candidate's official Talos gate for
+bridge proposition. It is the official Talos gate for
 Lean 4.34; it does not change the upstream Talos repository.
 The legacy `lean433UpstreamBridge` name is intentionally retained for the one
 audited assumption reviewed under both authenticated compiler identities.

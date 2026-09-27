@@ -22,7 +22,10 @@ AXIOM = re.compile(
     r"axiom\s+([A-Za-z_][A-Za-z0-9_'.]*)", re.MULTILINE
 )
 PLACEHOLDER = re.compile(r"\b(?:sorry|admit)\b")
-PROOF_ROOTS = ("Fir", "Inspect", "integration/talos/FirTalos")
+PROOF_ROOTS = (
+    "Fir", "Inspect", "integration/talos/FirTalos",
+    "integration/talos/retained-initializer",
+)
 
 
 def source_files(root: Path) -> list[Path]:
@@ -51,6 +54,38 @@ def audit_sources(root: Path) -> tuple[list[str], int]:
     return errors, len(files)
 
 
+def audit_compiled(root: Path) -> int:
+    """Prepare and audit the same authenticated project as the Talos gate."""
+    env = os.environ.copy()
+    env.pop("ELAN_TOOLCHAIN", None)
+    env["LAKE_CACHE_DIR"] = subprocess.check_output(
+        ["bash", str(root / "scripts/fir-lake-cache-path.sh")], cwd=root, text=True
+    ).strip()
+    env["LAKE_ARTIFACT_CACHE"] = "true"
+    env["LAKE_RESTORE_ARTIFACTS"] = "true"
+    scratch = root / ".deps/proof-trust/tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    env["TMPDIR"] = str(scratch)
+    project = root / ".deps/talos-434/project"
+    subprocess.run(
+        ["bash", str(root / "tooling/talos-434/setup.sh")],
+        cwd=root, env=env, check=True,
+    )
+    subprocess.run(
+        [sys.executable, str(root / "scripts/validate_trusted_assumptions.py"),
+         "--profile", "lean-4.34-rc2", "--lean-project", str(project)],
+        cwd=root, env=env, check=True,
+    )
+    # Refresh the dependency cone before forcing the audit itself. This prevents
+    # a stale audit olean from turning the gate green without checking endpoints.
+    subprocess.run(
+        ["lake", "build", "FirTalos.TrustAudit"], cwd=project, env=env, check=True
+    )
+    return subprocess.run(
+        ["lake", "env", "lean", "FirTalos/TrustAudit.lean"], cwd=project, env=env
+    ).returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sources-only", action="store_true")
@@ -62,24 +97,7 @@ def main() -> int:
     print(f"Source trust audit: {count} Lean files, including Talos integration; pass.", flush=True)
     if options.sources_only:
         return 0
-    env = os.environ.copy()
-    env["LAKE_CACHE_DIR"] = subprocess.check_output(
-        ["bash", str(ROOT / "scripts/fir-lake-cache-path.sh")], cwd=ROOT, text=True
-    ).strip()
-    env["LAKE_ARTIFACT_CACHE"] = "true"
-    env["LAKE_RESTORE_ARTIFACTS"] = "true"
-    scratch = ROOT / ".deps/proof-trust/tmp"
-    scratch.mkdir(parents=True, exist_ok=True)
-    env["TMPDIR"] = str(scratch)
-    project = ROOT / "integration/talos"
-    # Refresh the dependency cone before forcing the audit itself. This prevents
-    # a stale audit olean from turning the gate green without checking endpoints.
-    subprocess.run(
-        ["lake", "build", "FirTalos.TrustAudit"], cwd=project, env=env, check=True
-    )
-    return subprocess.run(
-        ["lake", "env", "lean", "FirTalos/TrustAudit.lean"], cwd=project, env=env
-    ).returncode
+    return audit_compiled(ROOT)
 
 
 if __name__ == "__main__":

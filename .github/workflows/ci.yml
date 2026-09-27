@@ -73,3 +73,19 @@ jobs:
           lake -d .deps/talos-434/project exe cache get
       - name: Check proofs and exact trust inventory
         run: make talos-check
+      - name: Fetch immutable lean-zip proof input
+        uses: actions/checkout@v6
+        with:
+          repository: ejgallego/lean-zip
+          ref: 273d0d6cd9cab77c7f3489b0b0b1f6e543315d21
+          path: .deps/retained-inputs/lean-zip
+          persist-credentials: false
+      - name: Fetch immutable zip-common proof input
+        uses: actions/checkout@v6
+        with:
+          repository: ejgallego/lean-zip-common
+          ref: 4425bab1f9522307d77e8d485bc536149ba31c36
+          path: .deps/retained-inputs/zip-common
+          persist-credentials: false
+      - name: Check retained initializer and exact consumer trust inventories
+        run: make retained-initializer-check

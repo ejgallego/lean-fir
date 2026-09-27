@@ -19,14 +19,14 @@ needed to state same-phase and lowering theorems, and two executable
 LCNF-to-WebAssembly paths: FIR's symbolic backend and Lean's direct C emitter
 followed by an optimized LLVM WebAssembly backend.
 
-The repository is pinned to Lean 4.33.0. The proof campaign works backwards
+The repository is pinned to Lean 4.34.0-rc2. The proof campaign works backwards
 from final impure LCNF while the Wasm backend develops against the same
 interpreter and semantic ABI. See `docs/pass-correctness-plan.md` for the
 implemented foundation and the remaining proof order.
 
 ## Requirements
 
-- Lean toolchain: `leanprover/lean4:v4.33.0`
+- Lean toolchain: `leanprover/lean4:v4.34.0-rc2`
 - Lake from the pinned Lean toolchain
 - `rg` for the placeholder scan
 - Python 3 for the validation orchestrator
@@ -51,11 +51,19 @@ ignored mailbox. Use `make mailbox-check`, `make mailbox-list`, and
 `make mailbox-test`; see `docs/MAILBOX_PROTOCOL.md`. Tracked lane status and
 integration decisions remain under `coordination/`.
 
-The optional Talos bridge is deliberately outside the default dependency
-graph. After cloning its pinned revision with `make talos-setup`, validate the
-proofs and adapter with `make talos-check`. That gate also forces elaboration
-of the exact compiled axiom inventories for the maintained theorem endpoints before
-recording a successful build receipt; `make proof-trust` runs the audit alone.
+The optional Talos bridge is outside the default dependency graph.
+`make talos-check` prepares the pinned Lean 4.34 overlay, builds the proofs and
+adapter, and forces direct elaboration of the exact compiled axiom inventories.
+`make proof-trust` prepares the same project and runs the audit independently.
+Neither command issues a persistent acceptance receipt.
+
+CI also runs `make retained-initializer-check` against immutable lean-zip and
+zip-common source commits. This reconstructs the checked compiler input,
+checks readback in a fresh process, and directly elaborates the retained proof
+consumers and their exact axiom inventories. Locally, pass
+`LEAN_ZIP_REPO=/path/to/lean-zip ZIP_COMMON_REPO=/path/to/zip-common` to that
+target; both repositories must contain the commits pinned in the
+[retained-input recipe](Fir/Compiler/LCNF/README.md#retained-lean-zip-rc2-nomination).
 
 Trust remains an explicit research obligation. The source registry contains
 one textual upstream alpha-equivalence bridge axiom. Separately, the two
@@ -63,9 +71,12 @@ public W6 source-invariant export theorems each depend on 57 generated axioms
 plus three standard logical axioms. These dependencies are pinned as existing
 debt, not removed or approved by a green gate. See the
 [compiled trust audit](integration/talos/W6-OBSERVABLE-CONTRACT-AND-TRUST.md).
-The destination includes represented terminal results and semantic faults as
-well as finite event prefixes; the closed compiler-derived result theorem is
-still pending.
+The rooted-return theorem now derives executable successful return at the
+export's exact result ABI from source termination. It still assumes general
+current-step admission, address-space safety, and the entry runtime relation.
+Closing compiler admission, general fault correspondence, and resident linking
+remain separate obligations; finite event-prefix agreement alone does not
+constrain the terminal result.
 
 The repository has two native Wasm artifact generators. The FIR-native path
 under `integration/talos/artifact` exposes the symbolic lowering and

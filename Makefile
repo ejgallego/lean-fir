@@ -19,6 +19,9 @@ FIR_VERBOSE ?= 0
 FIR_TOOL_LOG_DIR ?= $(CURDIR)/.deps/tool-logs
 export FIR_VERBOSE FIR_TOOL_LOG_DIR
 
+LEAN_ZIP_REPO ?= $(CURDIR)/.deps/retained-inputs/lean-zip
+ZIP_COMMON_REPO ?= $(CURDIR)/.deps/retained-inputs/zip-common
+
 .PHONY: help build examples scalar-surface-check inspect validate-harness validate validate-direct-lcnf validate-v8 validate-source-from-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions proof-trust-sources proof-trust-tests proof-trust no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
 
 help:
@@ -115,7 +118,7 @@ proof-trust-sources:
 proof-trust-tests:
 	@bash scripts/quiet-run.sh proof-trust-tests -- python3 integration/talos/test_proof_trust.py
 
-# Requires talos-setup; forces elaboration of the exact compiled inventories.
+# Prepares the official Talos project and forces its compiled inventory audit.
 proof-trust:
 	@bash scripts/quiet-run.sh proof-trust -- python3 integration/talos/check-proof-trust.py
 
@@ -176,6 +179,10 @@ talos-setup:
 
 talos-check:
 	@bash scripts/quiet-run.sh talos-check -- bash tooling/talos-434/check.sh
+
+.PHONY: retained-initializer-check
+retained-initializer-check:
+	@bash scripts/quiet-run.sh retained-initializer-check -- bash integration/talos/retained-initializer/check.sh "$(LEAN_ZIP_REPO)" "$(ZIP_COMMON_REPO)"
 
 clean:
 	@bash scripts/quiet-run.sh clean -- lake clean
