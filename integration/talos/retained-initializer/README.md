@@ -95,8 +95,14 @@ helper execution remains to be proved. The generic
 `mkEmptyExternalCallEvidence_of_budget` now derives concrete empty-allocation
 call evidence from headroom, request refinement and an installed-handler law,
 using this source contract. It derives allocation success and the full response
-relation, not the installed law itself. Fresh tagged-push evidence and target
-callee execution remain next. No whole lean-zip or Wasm artifact
+relation, not the installed law itself.
+`pushFreshTaggedExternalCallEvidence` now supplies the matching fresh/non-full
+push boundary, deriving mutation and exact singleton result while preserving
+the witness and budget. It accepts any represented tagged payload and derives
+the Array descriptor from heap refinement. Its installed-handler branch equation
+also remains explicit. Composing the generated target callee prefix is next;
+neither primitive endpoint by itself executes the initializer's generated code.
+No whole lean-zip or Wasm artifact
 correctness follows from this source endpoint.
 
 ## Reproduce

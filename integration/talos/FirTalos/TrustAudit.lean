@@ -13,6 +13,7 @@ import FirTalos.ConcreteSourceValidationTests
 import FirTalos.ConcreteLazyPublicationTests
 import FirTalos.ConcreteArrayExternal
 import FirTalos.ConcreteArrayExternalEvidence
+import FirTalos.ConcreteArrayPushExternalEvidence
 import FirTalos.ConcreteRetainedTransports
 import FirTalos.ConcreteRetainedPublication
 import FirTalos.ConcretePublicationBind

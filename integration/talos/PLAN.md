@@ -189,6 +189,18 @@ host boundary, not execution of W7's emitted helper or a JavaScript handler.
 The four endpoints retain only the existing byte-assembly native debt in
 addition to standard Lean axioms. No central admission change is made.
 
+**Fresh tagged Array push evidence (W6, 2026-09-27).**
+`pushFreshTaggedExternalCallEvidence` constructs the same call-evidence record
+for a fresh empty Array with spare capacity. It accepts any represented tagged
+payload, including promoted representations already present in the witness;
+there is no small-tag restriction. The source heap shape and live-heap relation
+derive the Array descriptor. The concrete in-place mutation, exact singleton
+result, caller transports and one appended event are derived, with unchanged
+witness, world, heap cursor and address-space budget. Source primitive semantics,
+request/payload representation, receiver mapping and the installed branch
+equation (`ArrayPushInPlaceHandlerAt`) remain explicit. Shared/full receivers,
+copy/grow dispatch and emitted-helper execution are not covered by this result.
+
 ### Next meaningful proof result
 
 Connect the checked singleton-Array initializer to heap-result cache
@@ -201,12 +213,16 @@ graph-separation invariant. The generic host rule and actual-body instance
 are available; the central dispatcher has not been broadened. Do not simply
 delete the object/tobject exclusions before proving that rule's closure.
 
-In parallel proof order, establish the matching external evidence for fresh,
-non-full tagged `Array.push`, then compose the generated target callee prefix.
-Empty allocation's evidence constructor is now available. Keep installed
+In parallel proof order, compose the generated target callee prefix using the
+empty-allocation and fresh tagged-push external evidence constructors. Keep installed
 handler equations explicit; their connection to emitted resident helpers is
 a separate implementation/linking obligation. Keep request representation,
 physical result and historical-frame obligations visible until derived.
+The next concrete control boundary is `ConcreteStructuredExternalCallReadyFocus.advance_call`:
+its `PureExternalCallShape` still packages a Nat/Int/scalar result classification.
+Factor the compiler/source call-control facts from that classification so the
+already generic `ConcreteExternalCallEvidence` can drive Array calls too; do not
+pretend the new primitive evidence automatically broadens central admission.
 The source input is the delivered RC2
 `RetainedRC2.program`, reproduced from exact source Git objects; no copied AST,
 historical 4.33 olean or substituted capture is a proof input. This remains an
