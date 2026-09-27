@@ -32,8 +32,9 @@ seven-step generated publication suffix, now composed through destination bind
 to the ordinary code-core relation. The validated non-heap lazy-return path
 consumes the common restoration and executable suffix; central heap lazy-miss
 admission remains separate. Empty-Array host-call evidence is now derived from
-address-space budget under an explicit installed-handler equation; it does not
-prove execution of W7's emitted helper.
+address-space budget, and fresh tagged in-place push evidence is derived under
+an explicit installed-handler equation. Neither result proves execution of
+W7's emitted helper.
 Production external refinement, target callee execution, and full
 `compressStored` closure remain open. Other parked proof work requires an
 explicit resume. See `docs/validation.md`.
@@ -194,9 +195,29 @@ claimed. Root's `make check`, `make talos-setup`, `make talos-check`, and direct
 RC2 TrustAudit (281 endpoints) pass. The retained source consumer was unchanged
 and its 14 audits remain predecessor evidence, not a fresh claim here. Four
 new endpoints retain only the existing `assembleByte32` native debt; no new
-axiom. Next: fresh non-full tagged `Array.push` evidence and target initializer
-prefix composition. Broader handler installation, heap-miss admission and
-encoded-artifact correctness remain separate.
+axiom. At that checkpoint, fresh non-full tagged `Array.push` evidence and
+target initializer-prefix composition remained. Broader handler installation,
+heap-miss admission and encoded-artifact correctness remain separate.
+
+The fresh tagged-push successor `aa33f5e13` is also landed. The exact producer
+commit was based on `307529d8f`; the root copy `a696ae515` applies the identical
+stable patch on top of the intervening board-only commit `5a61385c5`.
+`arrayDescriptor_of_mapped` derives an existing Array's descriptor from source
+shape and live-heap refinement. `pushFreshTaggedExternalCallEvidence` handles a
+fresh empty Array with spare capacity and any represented tagged payload,
+deriving in-place mutation, exact singleton result, ordinary/capacity
+transports, unchanged witness/world/cursor/budget, and the one appended
+`Array.push` event. The source primitive/request contract, receiver mapping,
+spare capacity, and `ArrayPushInPlaceHandlerAt` remain premises. This does not
+prove emitted-helper execution or general/full Array push semantics, and does
+not broaden central admission. Root's `make check`, `make talos-setup`,
+`make talos-check`, and direct RC2 TrustAudit (283 endpoints) pass. The
+unchanged retained source consumer's 14 audits remain predecessor evidence;
+no new consumer run is claimed. Descriptor extraction uses standard axioms;
+push keeps only existing `assembleByte32` debt. Next: factor compiler/source
+call-control facts out of `PureExternalCallShape` so `advance_call` can consume
+this evidence, then compose the generated initializer prefix. Installed-helper
+linking and broader heap-miss admission remain separate.
 
 ## Integration queue settled (2026-09-09)
 
