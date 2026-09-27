@@ -800,17 +800,14 @@ theorem body_publishes_and_resumesCaller
 /-- A real cold-cache invocation enters the checked initializer, executes its
 body, publishes the fresh result, and resumes the saved caller. No body-entry
 state, installed stack, callee frame, execution path or post-body scope is a
-premise. The five binding kinds are derived from production lowering; Array
-host contracts remain explicit. The generated declaration row is ordinary
-production compiler evidence. -/
+premise. The generated declaration row and five binding kinds are derived from
+production lowering; Array host contracts remain explicit. -/
 theorem lazyMiss_publishes_and_resumesCaller
-    {callerContext context : Context} {callerCode : LCNF.Code .impure}
-    {sourceModule : Fir.Wasm.Module} {callerFunction sourceFunction : Fir.Wasm.Function}
+    {callerContext : Context} {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {callerFunction : Fir.Wasm.Function}
     {targetModule : AdaptedModule} {hosts : ResolvedHosts}
     (callerSpec : ConcreteSupportedFunction RetainedRC2.program callerContext callerCode
       sourceModule callerFunction targetModule hosts)
-    (row : ConcreteGeneratedInternalDeclaration RetainedRC2.program RetainedRC2.initializer
-      context initializerBody sourceModule sourceFunction targetModule)
     {externals : ExternalImpl} (contract : FreshArrayExternalContract externals)
     {outerRuntime runtime : RuntimeState} {outerStore store : Wasm.Store Host}
     {outerWitness witness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
@@ -855,6 +852,16 @@ theorem lazyMiss_publishes_and_resumesCaller
         nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
       sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
       targetAfter.frames = frames := by
+  have caches := generated.cacheNames.trans
+    (LazyCacheGeneratedEnvironment.initializers_of_lower
+      (LazyCacheGeneratedEnvironment.lower_of_lowerSupported callerSpec.lowered))
+  have bodyEq : RetainedRC2.initializer.value = .code initializerBody := rfl
+  have classified : abiKind? RetainedRC2.initializer.type = .ok (some .object) :=
+    mkEmptyAbiTypes.2.2
+  obtain ⟨context, sourceFunction, _contexts, ⟨row⟩⟩ :=
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
+      callerSpec.contextProgram caches callerSpec.programNamesUnique callerSpec.lowered
+      callerSpec.adapted RetainedRC2.initializer.findDecl bodyEq classified
   obtain ⟨scalarKind, capacityKind, arrayKind, boxKind, resultKind⟩ :=
     initializer_bindingKinds row callerSpec.programNamesUnique callerSpec.lowered
   obtain ⟨sourceEntry, targetEntry, sourceStep, targetPath, focus, bodyFrame,
@@ -868,6 +875,67 @@ theorem lazyMiss_publishes_and_resumesCaller
       sourceStack targetStack ready.continuationAdapted ready.resultFound ready.resultKindAt tail
   exact ⟨3 + steps, nextStore, nextWitness, resumedLocals, sourceAfter, targetAfter,
     .step sourceStep bodySteps, targetPath.trans bodyPath, core, joins, sourceFramesEq, targetFramesEq⟩
+
+/-- Execute the caller's actual lazy-call let, including its production staging,
+the checked initializer, publication and destination binding. The callee package,
+local kinds, numeric indices, target suffix and source/target paths are derived.
+The compiler-supported call and module-wide cache contract remain explicit. -/
+theorem let_publishes_and_resumesCaller
+    {callerContext : Context} {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {callerFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (callerSpec : ConcreteSupportedFunction RetainedRC2.program callerContext callerCode
+      sourceModule callerFunction targetModule hosts)
+    {externals : ExternalImpl} (contract : FreshArrayExternalContract externals)
+    {outerRuntime runtime : RuntimeState} {outerStore store : Wasm.Store Host}
+    {outerWitness witness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
+    {callerEnv : Env} {callerLocals : Wasm.Locals} {labels : LabelContext}
+    {code : Wasm.Program} {source : MachineState} {target : StructuredWasmState Host}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {functionResult : AbiKind} {callerExpectedResult : Option AbiKind}
+    (related : ConcreteStructuredCodeFocus callerContext sourceModule callerFunction labels
+      runtime callerEnv (.let decl continuation) store callerLocals code witness source target)
+    (call : LazyCacheCallSupported callerContext decl RetainedRC2.initializer.name
+      RetainedRC2.initializer .object)
+    (generated : LazyCacheGeneratedEnvironment callerContext sourceModule)
+    (scope : ConcreteStructuredResourceScope callerContext sourceModule callerFunction externals
+      outerRuntime outerStore outerWitness facts bytes runtime callerEnv store callerLocals witness)
+    (empty : findGlobal? runtime.globals RetainedRC2.initializer.name = none)
+    (emptyHandler : ∀ request,
+      ConcreteExternalRequestRel witness request
+        (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
+      EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
+    (pushHandler : ∀ before nextWitness request address word,
+      ConcreteRuntimeRel before nextWitness (afterMkEmpty runtime) →
+      nextWitness.locations.lookup? runtime.nextLocation = some address →
+      ValueRel nextWitness .tobject (.word32 word) (.object (.tagged 0)) →
+      request.name = `Array.push →
+      request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
+      ArrayPushInPlaceHandlerAt store.host.externals request before address word)
+    (fits : residentArrayAllocationBytes 5 ≤ bytes)
+    (tail : ConcreteStructuredSuspendedResourceStack externals RetainedRC2.program
+      outerRuntime outerStore outerWitness functionResult callerExpectedResult
+      source.frames target.frames) :
+    ∃ targetSteps nextStore nextWitness resumedLocals rest sourceAfter targetAfter,
+      ExecSteps externals 14 source sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetSteps target targetAfter ∧
+      ConcreteStructuredCodeCoreRel RetainedRC2.program callerContext sourceModule callerFunction
+        externals labels outerRuntime outerStore outerWitness functionResult callerExpectedResult
+        (eraseReuseCapacityFact facts decl.fvarId) (bytes - residentArrayAllocationBytes 5)
+        ((afterPush runtime).setGlobal RetainedRC2.initializer.name (.object (.heap runtime.nextLocation)))
+        (bind callerEnv decl.fvarId (.object (.heap runtime.nextLocation))) continuation
+        nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
+      sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames := by
+  obtain ⟨staged, cacheIndex, declarationId, cacheSetId, resultIndex, rest, step, ready⟩ :=
+    related.stageLazyCall call generated callerSpec.localsAligned
+  obtain ⟨steps, nextStore, nextWitness, resumedLocals, sourceAfter, targetAfter,
+      sourceSteps, targetPath, core, joins, sourceFrames, targetFrames⟩ :=
+    lazyMiss_publishes_and_resumesCaller callerSpec contract ready scope empty
+      emptyHandler pushHandler fits tail
+  exact ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
+    .step step sourceSteps, targetPath, core, joins, sourceFrames, targetFrames⟩
 
 end
 
@@ -895,7 +963,8 @@ run_cmd do
       "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
   for endpoint in #[`RetainedInitializer.literals_mkEmpty_box, `RetainedInitializer.body_returns,
       `RetainedInitializer.body_publishes_and_resumesCaller,
-      `RetainedInitializer.lazyMiss_publishes_and_resumesCaller] do
+      `RetainedInitializer.lazyMiss_publishes_and_resumesCaller,
+      `RetainedInitializer.let_publishes_and_resumesCaller] do
     FirTalos.TrustAudit.check endpoint
       (FirTalos.TrustAudit.standardAxioms ++ #[
         "RetainedInitializer.literalAbiTypes._native.native_decide.ax_1_8",

@@ -169,8 +169,9 @@ whole matching target path back to caller code. The reusable `enterBody` rule
 derives the initial body focus, empty callee resource frame and both installed
 continuation stacks in one source / three target steps. It works for heap
 results without using or weakening the central restricted lazy-stack rule.
-The callee's supported-function package is inherited from the caller's pipeline
-and the generated declaration row, not supplied independently.
+The generated declaration row is now selected internally from the caller's
+supported pipeline and checked initializer declaration. The callee's
+supported-function package is inherited from that row, not supplied independently.
 
 `initializer_bindingKinds` now derives all five binding-kind lookups from the
 actual production collection/refinement equations. The reusable
@@ -179,13 +180,20 @@ for the same generated function using compiler-derived name uniqueness. The
 cold-cache theorem consumes this result internally: none of the five lookups
 is a caller premise. No new native evaluation or axiom is introduced.
 
-Remaining premises are the supported caller and production declaration row,
-staged-call focus, saved caller scope/stack,
-empty cache, source primitive contracts, installed handler laws and finite
-headroom. No callee entry state, callee frame, installed stack, post-body scope
-or execution path is assumed. The next static connection is to construct the
-initializer's generated declaration row internally from the supported pipeline,
-then connect the staged invocation back to the caller's source let.
+`let_publishes_and_resumesCaller` additionally starts at the caller's actual
+source let. The reusable `stageLazyCall` derives the source staging step and
+recovers all numeric cache/call/destination indices and the target suffix from
+compilation/adaptation. The complete theorem derives fourteen source steps and
+matching Wasm execution to ordinary caller code, restoring the original joins
+and continuation stacks. No staging step, invocation focus, generated callee
+row, callee frame, installed stack, post-body scope or execution path is assumed.
+
+Remaining premises are the supported caller, current let focus, static
+`LazyCacheCallSupported` and module-wide `LazyCacheGeneratedEnvironment`, saved
+caller scope/stack, empty cache, source primitive contracts, installed handler
+laws and finite headroom. The next admission connection is to derive the
+call-site support from production validation at the consuming caller let;
+installed Array-handler conformance remains a separate runtime obligation.
 Central heap-miss admission, resident linking and encoded-artifact correctness
 remain separate; this is not a theorem for the whole lean-zip application.
 
@@ -223,7 +231,7 @@ The body-prefix endpoint additionally records one closed native check for the
 UInt8/tagged literal ABI classifications. The full body additionally inherits
 the existing seven scalar-box policy comparison axioms and UInt8 result-kind
 comparison axiom; this slice adds no native evaluation. The maintained gate
-audits all eight retained target/static endpoints independently (twenty-two consumer
+audits all nine retained target/static endpoints independently (twenty-three consumer
 endpoints including the fourteen source/publication endpoints).
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are

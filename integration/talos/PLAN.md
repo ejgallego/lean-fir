@@ -66,7 +66,7 @@ bytes, or the complete lean-zip application.
 | Static supported-export assembly | `exists_ofSupportedPipeline` and pipeline alignment/uniqueness lemmas | Apply to the same checked captured program; closure-flow condition remains visible |
 | Saved-caller return/pop | `lazyMiss_publishes_and_resumesCaller` restores the caller scope/tail after the actual initializer's full target execution | General heap-result lazy-miss admission |
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
-| First actual lean-zip initializer | `lazyMiss_publishes_and_resumesCaller`: thirteen source steps and whole matching target path from staged cold-cache invocation to caller code; all five binding kinds derived | Construct generated callee row internally and connect caller let; installed Array handlers, central admission, linking/encoding |
+| First actual lean-zip initializer | `let_publishes_and_resumesCaller`: fourteen source steps and whole matching target path from caller source let to resumed code; callee row and all five binding kinds derived | Call-site admission from validation; installed Array handlers, central admission, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
 | Fresh heap cache publication | `ConcreteStructuredResourceScope.publishFreshCache` restores the full caller scope; the checked initializer composition derives its publication input and graph shape | Wire construction provenance into central lazy-miss admission |
 | Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
@@ -278,10 +278,16 @@ The five compiler binding-kind rows are now derived by `initializer_bindingKinds
 from production collection and refinement of the checked body. The reusable
 `loweredLocals` theorem identifies the same generated function's canonical
 lowering record using name uniqueness, with no extra layout certificate.
-Construct the generated callee row internally from the pipeline next, then
-connect the caller let to the staged invocation. Staged caller focus,
-caller resource scope/tail, cold cache, primitive/installed-handler contracts
-and finite headroom remain explicit. No whole-export or artifact claim follows.
+The generated callee row is now constructed internally from the pipeline.
+`let_publishes_and_resumesCaller` also composes the actual caller let's staging
+step, deriving fourteen source transitions and the complete matching Wasm
+path to caller code. Numeric indices and the residual target suffix are
+recovered from compilation/adaptation, not supplied. Current let focus,
+`LazyCacheCallSupported`, module-wide cache alignment, caller resource
+scope/tail, cold cache, primitive/installed-handler contracts and finite
+headroom remain explicit. Next derive call-site support from production
+validation; runtime handler conformance is a separate obligation. No
+whole-export or artifact claim follows.
 
 Connect the checked singleton-Array initializer to heap-result cache
 publication in the central relation. The body-level source execution and

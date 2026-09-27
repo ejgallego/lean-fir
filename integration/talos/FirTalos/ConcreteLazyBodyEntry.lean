@@ -4,6 +4,40 @@ namespace FirTalos.Concrete
 
 open Lean Fir.Wasm Fir.Wasm.Concrete Fir.LeanIR.Impure FirTalos.Correctness
 
+/-- Stage an actual lazy-call let without assuming its source transition.
+Production compilation/adaptation supplies the cache, call and destination
+indices and target suffix; the target itself stutters during this source step. -/
+theorem ConcreteStructuredCodeFocus.stageLazyCall
+    {context : Context} {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : LabelContext} {runtime : RuntimeState} {env : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {continuation : Lean.Compiler.LCNF.Code .impure}
+    {declaration : Name} {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
+    {kind : AbiKind} {store : Wasm.Store Host} {locals : Wasm.Locals}
+    {code : Wasm.Program} {witness : RefinementWitness}
+    {source : MachineState} {target : StructuredWasmState Host} {externals : ExternalImpl}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      runtime env (.let decl continuation) store locals code witness source target)
+    (call : LazyCacheCallSupported context decl declaration sourceDeclaration kind)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (aligned : LocalLayoutAligned context sourceFunction) :
+    ∃ sourceAfter cacheIndex declarationId cacheSetId resultIndex rest,
+      executeStep externals source = .next sourceAfter ∧
+      ConcreteStructuredLazyCallReadyFocus context sourceModule sourceFunction labels
+        call generated runtime env continuation source.joins source.frames store locals rest
+        target.frames witness cacheIndex declarationId cacheSetId resultIndex sourceAfter target := by
+  have valueEq : decl.value = .fap declaration #[] := by cases call; assumption
+  let staged : MachineState := {
+    source with
+      control := .invokeName declaration #[]
+      frames := .bind decl.fvarId continuation source.env source.joins :: source.frames }
+  have sourceStep : executeStep externals source = .next staged := by
+    simp [executeStep, coreStep, related.sourceControlEq, evalLetValue, valueEq,
+      evalArgs, Bind.bind, Except.bind, pure, Except.pure, pushBindFrame, staged]
+  obtain ⟨cacheIndex, declarationId, cacheSetId, resultIndex, rest, _, ready⟩ :=
+    related.advance_lazy_stage (module := default) (hostEnv := default)
+      call generated aligned sourceStep
+  exact ⟨staged, cacheIndex, declarationId, cacheSetId, resultIndex, rest, sourceStep, ready⟩
+
 /-- A generated internal row inherits the pipeline facts from any supported
 caller, not only an exported function. This is static compiler evidence. -/
 def ConcreteGeneratedInternalDeclaration.fromSupportedFunction
