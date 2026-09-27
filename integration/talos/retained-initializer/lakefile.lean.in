@@ -17,4 +17,5 @@ lean_lib LeanZipSource where
   leanOptions := #[⟨`compiler.postponeCompile, true⟩, ⟨`maxRecDepth, 8192⟩]
 lean_lib RetainedRC2
 lean_lib RetainedDeclarations
+lean_lib RetainedArrayCalls
 lean_lib RetainedInitializer

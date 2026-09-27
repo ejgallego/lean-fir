@@ -215,6 +215,21 @@ theorems delegate to the generic proofs; existing validated admission is retaine
 This opens the control interface for Array evidence, not automatic Array admission
 or an instantiated target initializer proof.
 
+**Actual captured mkEmpty call/bind (W6, 2026-09-27).**
+The generic external shape now separates actual argument kinds from declared
+parameter kinds, with directional `kindsRefine` evidence. `decodeRequest`
+transports the represented arguments to the declared signature without changing
+values. `advance_emptyArray_bind` derives the allocation call and destination
+bind, including witness extension and residual budget. The old pure dispatcher
+retains its previous exact-signature admission policy.
+`RetainedInitializer.mkEmpty_stage_call_bind` instantiates this with the checked
+initializer's actual `tagged -> tobject` capacity argument. Three source steps
+match the generated argument prefix plus call/bind and resume the actual captured
+continuation. The entry focus/local facts, source Array laws, installed-handler
+equation and headroom remain explicit. This is not export-entry execution or
+resident linking. Next connect literal entry and the following push, then carry
+the hereditary resource scope into the existing publication suffix.
+
 ### Next meaningful proof result
 
 Connect the checked singleton-Array initializer to heap-result cache

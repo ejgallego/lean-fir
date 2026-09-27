@@ -7798,6 +7798,8 @@ structure ExternalCallShape
   rawArgumentCode : List Fir.Wasm.Instruction
   argumentCode : List Fir.Wasm.Instruction
   argumentKinds : Array AbiKind
+  parameterKinds : Array AbiKind
+  argumentsRefine : Fir.Wasm.kindsRefine argumentKinds parameterKinds = true
   semanticArgs : Array Value
   declaration : Lean.Compiler.LCNF.Decl .impure
   resultKind : AbiKind
@@ -7813,11 +7815,11 @@ structure ExternalCallShape
     Fir.Wasm.compileDeclarationArguments context declaration args =
       .ok (argumentCode, argumentKinds)
   argumentsEvaluated : evalArgs sourceEnv args = .ok semanticArgs
-  signature :
+  parameterSignature :
     ExternalTypes.signature {
       params := declaration.params.map (·.type)
       result := declaration.type } =
-        .ok { params := argumentKinds, results := #[resultKind] }
+        .ok { params := parameterKinds, results := #[resultKind] }
   resultCompiled :
     Fir.Wasm.getLocal context decl.fvarId =
       .ok (.localGet decl.fvarId, resultKind)
@@ -7842,9 +7844,23 @@ structure PureExternalCallShape
     extends ExternalCallShape context externals sourceRuntime sourceEnv decl
       nextRuntime sourceValue where
   resultShape : PureExternalResultShape
+  signature :
+    ExternalTypes.signature {
+      params := declaration.params.map (·.type)
+      result := declaration.type } =
+        .ok { params := argumentKinds, results := #[resultKind] }
   resultKindEq : resultKind = resultShape.resultKind
   responseEq : response = resultShape.response sourceRuntime
   stepCostEq : stepCost = resultShape.cost
+
+private theorem kindsRefine_self (kinds : Array AbiKind) :
+    Fir.Wasm.kindsRefine kinds kinds = true := by
+  simp only [Fir.Wasm.kindsRefine, beq_self_eq_true, Bool.true_and]
+  rw [Array.all_eq_true]
+  intro i hi
+  have bound : i < kinds.size := by simpa using hi
+  simp only [Array.getElem_zip]
+  cases kinds[i] <;> rfl
 
 /-- Forget only the operation-specific result representation while retaining
 all facts needed to stage a pure external request.  This is a projection from
@@ -7877,6 +7893,9 @@ theorem PureExternalSupported.callShapeExists
       semanticArgs
       declaration
       resultShape := .integer value
+      parameterKinds := argumentKinds
+      argumentsRefine := kindsRefine_self argumentKinds
+      parameterSignature := signature
       resultKind := .tobject
       response := semanticIntegerExternalResponse sourceRuntime value
       valueEq
@@ -7911,6 +7930,9 @@ theorem PureExternalSupported.callShapeExists
       semanticArgs
       declaration
       resultShape := .natural value
+      parameterKinds := argumentKinds
+      argumentsRefine := kindsRefine_self argumentKinds
+      parameterSignature := signature
       resultKind := .tobject
       response := semanticNaturalExternalResponse sourceRuntime value
       valueEq
@@ -7945,6 +7967,9 @@ theorem PureExternalSupported.callShapeExists
       semanticArgs
       declaration
       resultShape := .scalar value
+      parameterKinds := argumentKinds
+      argumentsRefine := kindsRefine_self argumentKinds
+      parameterSignature := signature
       resultKind := value.kind.abiKind
       response := semanticScalarExternalResponse sourceRuntime value
       valueEq
@@ -8049,9 +8074,9 @@ structure ConcreteStructuredExternalCallControl
   operationName : operation.name = site.name
   operationMatches :
     ExternalOperationMatchesDeclaration operation site.declaration
-  operationSignature :
+  parameterSignature :
     operation.signature = {
-      params := site.argumentKinds
+      params := site.parameterKinds
       results := #[site.resultKind] }
   resultSignature : operation.signature.results = #[resolvedResultKind]
   imported : targetModule.wasmModule.imports[callIndex]? = some targetImport
@@ -8104,6 +8129,8 @@ structure ConcreteStructuredExternalCallReadyFocus
   supported :
     PureExternalSupported context externals sourceRuntime sourceEnv decl
       continuation nextRuntime sourceValue stepCost
+  operationSignature :
+    operation.signature = { params := site.argumentKinds, results := #[site.resultKind] }
 
 theorem ConcreteStructuredExternalCallReadyFocus.observes
     {program : Fir.LeanIR.ImpureProgram}
@@ -8224,11 +8251,11 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage_of_shape
       operationMatches, resultSignature, imported, inBounds, contracted,
       parameterCount, resultCount⟩ :=
     spec.externalCall declarationFound site.declarationExternal callFound
-  have operationSignature :
+  have parameterSignature :
       operation.signature = {
-        params := site.argumentKinds
+        params := site.parameterKinds
         results := #[site.resultKind] } := by
-    exact Except.ok.inj (operationMatches.signature.symm.trans site.signature)
+    exact Except.ok.inj (operationMatches.signature.symm.trans site.parameterSignature)
   obtain ⟨physicalArgs, argumentsReady, _physicalLength,
       argumentsRelated⟩ :=
     constructorArgsReady_of_compileDeclarationArguments localsAligned
@@ -8301,7 +8328,7 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage_of_shape
       argumentsRelated
       operationName
       operationMatches
-      operationSignature
+      parameterSignature
       resultSignature
       imported
       inBounds
@@ -8362,7 +8389,9 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
     related.advance_external_stage_of_shape spec site.toExternalCallShape localsAligned
   exact ⟨site, args, operation, kind, imp, callIndex, resultIndex, argumentCode, rest,
     sourceAfter, targetAfter, sourceStep, targetPath, {
-      toConcreteStructuredExternalCallControl := control, supported }⟩
+      toConcreteStructuredExternalCallControl := control, supported
+      operationSignature := Except.ok.inj
+        (control.operationMatches.signature.symm.trans site.signature) }⟩
 
 /-- Runtime/resource evidence required to cross one resolved external import.
 This boundary is deliberately separate from compiler control: the three pure
@@ -8983,19 +9012,20 @@ theorem ConcreteStructuredExternalCallControl.advance_call
         callerJoins sourceFrames nextStore callerLocals callerRemainder
         targetRest targetFrames nextWitness site.resultKind physicalResult
         resultIndex sourceAfter targetAfter := by
+  have parameterArgs := related.argumentsRelated.ofKindsRefine site.argumentsRefine
   have resultKindEq : resolvedResultKind = site.resultKind := by
     have resultAt :=
       congrArg (fun results : Array AbiKind => results[0]?)
         related.resultSignature
     symm
-    simpa [related.operationSignature] using resultAt
+    simpa [related.parameterSignature] using resultAt
   have parameterCount' : targetImport.params.length = physicalArgs.length := by
     calc
       targetImport.params.length = operation.signature.params.size :=
         related.parameterCount
-      _ = site.argumentKinds.size := by simp [related.operationSignature]
+      _ = site.parameterKinds.size := by simp [related.parameterSignature]
       _ = physicalArgs.length := by
-        simpa using related.argumentsRelated.physicalLength.symm
+        simpa using parameterArgs.physicalLength.symm
   have declarationName : site.name = site.declaration.name :=
     related.operationName.symm.trans related.operationMatches.name
   have requestEq :
@@ -9013,9 +9043,9 @@ theorem ConcreteStructuredExternalCallControl.advance_call
         simp
       _ = operation.signature.params.size :=
         related.operationMatches.paramTypesSize
-      _ = site.argumentKinds.size := by simp [related.operationSignature]
+      _ = site.parameterKinds.size := by simp [related.parameterSignature]
       _ = site.semanticArgs.size := by
-        simpa using related.argumentsRelated.semanticLength.symm
+        simpa using parameterArgs.semanticLength.symm
   have semanticArgsNonempty : site.semanticArgs.isEmpty = false := by
     have argumentSize : site.semanticArgs.size = site.args.size := by
       calc

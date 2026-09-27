@@ -104,9 +104,22 @@ also remains explicit. Composing the generated target callee prefix is next;
 neither primitive endpoint by itself executes the initializer's generated code.
 The shared `ExternalCallShape`/`ConcreteStructuredExternalCallControl` staging
 and imported-call rules now accept those evidence constructors without forcing
-the result into a Nat/Int/scalar family. Instantiating their compiler/source
-equations for the checked initializer and composing destination binding remains
-to be done; the central admission policy has not changed.
+the result into a Nat/Int/scalar family. `RetainedInitializer.mkEmptyCallShape`
+in `RetainedArrayCalls.lean` now extracts the actual call from the
+checked initializer and proves its compiler/source equations. It distinguishes
+actual `#[erased, tagged]` arguments from declared `#[erased, tobject]` parameters:
+directional refinement justifies this widening, not physical-lane compatibility.
+
+`RetainedInitializer.mkEmpty_stage_call_bind` composes argument staging, concrete
+empty allocation and destination binding: three source transitions match the
+generated target prefix plus two target transitions. The conclusion is the
+actual captured continuation with a related Array result, restored control
+stacks and exact residual allocation budget. Required entry facts are a supported
+compiler function, local alignment/current code focus, the two local-kind lookups
+and capacity value. Source primitive laws, installed-handler conformance and
+headroom remain explicit. Literal-prefix entry, the following push, hereditary
+resource-scope transport and publication composition remain to be connected;
+the central admission policy has not changed.
 No whole lean-zip or Wasm artifact
 correctness follows from this source endpoint.
 
@@ -133,6 +146,13 @@ process, and forces direct batch elaboration with an exact per-endpoint axiom
 audit. The source endpoint inherits the seven **existing** native-evaluation
 axioms of `boxUsesTaggedRepresentation_boxedScalar`, due to upstream opaque
 expression comparison. It introduces no new native evaluation or axiom.
+The separate mkEmpty target consumer has its own exact audit: standard Lean
+axioms, the existing byte-assembly dependency, and one new native-evaluation
+dependency checking only the closed `Expr` ABI classifications for `lcErased`,
+`tobj` and `obj`. No execution or heap assertion is established by native
+evaluation. Its proof-only captured projections are noncomputable; the observed
+upstream executable-projection failure is recorded in
+`FIR-BUG-wasm-none-retained-projection-codegen`.
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are
 also in the ordinary Talos trust inventory.

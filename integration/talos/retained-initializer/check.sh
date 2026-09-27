@@ -26,11 +26,13 @@ cp Fir/Compiler/LCNF/retained-example/RetainedRC2.lean.in "$project/RetainedRC2.
 cp Fir/Compiler/LCNF/retained-example/Readback.lean.in "$project/Readback.lean"
 cp integration/talos/retained-initializer/lakefile.lean.in "$project/lakefile.lean"
 cp integration/talos/retained-initializer/RetainedDeclarations.lean "$project/RetainedDeclarations.lean"
+cp integration/talos/retained-initializer/RetainedArrayCalls.lean "$project/RetainedArrayCalls.lean"
 cp integration/talos/retained-initializer/RetainedInitializer.lean "$project/RetainedInitializer.lean"
 make talos-setup
 lake -d .deps/talos-434/project build FirTalos.ConcreteArrayExternal FirTalos.ConcretePublicationBind
 cd "$project"
-lake build RetainedInitializer
+lake build RetainedArrayCalls RetainedInitializer
 lake env lean Readback.lean
 # Force real batch elaboration of the consumer and its exact axiom inventory.
 lake env lean RetainedInitializer.lean
+lake env lean RetainedArrayCalls.lean
