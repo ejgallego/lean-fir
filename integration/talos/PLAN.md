@@ -201,6 +201,20 @@ request/payload representation, receiver mapping and the installed branch
 equation (`ArrayPushInPlaceHandlerAt`) remain explicit. Shared/full receivers,
 copy/grow dispatch and emitted-helper execution are not covered by this result.
 
+**Representation-independent external control (W6, 2026-09-27).**
+`ExternalCallShape` holds the compiler/declaration/source-call equations without
+a result-family classifier. `ConcreteStructuredExternalCallControl` retains
+the import alignment, represented arguments, caller state and continuation.
+`advance_external_stage_of_shape` constructs that relation by executing the
+generated argument prefix; `ConcreteStructuredExternalCallControl.advance_call`
+then uses arbitrary `ConcreteExternalCallEvidence` to match one source step with
+one target call step and reach the existing destination-bind relation. Neither
+requires `PureExternalSupported`, a Nat/Int/scalar result shape or a target path
+premise. The old pure shape/focus extend these common structures and their old
+theorems delegate to the generic proofs; existing validated admission is retained.
+This opens the control interface for Array evidence, not automatic Array admission
+or an instantiated target initializer proof.
+
 ### Next meaningful proof result
 
 Connect the checked singleton-Array initializer to heap-result cache
@@ -218,11 +232,11 @@ empty-allocation and fresh tagged-push external evidence constructors. Keep inst
 handler equations explicit; their connection to emitted resident helpers is
 a separate implementation/linking obligation. Keep request representation,
 physical result and historical-frame obligations visible until derived.
-The next concrete control boundary is `ConcreteStructuredExternalCallReadyFocus.advance_call`:
-its `PureExternalCallShape` still packages a Nat/Int/scalar result classification.
-Factor the compiler/source call-control facts from that classification so the
-already generic `ConcreteExternalCallEvidence` can drive Array calls too; do not
-pretend the new primitive evidence automatically broadens central admission.
+The common staging/call rules now accept the representation-independent
+`ExternalCallShape`. Next derive those shape facts from the checked initializer's
+actual declaration and lowering, connect its represented request to the Array
+evidence, and compose destination binding. The central pure-result dispatcher
+still uses its original admission policy; do not silently broaden it.
 The source input is the delivered RC2
 `RetainedRC2.program`, reproduced from exact source Git objects; no copied AST,
 historical 4.33 olean or substituted capture is a proof input. This remains an

@@ -213,6 +213,14 @@ def literalExampleNativeDebt : Array String := #[
   "FirTalos.Correctness.abiLiteralSupportedExport._native.native_decide.ax_1"]
 
 def endpointInventory : Array (Lean.Name × Array String) := #[
+  (`FirTalos.Concrete.ConcreteStructuredCodeFocus.advance_external_stage_of_shape,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredExternalCallControl.advance_call,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredCodeFocus.advance_external_stage,
+    standardAxioms),
+  (`FirTalos.Concrete.ConcreteStructuredExternalCallReadyFocus.advance_call,
+    standardAxioms),
   (`FirTalos.Concrete.arrayDescriptor_of_mapped, #["propext", "Quot.sound"]),
   (`FirTalos.Concrete.pushFreshTaggedExternalCallEvidence,
     standardAxioms ++ referenceCountNativeDebt),

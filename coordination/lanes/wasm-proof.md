@@ -9,17 +9,17 @@ owner: fir/wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: active
-base: 1054ca39d9aed69a32e3f1fc253798dd97bd82f7
-functional-head: 307529d8fd8ea1fcf63dfbfdf35e515c05f1eee8
+base: 598cfda1bf69520f755bcc60f6b55be8bcbdb69b
+functional-head: a696ae515
 contract-base: 2504f9f74817c38279e0ed3b7b0b8c12196a7c35
 clean-at-update: false
-slice: Derive fresh non-full tagged Array.push external evidence, with unchanged witness and allocation budget.
-files: integration/talos/FirTalos/ConcreteArrayPushExternalEvidence.lean; TrustAudit.lean; TrustInventory.lean; W6 plans/consumer README; this snapshot.
-contracts: W6 proof helpers only. No shared semantic or ABI change. Any represented tagged payload; Array descriptor, mutation, singleton response and all external evidence transports are derived. Installed branch law remains explicit; no emitted-helper execution or admission broadening is claimed.
-checks: Lean Beam checks pass; batch and full candidate gates are reported at the exact clean mailbox checkpoint.
-trust: 283 generic endpoints; push evidence retains existing byte-assembly debt and descriptor extraction uses only propext/Quot.sound. Checked-input consumer unchanged (fourteen audits at accepted publication/bind predecessor). No new axiom.
+slice: Factor representation-independent external staging and call execution out of the existing pure-family admission.
+files: integration/talos/FirTalos/ConcreteStructuredSimulation.lean; TrustInventory.lean; W6 plans/consumer README; this snapshot.
+contracts: W6 proof-side shape/focus factoring only. Generic rules accept ExternalCallShape and ConcreteExternalCallEvidence; old pure structures extend them and delegate to the common proofs. No shared semantic/ABI or central admission-policy change.
+checks: Beam full-file check, fresh batch central-module build, make check, Talos setup/check and retained reconstruction/readback/direct consumer pass. Rebased candidate gates are reported at the exact clean mailbox checkpoint.
+trust: 287 generic endpoints; two generic rules and two compatibility endpoints have only standard Lean axioms. Array evidence retains existing byte-assembly debt. No new axiom.
 bug-cards: None new. Existing retained-token ordinaryness and native-audit debt are unchanged.
 blockers: Production Array external refinement, target callee execution and central heap-result lazy-miss closure remain separate obligations.
-handoff: Empty-Array evidence 307529d8f stays immutable on W6-ROOT-20260927-006. Tagged push is a separate successor; exact clean candidate is published in the mailbox.
-next: Compose target callee prefix for RetainedRC2 using both Array evidence constructors. Retain/derive construction provenance and residual validation for central heap-miss admission. Handler installation/resident linking remain separate. No complete compressStored or encoded-byte theorem is claimed.
+handoff: Tagged-push aa33f5e13 landed patch-identically as a696ae515 on main 598cfda1b (ROOT-W6-20260927-008). Generic external-control factoring is a separate successor; exact clean candidate is published in the mailbox.
+next: Instantiate generic external shape/staging/call rules from checked RetainedRC2 declaration/lowering facts, connect both Array evidence constructors and destination binding. Retain construction provenance/residual validation for heap-miss admission. Handler installation/resident linking remain separate; no complete compressStored or encoded-byte theorem.
 ```

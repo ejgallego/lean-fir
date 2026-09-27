@@ -102,6 +102,11 @@ the witness and budget. It accepts any represented tagged payload and derives
 the Array descriptor from heap refinement. Its installed-handler branch equation
 also remains explicit. Composing the generated target callee prefix is next;
 neither primitive endpoint by itself executes the initializer's generated code.
+The shared `ExternalCallShape`/`ConcreteStructuredExternalCallControl` staging
+and imported-call rules now accept those evidence constructors without forcing
+the result into a Nat/Int/scalar family. Instantiating their compiler/source
+equations for the checked initializer and composing destination binding remains
+to be done; the central admission policy has not changed.
 No whole lean-zip or Wasm artifact
 correctness follows from this source endpoint.
 

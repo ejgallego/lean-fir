@@ -7785,15 +7785,14 @@ def PureExternalResultShape.cost : PureExternalResultShape → Nat
   | .natural value => naturalAllocationBytes value
   | .scalar _ => 0
 
-/-- Common compiler and source-semantic shape of every currently admitted
-pure external call.  Integer, natural, and scalar results differ only after
-the imported call executes; their first source step and generated argument
-prefix have this exact shared boundary. -/
-structure PureExternalCallShape
+/-- Compiler and source-semantic facts for a non-nullary external call,
+independent of the response representation and allocation-cost classifier.
+Concrete response correctness is supplied separately by external-call evidence. -/
+structure ExternalCallShape
     (context : Fir.Wasm.Context) (externals : ExternalImpl)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (decl : Lean.Compiler.LCNF.LetDecl .impure)
-    (nextRuntime : RuntimeState) (sourceValue : Value) (stepCost : Nat) where
+    (nextRuntime : RuntimeState) (sourceValue : Value) where
   name : Lean.Name
   args : Array (Lean.Compiler.LCNF.Arg .impure)
   rawArgumentCode : List Fir.Wasm.Instruction
@@ -7801,7 +7800,6 @@ structure PureExternalCallShape
   argumentKinds : Array AbiKind
   semanticArgs : Array Value
   declaration : Lean.Compiler.LCNF.Decl .impure
-  resultShape : PureExternalResultShape
   resultKind : AbiKind
   response : ExternalResponse
   valueEq : decl.value = .fap name args
@@ -7832,6 +7830,18 @@ structure PureExternalCallShape
         (declarationExternalRequest declaration semanticArgs) sourceRuntime
         response
   sourceValueEq : sourceValue = response.value
+
+/-- The existing pure admission policy extends the representation-independent
+call facts with its Nat/Int/scalar result family and exact allocation cost.
+This factoring does not admit any additional calls into the central dispatcher. -/
+structure PureExternalCallShape
+    (context : Fir.Wasm.Context) (externals : ExternalImpl)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (nextRuntime : RuntimeState) (sourceValue : Value) (stepCost : Nat)
+    extends ExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue where
+  resultShape : PureExternalResultShape
   resultKindEq : resultKind = resultShape.resultKind
   responseEq : response = resultShape.response sourceRuntime
   stepCostEq : stepCost = resultShape.cost
@@ -7970,12 +7980,12 @@ noncomputable def PureExternalSupported.callShape
       nextRuntime sourceValue stepCost :=
   Classical.choice supported.callShapeExists
 
-/-- Intermediate relation after the source has staged a pure external request
+/-- Intermediate relation after the source has staged an external request
 and the generated target has evaluated its argument prefix.  Both machines
 are poised at the same resolved imported call.  The static import contract is
 retained so the next source step can be matched by one target imported-call
 step without rediscovering lowering or resolver facts. -/
-structure ConcreteStructuredExternalCallReadyFocus
+structure ConcreteStructuredExternalCallControl
     (program : Fir.LeanIR.ImpureProgram)
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
@@ -7984,10 +7994,10 @@ structure ConcreteStructuredExternalCallReadyFocus
     (hosts : ResolvedHosts)
     (externals : ExternalImpl)
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
-    {sourceValue : Value} {stepCost : Nat}
+    {sourceValue : Value}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
-    (site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
-      nextRuntime sourceValue stepCost)
+    (site : ExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue)
     (operation : ExternalOperation)
     (resolvedResultKind : AbiKind)
     (targetImport : Wasm.ImportDecl)
@@ -8013,9 +8023,6 @@ structure ConcreteStructuredExternalCallReadyFocus
   sourceFramesEq :
     source.frames =
       .bind decl.fvarId continuation sourceEnv callerJoins :: sourceFrames
-  supported :
-    PureExternalSupported context externals sourceRuntime sourceEnv decl
-      continuation nextRuntime sourceValue stepCost
   targetStoreEq : target.store = targetStore
   targetControlEq :
     target.control = .running
@@ -8055,6 +8062,48 @@ structure ConcreteStructuredExternalCallReadyFocus
   hostsSatisfy : hosts.env.Satisfies targetModule.wasmModule hosts.spec
   parameterCount : targetImport.params.length = operation.signature.params.size
   resultCount : targetImport.results.length = 1
+
+/-- Compatibility layer for the currently admitted pure result families.
+The common call-control relation carries no family restriction; this layer
+retains the existing admission premise used by the validated dispatcher. -/
+structure ConcreteStructuredExternalCallReadyFocus
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : ExternalImpl)
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {stepCost : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    (site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost)
+    (operation : ExternalOperation)
+    (resolvedResultKind : AbiKind)
+    (targetImport : Wasm.ImportDecl)
+    (labels : LabelContext)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (callerJoins : JoinEnv)
+    (sourceFrames : List Frame)
+    (targetStore : Wasm.Store Host)
+    (callerLocals : Wasm.Locals)
+    (callerRemainder : List Wasm.Value)
+    (targetRest : Wasm.Program)
+    (targetFrames : List StructuredWasmFrame)
+    (witness : RefinementWitness)
+    (physicalArgs : List Wasm.Value)
+    (callIndex resultIndex : Nat)
+    (source : MachineState)
+    (target : StructuredWasmState Host)
+    extends ConcreteStructuredExternalCallControl program context
+      sourceModule sourceFunction targetModule hosts externals site.toExternalCallShape
+      operation resolvedResultKind targetImport labels continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest targetFrames
+      witness physicalArgs callIndex resultIndex source target where
+  supported :
+    PureExternalSupported context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue stepCost
 
 theorem ConcreteStructuredExternalCallReadyFocus.observes
     {program : Fir.LeanIR.ImpureProgram}
@@ -8103,12 +8152,12 @@ theorem ConcreteStructuredExternalCallReadyFocus.observes
     rw [related.targetStoreEq, related.sourceRuntimeEq]
     exact related.callerStateRelated.1.trace
 
-/-- The first pure-external simulation step is compiler-derived and stops at
+/-- The first external simulation step is compiler-derived and stops at
 the imported-call boundary.  The source pushes its bind frame and exposes the
 semantic request; the target executes only the generated local-read/erased
-argument prefix.  No external response or terminating target suffix is
+argument prefix. No concrete response or terminating target suffix is
 assumed by this theorem. -/
-theorem ConcreteStructuredCodeFocus.advance_external_stage
+theorem ConcreteStructuredCodeFocus.advance_external_stage_of_shape
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {rootCode : Lean.Compiler.LCNF.Code .impure}
@@ -8122,9 +8171,9 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {continuation : Lean.Compiler.LCNF.Code .impure}
-    {sourceValue : Value} {stepCost : Nat}
-    (supported : PureExternalSupported context externals sourceRuntime sourceEnv
-      decl continuation nextRuntime sourceValue stepCost)
+    {sourceValue : Value}
+    (site : ExternalCallShape context externals sourceRuntime sourceEnv
+      decl nextRuntime sourceValue)
     {labels : LabelContext}
     {targetStore : Wasm.Store Host}
     {targetLocals : Wasm.Locals}
@@ -8136,9 +8185,7 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
     (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
       labels sourceRuntime sourceEnv (.let decl continuation) targetStore
       targetLocals targetCode witness source target) :
-    ∃ site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
-        nextRuntime sourceValue stepCost,
-      ∃ physicalArgs operation resolvedResultKind targetImport,
+    ∃ physicalArgs operation resolvedResultKind targetImport,
       ∃ callIndex resultIndex,
       ∃ targetArguments targetRest : Wasm.Program,
       ∃ sourceAfter targetAfter,
@@ -8146,13 +8193,12 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
       FinitePath
         (StructuredWasmStep targetModule.wasmModule hosts.env)
         targetArguments.length target targetAfter ∧
-      ConcreteStructuredExternalCallReadyFocus program context sourceModule
+      ConcreteStructuredExternalCallControl program context sourceModule
         sourceFunction targetModule hosts externals site operation
         resolvedResultKind targetImport labels continuation source.joins
         source.frames targetStore targetLocals targetLocals.values targetRest
         target.frames witness physicalArgs callIndex resultIndex sourceAfter
         targetAfter := by
-  let site := supported.callShape
   obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
       valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
     CodeAdaptedWithSuffix.let_eq related.adapted
@@ -8206,7 +8252,7 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
         { targetLocals with
           values := physicalArgs.reverse ++ targetLocals.values }
         (.call callIndex :: .localSet resultIndex :: targetRest) }
-  refine ⟨site, physicalArgs, operation, resolvedResultKind, targetImport,
+  refine ⟨physicalArgs, operation, resolvedResultKind, targetImport,
     callIndex, resultIndex, targetArguments, targetRest, sourceAfter,
     targetAfter, ?_, ?_, ?_⟩
   · rcases source with ⟨sourceProgram, sourceControl, sourceStateEnv,
@@ -8244,7 +8290,6 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
       sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
       sourceJoinsEq := by simp [sourceAfter]
       sourceFramesEq := by simp [sourceAfter, related.sourceEnvEq]
-      supported
       targetStoreEq := by simp [targetAfter, related.targetStoreEq]
       targetControlEq := by simp [targetAfter]
       targetFramesEq := by simp [targetAfter]
@@ -8264,6 +8309,60 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
       hostsSatisfy := spec.hostsSatisfy
       parameterCount
       resultCount }
+
+/-- The existing pure staging theorem is recovered by projecting its admitted
+shape into the generic staging rule, then retaining the original admission. -/
+theorem ConcreteStructuredCodeFocus.advance_external_stage
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {rootCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context rootCode sourceModule
+      sourceFunction targetModule hosts)
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {stepCost : Nat}
+    (supported : PureExternalSupported context externals sourceRuntime sourceEnv
+      decl continuation nextRuntime sourceValue stepCost)
+    {labels : LabelContext}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target) :
+    ∃ site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+        nextRuntime sourceValue stepCost,
+      ∃ physicalArgs operation resolvedResultKind targetImport,
+      ∃ callIndex resultIndex,
+      ∃ targetArguments targetRest : Wasm.Program,
+      ∃ sourceAfter targetAfter,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath
+        (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetArguments.length target targetAfter ∧
+      ConcreteStructuredExternalCallReadyFocus program context sourceModule
+        sourceFunction targetModule hosts externals site operation
+        resolvedResultKind targetImport labels continuation source.joins
+        source.frames targetStore targetLocals targetLocals.values targetRest
+        target.frames witness physicalArgs callIndex resultIndex sourceAfter
+        targetAfter := by
+  let site := supported.callShape
+  obtain ⟨args, operation, kind, imp, callIndex, resultIndex, argumentCode, rest,
+      sourceAfter, targetAfter, sourceStep, targetPath, control⟩ :=
+    related.advance_external_stage_of_shape spec site.toExternalCallShape localsAligned
+  exact ⟨site, args, operation, kind, imp, callIndex, resultIndex, argumentCode, rest,
+    sourceAfter, targetAfter, sourceStep, targetPath, {
+      toConcreteStructuredExternalCallControl := control, supported }⟩
 
 /-- Runtime/resource evidence required to cross one resolved external import.
 This boundary is deliberately separate from compiler control: the three pure
@@ -8836,7 +8935,7 @@ theorem ConcreteStructuredExternalBindFocus.observes
 the orthogonal runtime/resource layer has constructed the concrete response
 evidence.  The target stops before the generated destination write, matching
 the source's yielded bind-frame state exactly. -/
-theorem ConcreteStructuredExternalCallReadyFocus.advance_call
+theorem ConcreteStructuredExternalCallControl.advance_call
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -8845,10 +8944,10 @@ theorem ConcreteStructuredExternalCallReadyFocus.advance_call
     {hosts : ResolvedHosts}
     {externals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
-    {sourceValue : Value} {stepCost : Nat}
+    {sourceValue : Value}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
-    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
-      nextRuntime sourceValue stepCost}
+    {site : ExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue}
     {operation : ExternalOperation}
     {resolvedResultKind : AbiKind}
     {targetImport : Wasm.ImportDecl}
@@ -8867,7 +8966,7 @@ theorem ConcreteStructuredExternalCallReadyFocus.advance_call
     {callIndex resultIndex : Nat}
     {source : MachineState}
     {target : StructuredWasmState Host}
-    (related : ConcreteStructuredExternalCallReadyFocus program context
+    (related : ConcreteStructuredExternalCallControl program context
       sourceModule sourceFunction targetModule hosts externals site operation
       resolvedResultKind targetImport labels continuation callerJoins
       sourceFrames targetStore callerLocals callerRemainder targetRest
@@ -9037,6 +9136,58 @@ theorem ConcreteStructuredExternalCallReadyFocus.advance_call
       resultFound := related.resultFound
       kindAt := related.resultKindAt
       valueRelated := by simpa [resultKindEq] using evidence.valueRelated }
+
+/-- Existing pure callers reuse the representation-independent control proof.
+The additional pure-family admission evidence is intentionally unused here. -/
+theorem ConcreteStructuredExternalCallReadyFocus.advance_call
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {stepCost : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : LabelContext}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore nextStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness nextWitness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {physicalResult : Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredExternalCallReadyFocus program context
+      sourceModule sourceFunction targetModule hosts externals site operation
+      resolvedResultKind targetImport labels continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest
+      targetFrames witness physicalArgs callIndex resultIndex source target)
+    (evidence : ConcreteExternalCallEvidence operation resolvedResultKind
+      targetStore physicalArgs sourceRuntime nextRuntime sourceValue witness nextStore
+      nextWitness physicalResult) :
+    ∃ sourceAfter targetAfter,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+        target targetAfter ∧
+      ConcreteStructuredExternalBindFocus context sourceModule sourceFunction
+        labels nextRuntime sourceEnv sourceValue decl.fvarId continuation
+        callerJoins sourceFrames nextStore callerLocals callerRemainder
+        targetRest targetFrames nextWitness site.resultKind physicalResult
+        resultIndex sourceAfter targetAfter :=
+  related.toConcreteStructuredExternalCallControl.advance_call evidence
 
 /-- Cross the imported-call boundary directly from the threaded resource
 frame.  This is the caller-facing progress theorem: concrete execution
