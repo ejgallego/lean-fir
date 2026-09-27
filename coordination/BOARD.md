@@ -31,7 +31,9 @@ with cumulative entry transport, full saved-caller-scope restoration, and the
 seven-step generated publication suffix, now composed through destination bind
 to the ordinary code-core relation. The validated non-heap lazy-return path
 consumes the common restoration and executable suffix; central heap lazy-miss
-admission remains separate.
+admission remains separate. Empty-Array host-call evidence is now derived from
+address-space budget under an explicit installed-handler equation; it does not
+prove execution of W7's emitted helper.
 Production external refinement, target callee execution, and full
 `compressStored` closure remain open. Other parked proof work requires an
 explicit resume. See `docs/validation.md`.
@@ -178,6 +180,23 @@ reconstruction/readback/direct consumer passes with 14 endpoint audits;
 `make check`, `make talos-setup`, `make talos-check`, and direct RC2 TrustAudit
 (277 endpoints) pass. No new axiom; existing `assembleByte32`/source-boxing
 dependencies are unchanged.
+
+The budget-derived empty-Array evidence successor `307529d8f` is also landed
+on its exact main base `1054ca39d`. `mkEmptyExternalCallEvidence_of_budget`
+derives successful allocation, capacity bounds, response refinement, witness
+extension, existing-live-object capacity/ordinaryness transports, exact event
+and residual budget from the allocation headroom. It retains the primitive
+source contract, request representation/decoding, entry runtime relation,
+exact budget and `EmptyArrayHandlerAt`; that installed-handler equation is a
+host deployment contract, not proof of W7 helper execution or JavaScript
+conformance. No automatic dispatcher admission or complete target prefix is
+claimed. Root's `make check`, `make talos-setup`, `make talos-check`, and direct
+RC2 TrustAudit (281 endpoints) pass. The retained source consumer was unchanged
+and its 14 audits remain predecessor evidence, not a fresh claim here. Four
+new endpoints retain only the existing `assembleByte32` native debt; no new
+axiom. Next: fresh non-full tagged `Array.push` evidence and target initializer
+prefix composition. Broader handler installation, heap-miss admission and
+encoded-artifact correctness remain separate.
 
 ## Integration queue settled (2026-09-09)
 
