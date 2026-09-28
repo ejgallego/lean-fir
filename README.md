@@ -61,6 +61,8 @@ The optional Talos bridge is outside the default dependency graph.
 adapter, and forces direct elaboration of the exact compiled axiom inventories.
 `make proof-trust` prepares the same project and runs the audit independently.
 Neither command issues a persistent acceptance receipt.
+The old Lean 4.33 Talos setup and build-attestation wrapper are retired; use
+these overlay-backed targets for current proof validation.
 
 The same gate checks independent client contracts for the rooted return,
 source-run return, fault-simulation, and finite-prefix export endpoints.

@@ -52,7 +52,6 @@ validate-harness:
 	@bash scripts/quiet-run.sh validate-clean -- python3 scripts/test_clean_validation.py
 	@bash scripts/quiet-run.sh validate-interpreters-test -- python3 scripts/test_validate_interpreters.py
 	@bash scripts/quiet-run.sh validate-reuse-test -- python3 scripts/test_validation_reuse.py
-	@bash scripts/quiet-run.sh talos-attestation-test -- python3 scripts/test_talos_build_attestation.py
 	@bash scripts/quiet-run.sh validation-parallel-test -- python3 scripts/test_validation_parallel.py
 	@bash scripts/quiet-run.sh float-transport-test -- node scripts/test_wasm_bit_exact_float_transport.mjs
 	@bash scripts/quiet-run.sh wasm-externals-test -- node scripts/test_wasm_validation_externals.mjs
