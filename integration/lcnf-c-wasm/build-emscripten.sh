@@ -311,24 +311,24 @@ if [[ -z "$out_dir" ]]; then
   out_dir="$repo_root/_build/lcnf-c-wasm/build/$artifact_name"
 fi
 
-for tool in env find git grep lake mktemp mv node python3 rm sed sha256sum sort; do
+for tool in cmp cut env find git grep lake mktemp mv node python3 rm sed sha256sum sort; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     die "required build tool not found: $tool"
   fi
 done
 
 emsdk_dir="$deps_root/emsdk"
-if [[ "$runtime_profile" == "threaded" ]]; then
-  lean_build="$deps_root/lean4-emscripten-build"
-else
-  lean_build="$deps_root/lean4-emscripten-build-unthreaded"
-fi
+fir_lcnf_c_select_lean "$repo_root" || die "selected Lean compiler is unsupported"
+fir_lcnf_c_runtime_paths "$deps_root" "$runtime_profile"
+lean_build="$FIR_LCNF_C_LEAN_BUILD"
+lean_src="$FIR_LCNF_C_LEAN_SOURCE"
 lean_runtime="$lean_build/lib/lean/libleanrt.a"
 lean_init="$lean_build/lib/lean/libInit.a"
 lean_std="$lean_build/lib/lean/libStd.a"
+lean_libuv="$lean_build/libuv/src/libuv/libuv.a"
 lean_include="$lean_build/include"
 
-for dependency in "$emsdk_dir/emsdk_env.sh" "$lean_runtime" "$lean_init" "$lean_std"; do
+for dependency in "$emsdk_dir/emsdk_env.sh" "$lean_runtime" "$lean_init" "$lean_std" "$lean_libuv"; do
   if [[ ! -f "$dependency" ]]; then
     die "Emscripten Lean runtime profile '$runtime_profile' is not ready; run $lane_dir/setup-emscripten.sh --runtime-profile $runtime_profile"
   fi
@@ -336,11 +336,17 @@ done
 if [[ ! -f "$lean_include/lean/lean.h" ]]; then
   die "Emscripten Lean headers for profile '$runtime_profile' are not ready; run $lane_dir/setup-emscripten.sh --runtime-profile $runtime_profile"
 fi
+if [[ "$(git -C "$lean_src" rev-parse HEAD)" != "$FIR_LCNF_C_LEAN_COMMIT" ]]; then
+  die "Lean source does not match selected compiler commit $FIR_LCNF_C_LEAN_COMMIT"
+fi
+if [[ "$(git -C "$emsdk_dir" rev-parse HEAD)" != "$FIR_LCNF_C_EMSDK_COMMIT" ]]; then
+  die "emsdk checkout does not match pinned commit $FIR_LCNF_C_EMSDK_COMMIT"
+fi
+if ! fir_lcnf_c_verify_runtime_receipt "$lean_src" "$lean_build" "$runtime_profile"; then
+  die "Lean runtime archive/header/source identity mismatch; rebuild with setup-emscripten.sh --runtime-profile $runtime_profile"
+fi
 
 lean_version="$(lake -d "$repo_root" env lean --version)"
-if [[ "$lean_version" != *"commit $FIR_LCNF_C_LEAN_COMMIT"* ]]; then
-  die "Lean compiler does not match the pinned runtime: $lean_version"
-fi
 lean_prefix="$(lake -d "$repo_root" env lean --print-prefix)"
 lean_tool="$lean_prefix/bin/lean"
 if [[ ! -x "$lean_tool" ]]; then
@@ -633,7 +639,8 @@ link_key="$({
       "$host_o" \
       "$lean_std" \
       "$lean_init" \
-      "$lean_runtime"; do
+      "$lean_runtime" \
+      "$lean_libuv"; do
     key_field "input.$link_input_index.path" "$link_input"
     key_field "input.$link_input_index.sha256" "$(file_digest "$link_input")"
     link_input_index=$((link_input_index + 1))
@@ -662,6 +669,7 @@ else
     "$lean_std" \
     "$lean_init" \
     "$lean_runtime" \
+    "$lean_libuv" \
     "-Wl,--end-group" \
     "${link_flags[@]}" \
     -o "$module_tmp"

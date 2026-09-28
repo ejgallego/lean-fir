@@ -32,7 +32,7 @@ second compiler:
 | Profile | Support status | Host contract | Current acceptance fixture |
 | --- | --- | --- | --- |
 | `freestanding` | primary, deliberately narrow | `wasm32-unknown-unknown`, no imports or libc | raw `UInt64` expression and tail loop |
-| `emscripten` | primary for realistic programs | browser/Node ES module plus pinned `libleanrt`, `libInit`, and `libStd`; explicit threaded or unthreaded runtime | lists, arrays, strings, closures, `Except`, `Std.HashMap`, and real `IO.eprintln` |
+| `emscripten` | primary for realistic programs | browser/Node ES module plus exact-source `libleanrt`, `libInit`, `libStd`, and `libuv`; explicit threaded or unthreaded runtime | lists, arrays, strings, closures, `Except`, `Std.HashMap`, and real `IO.eprintln` |
 | `wasi` | experimental, ABI 3 frozen | single-threaded Lean core-object runtime in a WASI Preview 1 reactor (`wasm32-wasip1`) | boxed `UInt64`, lists, object and byte arrays, strings, captured one/two-argument closures, exact reclamation, scalar C, and a real monotonic-clock import |
 
 Normal lane acceptance runs the freestanding and Emscripten profiles through
@@ -57,12 +57,14 @@ primitive operations referenced by `Smoke.lean`; it must not silently grow a
 second object model.
 
 The Emscripten setup builds the complete Lean runtime plus the generated
-`libInit` and `libStd` archives from the exact source commit matching the
-frontend. The default `threaded` profile retains the historical runtime and
-cache paths. The explicit `unthreaded` profile uses a separate runtime build
-directory, omits `-pthread` from generated, bridge, host, and link commands,
-and runs in an ordinary browser page without cross-origin isolation. All three
-archives are compiled at `-O3` with LTO. The linked module
+`libInit`, `libStd`, and libuv archives from the exact source commit matching the
+selected frontend. Source and archive directories are keyed by that commit
+and by the `threaded` or `unthreaded` profile. Before linking, the build
+checks a setup receipt covering the source commit and patch, runtime archives,
+and `lean.h`; a changed or missing input requires a fresh setup. The explicit
+`unthreaded` profile omits `-pthread` from generated, bridge, host, and link
+commands, and runs in an ordinary browser page without cross-origin isolation.
+The Lean archives are compiled at `-O3` with LTO. The linked module
 initializes `RuntimeSmoke`, reaches the real `Init` implementation of
 `IO.eprintln`, and has no lane-local replacement for that symbol. Link-time
 garbage collection retains only the reachable runtime/library cone.
@@ -149,16 +151,25 @@ changes are not acceptable performance optimizations.
 
 ## Toolchain pins
 
-- Lean `4.33.0`, commit
-  `d8b18978322de05a8f3dba51ef03cf5461676c17`;
+- Lean identity comes from the selected `lake env lean --version`. During the
+  migration the accepted exact pairs are `4.33.0`/`d8b1897…`,
+  `4.34.0-rc2`/`6a10ac8…`, and `4.34.1`/`5045d00…`; other pairs fail closed.
 - Emscripten `5.0.3`, emsdk commit
   `a620cf1d71c62dfdfbb0c01fe0a371e2af2dda6c`;
 - wasi-sdk `33.0`, with per-platform release SHA-256 digests in
   `toolchain-pins.sh`.
 
-Lean 4.33.0 contains two mismatched declarations in Emscripten-only unsupported
-libuv stubs. `setup-emscripten.sh` applies the lane-local, signature-preserving
-patch under `patches/`; it does not modify the FIR or Lean semantic surface.
+The accepted Lean sources contain two mismatched declarations in
+Emscripten-only unsupported libuv stubs. `setup-emscripten.sh` checks and
+applies the lane-local, signature-preserving patch under `patches/`; it does
+not modify the FIR or Lean semantic surface. Run
+`bash integration/lcnf-c-wasm/test-toolchain-identity.sh` for direct mismatch
+negatives before an expensive runtime build.
+
+The WASI profile uses the selected compiler's generated C and installed
+`lean.h`, plus this lane's explicit small WASI runtime; it does not link the
+Emscripten Lean archives. The Emscripten manifest records the selected exact
+Lean version and commit after the runtime receipt has passed.
 
 ## Running the freestanding profile
 

@@ -182,7 +182,7 @@ const manifest = {
     runtimeProfile: options.runtimeProfile,
     compileFlags: options.compileFlags,
     linkFlags: options.linkFlags,
-    runtimeArchives: ["libleanrt.a", "libInit.a", "libStd.a"],
+    runtimeArchives: ["libleanrt.a", "libInit.a", "libStd.a", "libuv.a"],
     exactFloatingPoint: true,
   },
   runtime: {

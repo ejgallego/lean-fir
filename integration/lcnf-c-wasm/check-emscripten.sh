@@ -49,8 +49,8 @@ if ! grep -q "lean_alloc_closure" "$runtime_generated_c"; then
   exit 1
 fi
 
-lean_prefix="$(lake env lean --print-prefix)"
-lake env leanc \
+lean_prefix="$(lake -d "$repo_root" env lean --print-prefix)"
+lake -d "$repo_root" env leanc \
   -O3 \
   -DNDEBUG \
   -flto \
@@ -66,7 +66,7 @@ cc \
   -I "$lean_prefix/include" \
   -c "$lane_dir/runtime/native.c" \
   -o "$native_host_o"
-lake env leanc \
+lake -d "$repo_root" env leanc \
   -O3 \
   -flto \
   "$native_generated_o" \

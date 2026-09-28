@@ -43,7 +43,7 @@ native_generated_o="$artifact_dir/RuntimeSmoke.native.o"
 native_host_o="$artifact_dir/native-benchmark.o"
 native_executable="$artifact_dir/RuntimeSmoke.native-benchmark"
 manifest="$artifact_dir/RuntimeSmoke.manifest.json"
-lean_prefix="$(lake env lean --print-prefix)"
+lean_prefix="$(lake -d "$repo_root" env lean --print-prefix)"
 native_generated_flags=(
   -O3
   -DNDEBUG
@@ -76,7 +76,7 @@ native_link_flags=(
   -s
 )
 
-lake env leanc \
+lake -d "$repo_root" env leanc \
   "${native_generated_flags[@]}" \
   -c "$generated_c" \
   -o "$native_generated_o"
@@ -84,7 +84,7 @@ cc \
   "${native_host_flags[@]}" \
   -c "$lane_dir/runtime/native-benchmark.c" \
   -o "$native_host_o"
-lake env leanc \
+lake -d "$repo_root" env leanc \
   "${native_link_flags[@]}" \
   "$native_generated_o" \
   "$native_host_o" \

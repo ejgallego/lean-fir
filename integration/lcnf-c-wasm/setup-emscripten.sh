@@ -10,7 +10,7 @@ usage() {
 usage: setup-emscripten.sh [--runtime-profile threaded|unthreaded]
 
 Build the pinned Lean runtime, Init, and Std archives for Emscripten.
-The default profile is threaded and retains the historical build directory.
+The selected compiler determines the exact Lean source and archive directory.
 EOF
 }
 
@@ -40,14 +40,8 @@ while (($# > 0)); do
 done
 
 case "$runtime_profile" in
-  threaded)
-    lean_build="$deps_root/lean4-emscripten-build"
-    multi_thread="ON"
-    ;;
-  unthreaded)
-    lean_build="$deps_root/lean4-emscripten-build-unthreaded"
-    multi_thread="OFF"
-    ;;
+  threaded) multi_thread="ON" ;;
+  unthreaded) multi_thread="OFF" ;;
   *)
     die "unsupported runtime profile: $runtime_profile"
     ;;
@@ -56,9 +50,14 @@ esac
 # shellcheck source=toolchain-pins.sh
 # shellcheck disable=SC1091
 source "$lane_dir/toolchain-pins.sh"
+fir_lcnf_c_select_lean "$repo_root" || die "selected Lean compiler is unsupported"
+fir_lcnf_c_runtime_paths "$deps_root" "$runtime_profile"
+lean_build="$FIR_LCNF_C_LEAN_BUILD"
 
 emsdk_dir="$deps_root/emsdk"
-lean_src="$deps_root/lean4"
+lean_src="$FIR_LCNF_C_LEAN_SOURCE"
+# The two UV stubs still have the older ABI in both accepted source commits.
+# The exact patch is checked against the selected checkout before any build.
 lean_patch="$lane_dir/patches/lean-4.33.0-emscripten-uv-stubs.patch"
 jobs="${FIR_WASM_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '4')}"
 
@@ -106,8 +105,12 @@ if git -C "$lean_src" apply --reverse --check "$lean_patch" >/dev/null 2>&1; the
 elif git -C "$lean_src" apply --check "$lean_patch"; then
   git -C "$lean_src" apply "$lean_patch"
 else
-  echo "Lean Emscripten compatibility patch does not match the pinned source" >&2
-  exit 1
+  die "Lean Emscripten compatibility patch does not match the selected source"
+fi
+modified_source="$(git -C "$lean_src" diff --name-only HEAD)"
+expected_modified_source=$'stage0/src/runtime/uv/event_loop.cpp\nstage0/src/runtime/uv/system.cpp'
+if [[ "$modified_source" != "$expected_modified_source" ]]; then
+  die "Lean source has changes outside the reviewed Emscripten UV patch"
 fi
 
 export EMSDK_QUIET=1
@@ -161,6 +164,11 @@ build_stdlib_archive Std
 for archive in libleanrt.a libInit.a libStd.a; do
   test -f "$lean_build/lib/lean/$archive"
 done
+test -f "$lean_build/libuv/src/libuv/libuv.a"
+test -f "$lean_build/include/lean/lean.h"
+receipt="$lean_build/fir-runtime-identity.txt"
+fir_lcnf_c_runtime_receipt "$lean_src" "$lean_build" "$runtime_profile" > "$receipt.tmp"
+mv -f "$receipt.tmp" "$receipt"
 
 printf 'Emscripten %s and Lean runtime/Init/Std %s (%s) are ready in %s\n' \
   "$FIR_LCNF_C_EMSDK_VERSION" \

@@ -1,8 +1,59 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 
-FIR_LCNF_C_LEAN_VERSION="4.33.0"
-FIR_LCNF_C_LEAN_COMMIT="d8b18978322de05a8f3dba51ef03cf5461676c17"
+# The selected Lean compiler, not this file, determines the runtime source.
+# Keep the accepted transition identities explicit so an unrelated toolchain
+# cannot silently enter the C/Wasm path.
+fir_lcnf_c_parse_lean_identity() {
+  local version="$1"
+  if [[ ! "$version" =~ ^Lean\ \(version\ ([0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?),.*commit\ ([0-9a-f]{40}), ]]; then
+    echo "unrecognized Lean compiler identity: $version" >&2
+    return 1
+  fi
+  FIR_LCNF_C_LEAN_VERSION="${BASH_REMATCH[1]}"
+  FIR_LCNF_C_LEAN_COMMIT="${BASH_REMATCH[3]}"
+  case "$FIR_LCNF_C_LEAN_VERSION:$FIR_LCNF_C_LEAN_COMMIT" in
+    4.33.0:d8b18978322de05a8f3dba51ef03cf5461676c17|\
+    4.34.0-rc2:6a10ac8c22beadecabdbb0919c2b50214762f91d|\
+    4.34.1:5045d0056413266e57c625dcd7c365b10e377c52) ;;
+    *)
+      echo "unsupported Lean compiler identity: $version" >&2
+      return 1
+      ;;
+  esac
+}
+
+fir_lcnf_c_select_lean() {
+  local repo_root="$1" version
+  version="$(lake -d "$repo_root" env lean --version)" || return 1
+  fir_lcnf_c_parse_lean_identity "$version"
+}
+
+fir_lcnf_c_runtime_paths() {
+  local deps_root="$1" profile="$2"
+  FIR_LCNF_C_LEAN_SOURCE="$deps_root/lean4-$FIR_LCNF_C_LEAN_COMMIT"
+  FIR_LCNF_C_LEAN_BUILD="$deps_root/lean4-emscripten-build-$FIR_LCNF_C_LEAN_COMMIT-$profile"
+}
+
+fir_lcnf_c_runtime_receipt() {
+  local source="$1" build="$2" profile="$3" archive
+  printf 'lean-version %s\nlean-commit %s\nprofile %s\n' \
+    "$FIR_LCNF_C_LEAN_VERSION" "$FIR_LCNF_C_LEAN_COMMIT" "$profile"
+  printf 'source-commit %s\n' "$(git -C "$source" rev-parse HEAD)"
+  printf 'source-diff %s\n' "$(git -C "$source" diff --binary HEAD | sha256sum | cut -d' ' -f1)"
+  for archive in libleanrt.a libInit.a libStd.a; do
+    printf '%s %s\n' "$archive" "$(sha256sum "$build/lib/lean/$archive" | cut -d' ' -f1)"
+  done
+  printf 'libuv.a %s\n' "$(sha256sum "$build/libuv/src/libuv/libuv.a" | cut -d' ' -f1)"
+  printf 'lean.h %s\n' "$(sha256sum "$build/include/lean/lean.h" | cut -d' ' -f1)"
+}
+
+fir_lcnf_c_verify_runtime_receipt() {
+  local source="$1" build="$2" profile="$3"
+  [[ -f "$build/fir-runtime-identity.txt" ]] &&
+    cmp -s "$build/fir-runtime-identity.txt" \
+      <(fir_lcnf_c_runtime_receipt "$source" "$build" "$profile")
+}
 
 FIR_LCNF_C_EMSDK_VERSION="5.0.3"
 FIR_LCNF_C_EMSDK_COMMIT="a620cf1d71c62dfdfbb0c01fe0a371e2af2dda6c"

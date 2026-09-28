@@ -3,6 +3,13 @@ set -euo pipefail
 
 lane_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(git -C "$lane_dir" rev-parse --show-toplevel)"
+# shellcheck source=toolchain-pins.sh
+# shellcheck disable=SC1091
+source "$lane_dir/toolchain-pins.sh"
+fir_lcnf_c_select_lean "$repo_root" || {
+  echo "freestanding check requires an accepted Lean compiler identity" >&2
+  exit 1
+}
 out_dir="${FIR_LCNF_C_WASM_OUT:-$repo_root/_build/lcnf-c-wasm}"
 
 resolve_tool() {
@@ -57,11 +64,11 @@ wasm_clang="$(
 
 mkdir -p "$out_dir"
 
-lean_prefix="$(lake env lean --print-prefix)"
+lean_prefix="$(lake -d "$repo_root" env lean --print-prefix)"
 generated_c="$out_dir/Smoke.c"
 artifact="$out_dir/Smoke.wasm"
 
-lake env lean \
+lake -d "$repo_root" env lean \
   -c "$generated_c" \
   -R "$lane_dir" \
   "$lane_dir/Smoke.lean"

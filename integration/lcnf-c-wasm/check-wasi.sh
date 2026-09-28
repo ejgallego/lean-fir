@@ -9,6 +9,10 @@ out_dir="${FIR_LCNF_C_WASM_WASI_OUT:-$repo_root/_build/lcnf-c-wasm/wasi}"
 # shellcheck source=toolchain-pins.sh
 # shellcheck disable=SC1091
 source "$lane_dir/toolchain-pins.sh"
+fir_lcnf_c_select_lean "$repo_root" || {
+  echo "WASI check requires an accepted Lean compiler identity" >&2
+  exit 1
+}
 
 read -r asset _ < <(fir_lcnf_c_wasi_sdk_asset)
 wasi_sdk="$deps_root/${asset%.tar.gz}"
@@ -26,15 +30,9 @@ for tool in cc node; do
   fi
 done
 
-lean_version="$(lake env lean --version)"
-if [[ "$lean_version" != *"commit $FIR_LCNF_C_LEAN_COMMIT"* ]]; then
-  echo "Lean compiler does not match the pinned WASI ABI: $lean_version" >&2
-  exit 1
-fi
-
 mkdir -p "$out_dir"
 
-lean_prefix="$(lake env lean --print-prefix)"
+lean_prefix="$(lake -d "$repo_root" env lean --print-prefix)"
 generated_scalar_c="$out_dir/Smoke.c"
 generated_heap_c="$out_dir/HeapSmoke.c"
 generated_core_c="$out_dir/WasiCoreSmoke.c"
@@ -53,22 +51,22 @@ native_scalar_array_executable="$out_dir/WasiScalarSmoke.native"
 native_scalar_array_results="$out_dir/WasiScalarSmoke.native.txt"
 artifact="$out_dir/WasiCoreSmoke.wasm"
 
-lake env lean \
+lake -d "$repo_root" env lean \
   -c "$generated_scalar_c" \
   -R "$lane_dir" \
   "$lane_dir/Smoke.lean"
 
-lake env lean \
+lake -d "$repo_root" env lean \
   -c "$generated_heap_c" \
   -R "$lane_dir" \
   "$lane_dir/HeapSmoke.lean"
 
-lake env lean \
+lake -d "$repo_root" env lean \
   -c "$generated_core_c" \
   -R "$lane_dir" \
   "$lane_dir/WasiCoreSmoke.lean"
 
-lake env lean \
+lake -d "$repo_root" env lean \
   -c "$generated_scalar_array_c" \
   -R "$lane_dir" \
   "$lane_dir/WasiScalarSmoke.lean"
@@ -101,7 +99,7 @@ for symbol in \
   fi
 done
 
-lake env leanc \
+lake -d "$repo_root" env leanc \
   -O3 \
   -DNDEBUG \
   -flto \
@@ -116,7 +114,7 @@ cc \
   -ffp-contract=off \
   -c "$lane_dir/runtime/native_heap.c" \
   -o "$native_heap_host_o"
-lake env leanc \
+lake -d "$repo_root" env leanc \
   -O3 \
   -flto \
   "$native_heap_generated_o" \
@@ -124,7 +122,7 @@ lake env leanc \
   -o "$native_heap_executable"
 "$native_heap_executable" > "$native_heap_results"
 
-lake env leanc \
+lake -d "$repo_root" env leanc \
   -O3 \
   -DNDEBUG \
   -flto \
@@ -139,7 +137,7 @@ cc \
   -ffp-contract=off \
   -c "$lane_dir/runtime/native_wasi_core.c" \
   -o "$native_core_host_o"
-lake env leanc \
+lake -d "$repo_root" env leanc \
   -O3 \
   -flto \
   "$native_core_generated_o" \
@@ -147,7 +145,7 @@ lake env leanc \
   -o "$native_core_executable"
 "$native_core_executable" > "$native_core_results"
 
-lake env leanc \
+lake -d "$repo_root" env leanc \
   -O3 \
   -DNDEBUG \
   -flto \
@@ -162,7 +160,7 @@ cc \
   -ffp-contract=off \
   -c "$lane_dir/runtime/native_wasi_scalar.c" \
   -o "$native_scalar_array_host_o"
-lake env leanc \
+lake -d "$repo_root" env leanc \
   -O3 \
   -flto \
   "$native_scalar_array_generated_o" \
