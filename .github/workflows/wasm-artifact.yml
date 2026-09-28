@@ -1,0 +1,69 @@
+name: Wasm artifact gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Fir/**'
+      - 'lean-toolchain'
+      - 'lakefile.lean'
+      - 'lake-manifest.json'
+      - 'integration/talos/artifact/**'
+      - 'integration/talos/**'
+      - 'tooling/talos-434/**'
+      - 'integration/lcnf-c-wasm/setup-emscripten.sh'
+      - 'integration/lcnf-c-wasm/toolchain-pins.sh'
+      - '.github/workflows/wasm-artifact.yml'
+  pull_request:
+    paths:
+      - 'Fir/**'
+      - 'lean-toolchain'
+      - 'lakefile.lean'
+      - 'lake-manifest.json'
+      - 'integration/talos/artifact/**'
+      - 'integration/talos/**'
+      - 'tooling/talos-434/**'
+      - 'integration/lcnf-c-wasm/setup-emscripten.sh'
+      - 'integration/lcnf-c-wasm/toolchain-pins.sh'
+      - '.github/workflows/wasm-artifact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-artifact-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  artifact:
+    name: Deterministic W7 artifact acceptance
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      LEAN_NUM_THREADS: 2
+      FIR_WASM_JOBS: 2
+      FIR_BINARYEN_DIR: ${{ github.workspace }}/.deps/lcnf-c-wasm/emsdk/upstream/bin
+      TMPDIR: ${{ github.workspace }}/.deps/tmp
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install Lean and local scratch prerequisites
+        run: |
+          mkdir -p "$TMPDIR" .deps
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o .deps/elan-init.sh
+          sh .deps/elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Prepare pinned Binaryen tools
+        run: bash integration/lcnf-c-wasm/setup-emscripten.sh --runtime-profile unthreaded
+      - name: Run deterministic artifact gate
+        run: |
+          git diff --check
+          bash integration/talos/artifact/check.sh

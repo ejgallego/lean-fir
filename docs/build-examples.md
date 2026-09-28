@@ -12,20 +12,38 @@ acceptance claim.
 For evidence-first retirement decisions, see the
 [consumer cleanup audit](consumer-cleanup-audit.md).
 
+The package table separates two facts. **Artifact status** describes an
+immutable output and its original acceptance. **Recipe freshness** says
+whether that producer recipe has been rerun against the named current FIR main
+and toolchain. An accepted historical artifact stays accepted when a recipe
+becomes stale; it must not be described as current until its recipe gate passes
+again. `Provisional` means there is no consumer acceptance; if no active recipe
+owner is recorded, mark the work `unowned` as well.
+
 ## Consumer packages
 
-| Package | Status | Lean entry | Build and acceptance gate | Canonical pointer |
-| --- | --- | --- | --- | --- |
-| [FIR-native styled `prettyM`](../integration/talos/artifact/prettyM-package/README.md) | accepted W7 package | `Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw` | `bash integration/talos/artifact/check.sh` | `integration/talos/artifact/_build/prettyM-current` |
-| [Illuminate full-action player](../integration/illuminate-player/README.md) | accepted; retained as the full-action oracle | `Illuminate.AnimationPlayer.initialLive`, `transitionLive` | `ILLUMINATE_ROOT=/clean/pinned/illuminate bash integration/illuminate-player/check.sh` | `integration/illuminate-player/_build/illuminate-player-current` |
-| [Illuminate selection player](../integration/illuminate-player/README.md#selection-only-v4-package) | accepted; preferred compact player | `Illuminate.AnimationPlayer.initialSelectionLive`, `transitionSelectionLive`, and the bit-exact tick facade | same Illuminate gate | `integration/illuminate-player/_build/illuminate-selection-player-current` |
-| [Illuminate prepared HitScene](../integration/illuminate-hit-scene/README.md) | accepted W7 query package | `Illuminate.HitScene.query` and its bit-exact coordinate facade | `ILLUMINATE_ROOT=/clean/pinned/illuminate ILLUMINATE_HIT_SCENE_FIXTURE=/fixture.json FIR_HIT_SCENE_REQUIRE_REPEAT=1 node integration/illuminate-hit-scene/package.mjs` | `integration/illuminate-hit-scene/_build/illuminate-hit-scene-current` |
-| [C/Emscripten styled `prettyM`](../integration/lcnf-c-wasm/prettyM-emscripten-package/README.md) | accepted alternative backend | `Fir.LCNFC.PrettyM.renderWire` | `bash integration/lcnf-c-wasm/package-prettyM-emscripten.sh` | `integration/lcnf-c-wasm/_build/prettyM-emscripten-current` |
+| Package | Artifact status | Recipe freshness | Lean entry | Build and acceptance gate | Canonical pointer |
+| --- | --- | --- | --- | --- | --- |
+| [FIR-native styled `prettyM`](../integration/talos/artifact/prettyM-package/README.md) | Historically accepted immutable W7 package | Verified on main `340f4612` (Lean 4.34.1; full artifact gate) | `Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw` | `bash integration/talos/artifact/check.sh` | `integration/talos/artifact/_build/prettyM-current` |
+| [Illuminate full-action player](../integration/illuminate-player/README.md) | Historically accepted; retained as the full-action oracle | Client-owned; not reverified against main `340f4612` | `Illuminate.AnimationPlayer.initialLive`, `transitionLive` | `ILLUMINATE_ROOT=/clean/pinned/illuminate bash integration/illuminate-player/check.sh` | `integration/illuminate-player/_build/illuminate-player-current` |
+| [Illuminate selection player](../integration/illuminate-player/README.md#selection-only-v4-package) | Historically accepted; preferred compact player | Client-owned; not reverified against main `340f4612` | `Illuminate.AnimationPlayer.initialSelectionLive`, `transitionSelectionLive`, and the bit-exact tick facade | same Illuminate gate | `integration/illuminate-player/_build/illuminate-selection-player-current` |
+| [Illuminate prepared HitScene](../integration/illuminate-hit-scene/README.md) | Historically accepted W7 query package | Client-owned; not reverified against main `340f4612` | `Illuminate.HitScene.query` and its bit-exact coordinate facade | `ILLUMINATE_ROOT=/clean/pinned/illuminate ILLUMINATE_HIT_SCENE_FIXTURE=/fixture.json FIR_HIT_SCENE_REQUIRE_REPEAT=1 node integration/illuminate-hit-scene/package.mjs` | `integration/illuminate-hit-scene/_build/illuminate-hit-scene-current` |
+| [C/Emscripten styled `prettyM`](../integration/lcnf-c-wasm/prettyM-emscripten-package/README.md) | Historically accepted alternative backend | Generic C runtime verified at `431ec5fe`; package recipe still needs post-migration qualification | `Fir.LCNFC.PrettyM.renderWire` | `bash integration/lcnf-c-wasm/package-prettyM-emscripten.sh` | `integration/lcnf-c-wasm/_build/prettyM-emscripten-current` |
 
 An accepted package has a real source entry, immutable publication,
 `BUILD.json`, complete checksums, a packaged smoke test, an explicit ABI and
 ownership contract, and a deterministic acceptance gate. Generated `_build`
 pointers are conveniences; their package metadata is authoritative.
+
+FIR CI keeps `make check` and Talos mandatory. Separate path-triggered jobs run
+the W7 artifact gate for FIR/Wasm/artifact inputs and the C/Wasm gate for FIR
+and C/Wasm inputs. Consumer-specific acceptance stays with the consumer
+repository: its pinned recipe is requalified after producer-pin or recipe
+changes, and its scheduled moving-client canary follows that repository's
+source/CI policy. FIR does not fetch a floating client checkout from core CI;
+no FIR-side moving-client canary is currently configured.
+Until a consumer gate supplies fresh evidence, record its recipe as not
+verified against current main; do not create a second package registry.
 
 ## Additional package recipes
 

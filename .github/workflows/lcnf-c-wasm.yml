@@ -1,0 +1,62 @@
+name: LCNF C/Wasm gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Fir/**'
+      - 'lean-toolchain'
+      - 'lakefile.lean'
+      - 'lake-manifest.json'
+      - 'integration/lcnf-c-wasm/**'
+      - '.github/workflows/lcnf-c-wasm.yml'
+  pull_request:
+    paths:
+      - 'Fir/**'
+      - 'lean-toolchain'
+      - 'lakefile.lean'
+      - 'lake-manifest.json'
+      - 'integration/lcnf-c-wasm/**'
+      - '.github/workflows/lcnf-c-wasm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lcnf-c-wasm-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  c-wasm:
+    name: Emscripten and WASI consumer smoke
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      LEAN_NUM_THREADS: 2
+      FIR_WASM_JOBS: 2
+      TMPDIR: ${{ github.workspace }}/.deps/tmp
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install Lean and local scratch prerequisites
+        run: |
+          mkdir -p "$TMPDIR" .deps
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o .deps/elan-init.sh
+          sh .deps/elan-init.sh -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Prepare pinned Emscripten runtime
+        run: bash integration/lcnf-c-wasm/setup-emscripten.sh
+      - name: Prepare pinned WASI SDK
+        run: bash integration/lcnf-c-wasm/setup-wasi-sdk.sh
+      - name: Run complete C/Wasm suite
+        run: |
+          git diff --check
+          bash integration/lcnf-c-wasm/check-all.sh
