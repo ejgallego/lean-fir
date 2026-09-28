@@ -6,10 +6,10 @@ diff --git a/interpreter/lakefile.toml b/interpreter/lakefile.toml
  name = "mathlib"
  scope = "leanprover-community"
 -rev = "v4.33.0"
-+rev = "v4.34.0-rc2"
++rev = "v4.34.1"
 diff --git a/interpreter/lean-toolchain b/interpreter/lean-toolchain
 --- a/interpreter/lean-toolchain
 +++ b/interpreter/lean-toolchain
 @@ -1 +1 @@
 -leanprover/lean4:v4.33.0
-+leanprover/lean4:v4.34.0-rc2
++leanprover/lean4:v4.34.1

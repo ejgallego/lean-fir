@@ -21,6 +21,10 @@ class ProofTrustTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(dir=scratch)
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.write(
+            ".deps/talos-434/project/lean-toolchain",
+            "leanprover/lean4:v4.34.1\n",
+        )
         for path, name in AUDIT.EXPECTED_AXIOMS:
             self.write(str(path), f"axiom {name} : True\n")
 
@@ -75,7 +79,7 @@ class ProofTrustTests(unittest.TestCase):
     def test_compiled_audit_prepares_current_project_and_forces_elaboration(self):
         project = self.root / ".deps/talos-434/project"
         # Legacy state must not determine where either Lean command executes.
-        self.write("integration/talos/lean-toolchain", "leanprover/lean4:v4.33.0\n")
+        self.write("integration/talos/lean-toolchain", "leanprover/lean4:v4.34.1\n")
         with patch.dict(AUDIT.os.environ, {"ELAN_TOOLCHAIN": "obsolete"}), \
              patch.object(AUDIT.subprocess, "check_output", return_value="cache\n"), \
              patch.object(AUDIT.subprocess, "run",
@@ -85,7 +89,7 @@ class ProofTrustTests(unittest.TestCase):
         self.assertEqual(setup.args[0],
                          ["bash", str(self.root / "tooling/talos-434/setup.sh")])
         self.assertEqual(identity.args[0][2:],
-                         ["--profile", "lean-4.34-rc2", "--lean-project", str(project)])
+                         ["--profile", "lean-4.34.1", "--lean-project", str(project)])
         self.assertEqual(build.args[0], ["lake", "build", "FirTalos.TrustAudit"])
         self.assertEqual(direct.args[0],
                          ["lake", "env", "lean", "FirTalos/TrustAudit.lean"])

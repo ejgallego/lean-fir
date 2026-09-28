@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = "lean-4.33"
+DEFAULT_PROFILE = "lean-4.34.1"
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,11 @@ AUDIT_PROFILES = {
         pin="leanprover/lean4:v4.34.0-rc2",
         version="4.34.0-rc2",
         githash="6a10ac8c22beadecabdbb0919c2b50214762f91d",
+    ),
+    "lean-4.34.1": AuditProfile(
+        pin="leanprover/lean4:v4.34.1",
+        version="4.34.1",
+        githash="5045d0056413266e57c625dcd7c365b10e377c52",
     ),
 }
 EXPECTED_SOURCE_SHA256 = {

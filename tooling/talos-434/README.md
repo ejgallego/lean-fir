@@ -21,10 +21,10 @@ Before building, `check.sh` runs the fail-closed profile negatives and
 the trusted-assumption validator against the overlay project's explicit
 toolchain. It authenticates the exact compiler version and commit plus the
 W6-reviewed upstream and local checker source hashes. The ordinary no-argument
-validator remains the Lean 4.33 audit. All mutable source and Lake state stays under
+validator uses the accepted Lean 4.34.1 profile. All mutable source and Lake state stays under
 `.deps/talos-434/` in this worktree. The historical `integration/talos` package
 manifest is historical; the standard Talos and proof-trust targets select the
-authenticated 4.34 overlay.
+authenticated stable 4.34.1 overlay.
 
 `setup.sh` mirrors the current complete `integration/talos/FirTalos` tree into
 the isolated project, deleting files removed upstream. It compares the source
@@ -37,8 +37,8 @@ source mutation during copying, and changed pinned identities.
 
 The immutable inputs are Talos
 `0e05edbcfbb105b33e90c60b4f50e2cf193d9254`, mathlib
-`85e3a25e006c35636f0e53b0e9296caca2685bc0`, and Lean
-`4.34.0-rc2` (`6a10ac8c22beadecabdbb0919c2b50214762f91d`). The
+`d13f23b723b8a846827a245b89c10fc7d3f11612`, and Lean
+`4.34.1` (`5045d0056413266e57c625dcd7c365b10e377c52`). The
 tracked manifests and patches have exact SHA-256 checks in `setup.sh`.
 `talos.patch` changes only the interpreter's toolchain and mathlib release;
 `setup.sh` applies it with `--unidiff-zero` only after authenticating the exact
@@ -51,12 +51,12 @@ trailing context; the expected identity and output are still fail-closed.
 hash. It accepts the exact normalized hash when that line has already landed.
 The complete `FirTalos` proof tree is mirrored from the current checkout with
 before/after and copied-tree hash checks, so reviewed proof additions and
-deletions reach the isolated RC2 gate without changing a fixed whole-tree
+deletions reach the isolated stable gate without changing a fixed whole-tree
 digest. The Float source and umbrella entry point remain individually pinned;
 other proof-tree edits must be reviewed through the normal W6 handoff.
 
 This is audited compatibility evidence, not a kernel proof of the universal
 bridge proposition. It is the official Talos gate for
-Lean 4.34; it does not change the upstream Talos repository.
+Lean 4.34.1; it does not change the upstream Talos repository.
 The legacy `lean433UpstreamBridge` name is intentionally retained for the one
 audited assumption reviewed under both authenticated compiler identities.

@@ -39,6 +39,14 @@ class TrustedAssumptionProfileTests(unittest.TestCase):
             ),
             "lean-4.34-rc2",
         )
+        self.assertEqual(
+            AUDIT.select_profile(
+                "leanprover/lean4:v4.34.1",
+                "4.34.1",
+                "5045d0056413266e57c625dcd7c365b10e377c52",
+            ),
+            "lean-4.34.1",
+        )
 
     def test_unknown_and_crossed_identities_fail_closed(self) -> None:
         self.assertIsNone(AUDIT.select_profile(
@@ -52,6 +60,11 @@ class TrustedAssumptionProfileTests(unittest.TestCase):
         self.assertIsNone(AUDIT.select_profile(
             "leanprover/lean4:v4.33.0",
             "4.33.0",
+            "6a10ac8c22beadecabdbb0919c2b50214762f91d",
+        ))
+        self.assertIsNone(AUDIT.select_profile(
+            "leanprover/lean4:v4.34.1",
+            "4.34.1",
             "6a10ac8c22beadecabdbb0919c2b50214762f91d",
         ))
 

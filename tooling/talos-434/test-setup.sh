@@ -87,9 +87,9 @@ check_hash 302cd63c54178885b89e669f33b38f12f4dd7ae7e5cac537b3203e3768d8fb2b \
   git apply --check --unidiff-zero "$overlay/talos.patch"
   git apply --unidiff-zero "$overlay/talos.patch"
 )
-check_hash d3a81bdfc0f2c4747aace9f0a4089186557686d88f49083af57d9c60d7a3a35a \
+check_hash 75a680e8b6726f82caebabb184f188411c7cad72c7dcd8e6f1990112337023e4 \
   "$patch_tree/interpreter/lakefile.toml"
-check_hash 8190e75a201741065fe508b28955dd64dd72d090babe5f70ce6848879d68ae88 \
+check_hash d5edba4e4b8faad9c1baeadb265716d20d03be4d1a2647dc5e35b0c0325bea7b \
   "$patch_tree/interpreter/lean-toolchain"
 
 cp "$overlay/talos.patch" "$test_dir/talos.patch"
@@ -99,10 +99,10 @@ printf 'changed\n' >> "$test_dir/talos.patch"
 expect_failure check_hash "$patch_hash" "$test_dir/talos.patch"
 rg -q 'overlay identity mismatch' "$test_dir/negative.log"
 
-printf 'leanprover/lean4:v4.34.0-rc2\n' > "$test_dir/lean-toolchain"
-check_toolchain leanprover/lean4:v4.34.0-rc2 "$test_dir/lean-toolchain"
+printf 'leanprover/lean4:v4.34.1\n' > "$test_dir/lean-toolchain"
+check_toolchain leanprover/lean4:v4.34.1 "$test_dir/lean-toolchain"
 printf 'leanprover/lean4:v4.34.0\n' > "$test_dir/lean-toolchain"
-expect_failure check_toolchain leanprover/lean4:v4.34.0-rc2 "$test_dir/lean-toolchain"
+expect_failure check_toolchain leanprover/lean4:v4.34.1 "$test_dir/lean-toolchain"
 rg -q 'toolchain mismatch' "$test_dir/negative.log"
 
 for dependency in talos mathlib; do

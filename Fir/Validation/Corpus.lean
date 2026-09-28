@@ -14,6 +14,9 @@ private def uint8ArrayGetExternalTrace?
   else if toolchain == "leanprover/lean4:4.34.0-rc2" &&
       githash == "6a10ac8c22beadecabdbb0919c2b50214762f91d" then
     some #[``Array.get!Internal]
+  else if toolchain == "leanprover/lean4:4.34.1" &&
+      githash == "5045d0056413266e57c625dcd7c365b10e377c52" then
+    some #[``Array.get!Internal]
   else
     none
 
@@ -28,14 +31,22 @@ private def uint8ArrayGetExternalTrace : Array Lean.Name :=
 #guard uint8ArrayGetExternalTrace?
   "leanprover/lean4:4.34.0-rc2" "6a10ac8c22beadecabdbb0919c2b50214762f91d" ==
     some #[``Array.get!Internal]
+#guard uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.34.1" "5045d0056413266e57c625dcd7c365b10e377c52" ==
+    some #[``Array.get!Internal]
 #guard (uint8ArrayGetExternalTrace?
   "leanprover/lean4:4.35.0" "unreviewed").isNone
 #guard (uint8ArrayGetExternalTrace?
   "leanprover/lean4:4.33.0" "6a10ac8c22beadecabdbb0919c2b50214762f91d").isNone
 #guard (uint8ArrayGetExternalTrace?
   "leanprover/lean4:4.34.0-rc2" "d8b18978322de05a8f3dba51ef03cf5461676c17").isNone
+#guard (uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.34.1" "6a10ac8c22beadecabdbb0919c2b50214762f91d").isNone
 #guard uint8ArrayGetExternalTrace?
   "leanprover/lean4:4.34.0-rc2" "6a10ac8c22beadecabdbb0919c2b50214762f91d" !=
+    some #[``instInhabitedUInt8, ``Array.get!Internal]
+#guard uint8ArrayGetExternalTrace?
+  "leanprover/lean4:4.34.1" "5045d0056413266e57c625dcd7c365b10e377c52" !=
     some #[``instInhabitedUInt8, ``Array.get!Internal]
 #guard uint8ArrayGetExternalTrace?
   "leanprover/lean4:4.34.0-rc2" "6a10ac8c22beadecabdbb0919c2b50214762f91d" !=

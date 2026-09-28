@@ -71,9 +71,17 @@ def audit_compiled(root: Path) -> int:
         ["bash", str(root / "tooling/talos-434/setup.sh")],
         cwd=root, env=env, check=True,
     )
+    toolchain = (project / "lean-toolchain").read_text(encoding="utf-8").strip()
+    profiles = {
+        "leanprover/lean4:v4.34.0-rc2": "lean-4.34-rc2",
+        "leanprover/lean4:v4.34.1": "lean-4.34.1",
+    }
+    profile = profiles.get(toolchain)
+    if profile is None:
+        raise RuntimeError(f"unreviewed Talos toolchain: {toolchain!r}")
     subprocess.run(
         [sys.executable, str(root / "scripts/validate_trusted_assumptions.py"),
-         "--profile", "lean-4.34-rc2", "--lean-project", str(project)],
+         "--profile", profile, "--lean-project", str(project)],
         cwd=root, env=env, check=True,
     )
     # Refresh the dependency cone before forcing the audit itself. This prevents

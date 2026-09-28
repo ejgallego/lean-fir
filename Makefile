@@ -105,7 +105,10 @@ bug-cards:
 	@bash scripts/quiet-run.sh bug-cards -- python3 scripts/validate_bug_cards.py
 
 trusted-assumptions:
-	@if grep -qx 'leanprover/lean4:v4.34.0-rc2' lean-toolchain; then \
+	@if grep -qx 'leanprover/lean4:v4.34.1' lean-toolchain; then \
+		bash scripts/quiet-run.sh trusted-assumptions -- python3 scripts/validate_trusted_assumptions.py \
+			--profile lean-4.34.1 --lean-project "$(CURDIR)"; \
+	elif grep -qx 'leanprover/lean4:v4.34.0-rc2' lean-toolchain; then \
 		bash scripts/quiet-run.sh trusted-assumptions -- python3 scripts/validate_trusted_assumptions.py \
 			--profile lean-4.34-rc2 --lean-project "$(CURDIR)"; \
 	else \
@@ -187,7 +190,7 @@ retained-initializer-check:
 clean:
 	@bash scripts/quiet-run.sh clean -- lake clean
 
-# Separate documentation workspace; imports the accepted RC2 Talos overlay.
+# Separate documentation workspace; imports the accepted Lean 4.34.1 Talos overlay.
 blueprint: talos-setup
 	@mkdir -p .deps/tmp
 	@cd blueprint && TMPDIR="$(CURDIR)/.deps/tmp" bash ../scripts/quiet-run.sh blueprint -- lake exe vbp build
