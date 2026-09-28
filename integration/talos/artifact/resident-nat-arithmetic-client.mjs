@@ -286,6 +286,78 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   assert.equal(apply(mod, dividend, divisor), dividend % divisor);
   assert.equal(apply(mod, divisor - 1n, divisor), divisor - 1n);
 
+  // Keep division in the differential: both wrappers previously confused a
+  // zero low limb with a zero divisor (FIR-BUG-wasm-none-nat-divisor-zero-low-limb).
+  const decrement = exported(instance, "fir_dec_once");
+  const release = word => decrement(word, 1); // Checked tagged/object boundary.
+  const increment = exported(instance, "fir_inc_once");
+  function canonicalResult(word, expected) {
+    assert.equal(naturalValue(host, word), expected);
+    if (expected <= 0x7fff_ffffn) {
+      assert.equal(host.classify(word), "immediate", "noncanonical small result");
+    } else {
+      const header = host.readHeader(word);
+      const limbs = Math.ceil(expected.toString(2).length / 64);
+      assert.equal(header.kind, 5);
+      assert.equal(header.aux1, limbs);
+      assert.equal(header.bytes, 32 + 8 * limbs, "noncanonical natural extent");
+      assert.equal(header.aux0, expected < (1n << 63n) ? 1 : 2);
+      assert.equal(header.aux2, 0);
+      assert.equal(header.aux3, 0);
+    }
+  }
+  function divModCase(n, d, alias = false) {
+    const a = naturalInput(host, n), b = alias ? a : naturalInput(host, d);
+    // Explicitly exercise borrowed shared values, including a == b.
+    increment(a); increment(b);
+    const snapshot = word => host.classify(word) === "immediate" ? null : host.readHeader(word);
+    const ah = snapshot(a), bh = snapshot(b);
+    for (const [operation, expected] of [[div, d === 0n ? 0n : n / d],
+      [mod, d === 0n ? n : n % d], [modCaller, d === 0n ? n : n % d]]) {
+      const result = operation(a, b);
+      canonicalResult(result, expected);
+      release(result);
+      synchronize(host);
+      assert.equal(naturalValue(host, a), n, "div/mod changed borrowed dividend");
+      assert.equal(naturalValue(host, b), d, "div/mod changed borrowed divisor");
+      assert.deepStrictEqual(snapshot(a), ah, "div/mod consumed borrowed dividend");
+      assert.deepStrictEqual(snapshot(b), bh, "div/mod consumed borrowed divisor");
+    }
+    release(a); release(b); // Shared references introduced above.
+    release(a);
+    if (!alias) release(b);
+  }
+  for (const bit of [31n, 32n, 63n, 64n, 65n, 127n, 128n, 129n, 193n, 257n]) {
+    const boundary = 1n << bit;
+    for (const d of [0n, 1n, boundary - 1n, boundary, boundary + 1n]) {
+      divModCase(2n * boundary + 3n, d);
+    }
+    divModCase(boundary - 1n, boundary);
+    divModCase(boundary, boundary, true);
+    divModCase(0n, boundary);
+  }
+  let seed = 0x1234_5678n;
+  const randomWord = () => (seed = BigInt.asUintN(64,
+    seed * 6364136223846793005n + 1442695040888963407n));
+  for (let index = 0; index < 48; index++) {
+    const n = (randomWord() << 192n) | (randomWord() << 128n) |
+      (randomWord() << 64n) | randomWord();
+    const d = (randomWord() << 64n) | (index % 3 === 0 ? 0n : randomWord());
+    divModCase(n, d);
+  }
+  const recycledLeft = naturalInput(host, dividend), recycledRight = naturalInput(host, divisor);
+  const recycle = () => {
+    const result = mod(recycledLeft, recycledRight);
+    canonicalResult(result, dividend % divisor);
+    release(result);
+    assert.equal(host.readHeader(result, false).live, false,
+      "owned multi-limb remainder did not retire through the resident release path");
+  };
+  // Promoted tagged values are persistent in this representation; require
+  // correct ordinary-result retirement, not an unsupported flat-arena promise.
+  for (let index = 0; index < 32; index++) recycle();
+  release(recycledLeft); release(recycledRight);
+
   for (const [value, count] of [
     [0n, 65n],
     [1n, 0n],

@@ -854,20 +854,13 @@ private def immediateMod : List Instruction :=
           .call (.declaration ResidentNumeric.makeNaturalName)] ++
         retypeRawResult)]
 
-/-- The pre-existing checked arbitrary-precision implementation, retained as
-the exact fallback for mixed and heap-backed representations. -/
-private def checkedModFallback : List Instruction := validateInputs ++ [
-  .localGet rightParam,
-  .i32Const .uint32 0,
-  .call (.declaration ResidentBigNumeric.naturalLowName),
-  .i32Const .uint32 0,
-  .i32Eq,
-  .localGet rightParam,
-  .i32Const .uint32 0,
-  .call (.declaration ResidentBigNumeric.naturalHighName),
-  .i32Const .uint32 0,
-  .i32Eq,
-  .i32And,
+/-- After validation, zero has exactly the immediate tagged word 1. A zero
+low limb does not imply a zero arbitrary-precision divisor. -/
+private def rightIsCanonicalZero : List Instruction := [
+  .localGet rightParam, .i32Const .tobject 1, .i32Eq]
+
+/-- Checked arbitrary-precision fallback for mixed and heap-backed operands. -/
+private def checkedModFallback : List Instruction := validateInputs ++ rightIsCanonicalZero ++ [
   .ifElse (incrementLocal leftParam ++ [.localGet leftParam, .ret]) callGenericMod]
 
 def divFunction : Function := {
@@ -875,18 +868,7 @@ def divFunction : Function := {
   params := #[(leftParam, .tobject), (rightParam, .tobject)]
   results := #[.tobject]
   locals := #[]
-  body := validateInputs ++ [
-    .localGet rightParam,
-    .i32Const .uint32 0,
-    .call (.declaration ResidentBigNumeric.naturalLowName),
-    .i32Const .uint32 0,
-    .i32Eq,
-    .localGet rightParam,
-    .i32Const .uint32 0,
-    .call (.declaration ResidentBigNumeric.naturalHighName),
-    .i32Const .uint32 0,
-    .i32Eq,
-    .i32And,
+  body := validateInputs ++ rightIsCanonicalZero ++ [
     .ifElse (returnImmediate 1) callGenericDiv] }
 
 def modFunction : Function := {
@@ -1203,7 +1185,8 @@ def residentExampleModule : Except String Module := do
     functions := module.functions ++ #[shiftRightCallerFunction,
       landCallerFunction, modCallerFunction, mulCallerFunction]
     exports := (#[shiftRightCallerName, landCallerName, modCallerName,
-      mulCallerName]).foldl Fir.Wasm.addUnique module.exports }
+      mulCallerName, ResidentRelease.decrementOnceName,
+      ResidentReferenceCount.incrementOnceName]).foldl Fir.Wasm.addUnique module.exports }
   let module ← internalizeAvailable module
     |>.mapError fun error => s!"Nat arithmetic: {repr error}"
   ResidentNatShift.internalizeAvailable module
