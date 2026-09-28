@@ -499,7 +499,16 @@ def specializeCheckedDecrements (module : Module) : Module :=
 
 private def checkedDecrementCalls (calls : List Instruction) :
     List Instruction :=
-  checkedDecrementLocalCalls objectParam calls
+  /- The wrapper has already paid its call boundary. Combine the erased-zero
+  and tagged-immediate predicates into one branch; every even nonzero value
+  still enters the complete checked heap path. -/
+  [.localGet objectParam,
+    .i32Eqz,
+    .localGet objectParam,
+    .i32Const .uint32 1,
+    .i32And,
+    .i32Or,
+    .ifElse [] calls]
 
 private def decrementWrapper (ordinal amount : Nat) (check : Bool) :
     Except LinkError Function := do
@@ -813,8 +822,14 @@ def manifest : Json :=
       (decrementOnceCall true) ++ [.ret]
   | .error _ => false
 
-#guard checkedDecrementLocal objectParam == checkedDecrementCalls
-  (decrementOnceCall true)
+#guard checkedDecrementCalls (decrementOnceCall true) == [
+  .localGet objectParam,
+  .i32Eqz,
+  .localGet objectParam,
+  .i32Const .uint32 1,
+  .i32And,
+  .i32Or,
+  .ifElse [] (decrementOnceCall true)]
 
 #guard (specializeCheckedDecrementFunction exampleCheckedCaller).body ==
   exampleCheckedCaller.body

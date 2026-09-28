@@ -116,7 +116,9 @@ export async function checkResidentReleases(bytes) {
     "shared closure child did not decrement once");
 
   exports.resident_dec_checked(0);
+  exports.resident_dec_checked(1);
   exports.resident_dec_checked(3);
+  exports.resident_dec_checked(0xffffffff);
 
   const aboveOne = 1408;
   const persistent = 1472;
