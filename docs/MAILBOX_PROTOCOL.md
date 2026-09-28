@@ -72,8 +72,8 @@ ownership across repositories in one thread.
 
 ## Message Files
 
-Protocol v1 stores one immutable Markdown file per message directly in the
-mailbox directory:
+Protocol v1 stores one immutable Markdown file per message in the mailbox
+directory (or `archive/` after terminal-thread archival):
 
 ```text
 .fir-mailbox/ROOT-FIR-20260813-001.md
@@ -439,6 +439,37 @@ Delete mailbox files only when the thread is `closed` or `cancelled` and its
 durable disposition is recorded. Delete the complete thread, not selected
 events. Open, claimed, blocked, completed-but-unclosed, and unacknowledged
 threads remain.
+
+Prefer non-destructive archival to deletion:
+
+```bash
+scripts/mailbox archive          # read-only plan and pending-review count
+scripts/mailbox archive --apply  # maintainer-authorized maintenance only
+```
+
+This moves whole terminal threads into `.fir-mailbox/archive/`, preserving
+every event byte. Nonterminal threads (including `completed`) and terminal
+threads transitively referenced by them remain in place. References include
+message IDs in prose, not only `parent-thread` and `depends-on`. Age never
+closes a thread; reconcile completed work only from its recorded acceptance,
+in the original thread and under the requester's authority. Review that queue
+with `scripts/mailbox list --state completed --verbose`.
+
+`check`, `brief`, `list --all`, and delivery's ID/transition checks include
+archived history. `brief` prints the historical path when applicable. There is
+no separate database, index, daemon, or automatic pruning. This reduces active
+directory clutter, **not total disk usage or validation work**. Use current
+main's mailbox tool from old worktrees: pre-archive tooling sees only the flat
+files. A reserved `ARCHIVE.md` guard makes those older readers fail closed
+rather than deliver with incomplete ID/transition validation. Upgrade or invoke
+the primary checkout's current tool; do not remove the guard.
+
+Archival takes the delivery lock and renames files on the same filesystem.
+Interrupted moves remain valid across the two directories: after confirming
+no operation is running, remove a stale `tmp/delivery.lock` and rerun `archive
+--apply`. A concurrent read may need retrying during movement. Do not manually
+split, edit, or delete archived threads. Archive integrity failures block
+delivery just like failures in the active directory.
 
 Mailbox deletion does not authorize worktree or branch deletion. Worktree
 retirement separately confirms cleanliness, commit reachability, remote/PR

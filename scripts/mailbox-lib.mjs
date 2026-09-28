@@ -25,8 +25,9 @@ const worktreePattern = /^\.worktrees\/[a-z0-9][a-z0-9._-]*$/;
 const codexSessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const routeFileName = "codex-routes.json";
 const ignoredMetadataNames = new Set(["README.md"]);
-const reservedMetadataNames = new Set([routeFileName]);
-const reservedDirectoryNames = new Set(["tmp"]);
+export const archiveGuardName = "ARCHIVE.md";
+const reservedMetadataNames = new Set([routeFileName, archiveGuardName]);
+const reservedDirectoryNames = new Set(["tmp", "archive"]);
 
 export const codexRouteProtocol = "fir.mailbox.codex-routes/v1";
 
@@ -585,7 +586,23 @@ function loadMailbox(mailboxPath) {
   if (!existsSync(mailboxPath)) {
     return { mailboxPath, messages, ignoredFiles, parseErrors };
   }
-  for (const entry of readdirSync(mailboxPath, { withFileTypes: true })) {
+  // History stays part of validation and ID uniqueness, not a second mailbox.
+  // A partly moved thread after an interrupted archive is still readable.
+  const entries = readdirSync(mailboxPath, { withFileTypes: true })
+    .map((entry) => ({ entry, directory: "" }));
+  const archive = entries.find(({ entry }) => entry.name === "archive");
+  if (archive) {
+    if (!archive.entry.isDirectory()) parseErrors.push("archive must be a directory, not a symlink or file");
+    else entries.push(...readdirSync(resolve(mailboxPath, "archive"), { withFileTypes: true })
+      .map((entry) => ({ entry, directory: "archive" })));
+  }
+  for (const { entry, directory } of entries) {
+    const relativeFile = directory ? `${directory}/${entry.name}` : entry.name;
+    if (directory && (!entry.isFile() || !messageIdPattern.test(entry.name.replace(/\.md$/, "")) ||
+        !entry.name.endsWith(".md"))) {
+      parseErrors.push(issue(relativeFile, "archive accepts only regular message files"));
+      continue;
+    }
     if (!entry.isFile()) {
       if (!reservedDirectoryNames.has(entry.name)) ignoredFiles.push(`${entry.name}/`);
       continue;
@@ -599,9 +616,9 @@ function loadMailbox(mailboxPath) {
       ignoredFiles.push(entry.name);
       continue;
     }
-    const file = resolve(mailboxPath, entry.name);
+    const file = resolve(mailboxPath, relativeFile);
     try {
-      const message = parseMessage(readFileSync(file, "utf8"), entry.name);
+      const message = parseMessage(readFileSync(file, "utf8"), relativeFile);
       const messageId = message.header["message-id"];
       const expected = messageId ? `${messageId}.md` : null;
       if (expected && entry.name !== expected) {
@@ -621,9 +638,14 @@ function loadMailbox(mailboxPath) {
 export function inspectMailbox(mailboxPath) {
   const loaded = loadMailbox(mailboxPath);
   const validated = validateMessages(loaded.messages);
+  const states = new Map(validated.threads.map((thread) => [thread.threadId, thread.state]));
+  const archiveErrors = loaded.messages
+    .filter((message) => message.file.startsWith("archive/") &&
+      !terminalStates.has(states.get(message.header["thread-id"])))
+    .map((message) => issue(message.file, "only terminal threads may be archived"));
   return {
     ...loaded,
-    errors: [...loaded.parseErrors, ...validated.errors],
+    errors: [...loaded.parseErrors, ...validated.errors, ...archiveErrors],
     threads: validated.threads,
   };
 }

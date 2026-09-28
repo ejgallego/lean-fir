@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync } from "node:fs";
+import { archiveMailbox } from "./mailbox-archive.mjs";
 
 import {
   bindCodexRoute,
@@ -25,6 +26,7 @@ function usage(print = console.error) {
       "[--verbose|--json] [--all] [--mailbox PATH]",
     "  scripts/mailbox brief MESSAGE-ID [--mailbox PATH]",
     "  scripts/mailbox check [--mailbox PATH]",
+    "  scripts/mailbox archive [--apply] [--mailbox PATH]",
     "  scripts/mailbox deliver DRAFT [--no-notify|--notify-session SESSION] " +
       "[--mailbox PATH]",
     "  scripts/mailbox route bind ADDRESS SESSION [--mailbox PATH]",
@@ -37,8 +39,8 @@ function usage(print = console.error) {
 
 function parseArgs(argv) {
   const [command, ...arguments_] = argv;
-  if (!new Set(["brief", "check", "list", "deliver", "route"]).has(command)) {
-    throw new Error("expected `brief`, `check`, `list`, `deliver`, or `route`");
+  if (!new Set(["brief", "check", "list", "deliver", "route", "archive"]).has(command)) {
+    throw new Error("expected `brief`, `check`, `list`, `deliver`, `route`, or `archive`");
   }
   const rest = [...arguments_];
   const routeAction = command === "route" ? rest.shift() : null;
@@ -49,6 +51,7 @@ function parseArgs(argv) {
     command,
     routeAction,
     all: false,
+    apply: false,
     json: false,
     verbose: false,
     mailbox: null,
@@ -64,6 +67,7 @@ function parseArgs(argv) {
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index];
     if (argument === "--all") options.all = true;
+    else if (argument === "--apply" && command === "archive") options.apply = true;
     else if (argument === "--json") options.json = true;
     else if (argument === "--verbose") options.verbose = true;
     else if (argument === "--for") {
@@ -184,6 +188,7 @@ function brief(result, messageId) {
     `worktree=${header.worktree}`,
   ].filter((entry) => !entry.endsWith("=undefined"));
   console.log(`${header["message-id"]} ${header.kind}/${header.state}: ${header.subject}`);
+  if (message.file.startsWith("archive/")) console.log(`history: ${result.mailboxPath}/${message.file}`);
   if (identity.length > 0) console.log(identity.join(" "));
   const parts = sections(body);
   const outcome = matchingSection(parts, /outcome|result|decision|scope|blocker/i) || body;
@@ -326,6 +331,11 @@ if (options) {
           );
         }
       }
+    } else if (options.command === "archive") {
+      const plan = archiveMailbox(mailboxPath, { apply: options.apply });
+      console.log(`${options.apply ? "archived" : "would archive"}: ${plan.threads.length} terminal thread(s), ${plan.files.length} message(s)`);
+      console.log(`retained: ${plan.protectedTerminalThreads} referenced terminal thread(s), ${plan.reviewPendingThreads} completed thread(s) awaiting closure`);
+      if (!options.apply) console.log("dry run; use --apply to move eligible history into archive/ (no deletion)");
     } else if (options.command === "route") {
       if (options.routeAction === "bind") {
         const route = bindCodexRoute(mailboxPath, options.routeAddress,

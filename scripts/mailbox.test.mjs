@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { archiveMailbox, planArchive } from "./mailbox-archive.mjs";
 
 import {
   bindCodexRoute,
@@ -1203,4 +1204,121 @@ test("CLI rejects a nonexistent explicit mailbox", async () => {
 test("default mailbox resolves to the primary checkout from a linked worktree", () => {
   const primary = primaryCheckout(process.cwd());
   assert.equal(resolveMailbox(), join(primary, ".fir-mailbox"));
+});
+
+async function cancelledThread(mailbox, number, body = "## Decision\n\nDisposable test evidence; no source work.") {
+  const thread = `ROOT-FIR-20260813-${number}`;
+  const tail = `ROOT-FIR-20260814-${number}`;
+  await put(mailbox, thread, message({ id: thread }));
+  await put(mailbox, tail, message({ id: tail, thread, reply: thread,
+    time: "2026-08-14T14:30:00+02:00",
+    kind: "cancellation", state: "cancelled", fields: { disposition: "discarded" }, body }));
+  return { thread, tail };
+}
+
+test("archive dry run is read-only; apply preserves bytes, history, routes and global IDs", async () => {
+  await withMailbox(async (mailbox, root) => {
+    const { thread, tail } = await cancelledThread(mailbox, "001");
+    const original = readFileSync(join(mailbox, `${tail}.md`));
+    await writeFile(join(mailbox, "codex-routes.json"), "untouched metadata\n");
+    const before = inspectMailbox(mailbox);
+    const files = await readdir(mailbox);
+    assert.deepEqual(planArchive(mailbox).threads, [thread]);
+    assert.deepEqual(await readdir(mailbox), files);
+    const dry = spawnSync(script, ["archive", "--mailbox", mailbox], { encoding: "utf8" });
+    assert.equal(dry.status, 0, dry.stderr);
+    assert.match(dry.stdout, /dry run/);
+    assert.deepEqual(await readdir(mailbox), files);
+    archiveMailbox(mailbox, { apply: true });
+    // Legacy loaders parse every non-reserved Markdown file and fail closed.
+    assert.throws(() => parseMessage(readFileSync(join(mailbox, "ARCHIVE.md"), "utf8"), "ARCHIVE.md"));
+    assert.deepEqual(readFileSync(join(mailbox, "archive", `${tail}.md`)), original);
+    assert.equal(readFileSync(join(mailbox, "codex-routes.json"), "utf8"), "untouched metadata\n");
+    const after = inspectMailbox(mailbox);
+    assert.deepEqual(after.errors, []);
+    assert.deepEqual(after.threads, before.threads);
+    assert.equal(after.messages.length, before.messages.length);
+    assert.equal(archiveMailbox(mailbox, { apply: true }).files.length, 0);
+    const brief = spawnSync(script, ["brief", tail, "--mailbox", mailbox], { encoding: "utf8" });
+    assert.equal(brief.status, 0, brief.stderr);
+    assert.match(brief.stdout, /history: .*archive\//);
+    const draft = join(root, "duplicate.md");
+    await writeFile(draft, message({ id: thread }));
+    assert.throws(() => deliverMessage(mailbox, draft), /duplicate message ID/);
+  });
+});
+
+test("archive protects unfinished threads and transitive header/body references", async () => {
+  await withMailbox(async (mailbox) => {
+    const older = await cancelledThread(mailbox, "001");
+    const referenced = await cancelledThread(mailbox, "002", `## Decision\n\nSee ${older.tail}.`);
+    const independent = await cancelledThread(mailbox, "003");
+    const active = "ROOT-FIR-20260815-001";
+    await put(mailbox, active, message({ id: active, time: "2026-08-15T14:30:00+02:00",
+      fields: { "depends-on": referenced.thread } }));
+    const pending = "ROOT-FIR-20260815-002";
+    await put(mailbox, pending, message({ id: pending, time: "2026-08-15T14:30:00+02:00",
+      fields: { "requires-ack": "false" } }));
+    await put(mailbox, "FIR-ROOT-20260815-001", message({
+      id: "FIR-ROOT-20260815-001", thread: pending, reply: pending,
+      time: "2026-08-15T14:30:00+02:00",
+      from: "fir/root", to: "lean-zip/root", kind: "completion", state: "completed",
+      fields: { disposition: "no-action" },
+    }));
+    const plan = planArchive(mailbox);
+    assert.deepEqual(plan.threads, [independent.thread]);
+    assert.equal(plan.protectedTerminalThreads, 2);
+    assert.equal(plan.reviewPendingThreads, 1);
+    archiveMailbox(mailbox, { apply: true });
+    assert.deepEqual(inspectMailbox(mailbox).errors, []);
+    assert.ok((await readdir(mailbox)).includes(`${older.tail}.md`));
+    await put(mailbox, "ROOT-FIR-20260815-003", message({
+      id: "ROOT-FIR-20260815-003", thread: pending, reply: "FIR-ROOT-20260815-001",
+      time: "2026-08-15T14:30:00+02:00", kind: "closure", state: "closed",
+      fields: { disposition: "no-action" },
+    }));
+    assert.deepEqual(archiveMailbox(mailbox, { apply: true }).threads, [pending]);
+    assert.deepEqual(inspectMailbox(mailbox).errors, []);
+  });
+});
+
+test("archive shares delivery lock and can resume a partially moved thread", async () => {
+  await withMailbox(async (mailbox) => {
+    const { thread, tail } = await cancelledThread(mailbox, "001");
+    await mkdir(join(mailbox, "tmp"));
+    const lock = join(mailbox, "tmp", "delivery.lock");
+    await writeFile(lock, "someone else's lock");
+    assert.throws(() => archiveMailbox(mailbox, { apply: true }), /EEXIST/);
+    assert.equal(readFileSync(lock, "utf8"), "someone else's lock");
+    await rm(lock);
+    await mkdir(join(mailbox, "archive"));
+    await rename(join(mailbox, `${thread}.md`), join(mailbox, "archive", `${thread}.md`));
+    assert.deepEqual(inspectMailbox(mailbox).errors, []);
+    const result = archiveMailbox(mailbox, { apply: true });
+    assert.deepEqual(result.files, [`${tail}.md`]);
+    assert.deepEqual(inspectMailbox(mailbox).errors, []);
+    assert.equal(planArchive(mailbox).files.length, 0);
+  });
+});
+
+test("archive fails closed on corrupt history, duplicate IDs and nonterminal archived threads", async () => {
+  await withMailbox(async (mailbox) => {
+    const { thread } = await cancelledThread(mailbox, "001");
+    archiveMailbox(mailbox, { apply: true });
+    await put(mailbox, thread, message({ id: thread }));
+    assert.throws(() => archiveMailbox(mailbox, { apply: true }), /duplicate message ID/);
+    await rm(join(mailbox, `${thread}.md`));
+    await writeFile(join(mailbox, "archive", `${thread}.md`), "invalid event");
+    assert.throws(() => planArchive(mailbox), /integrity checks/);
+  });
+  await withMailbox(async (mailbox) => {
+    await mkdir(join(mailbox, "archive"));
+    const id = "ROOT-FIR-20260813-001";
+    await put(join(mailbox, "archive"), id, message({ id }));
+    assert.throws(() => planArchive(mailbox), /only terminal threads/);
+  });
+  await withMailbox(async (mailbox, root) => {
+    await symlink(root, join(mailbox, "archive"));
+    assert.throws(() => planArchive(mailbox), /archive must be a directory/);
+  });
 });
