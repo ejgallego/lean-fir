@@ -78,12 +78,14 @@ for (const limbs of [2n, 3n, 8n, 32n, 64n]) {
 // Reuse both exact and trimmed construction extents. Poison dead payload bytes
 // except the recycler link word, so fresh zero-filled Wasm memory cannot mask
 // missing initialization. All input allocation happens before the warm loop.
-for (const a of [(1n << 128n) - 1n, 1n << 64n]) {
+for (const [a, fullExtent] of [[(1n << 127n) - 1n, true], [1n << 64n, false]]) {
   const x = input(a), y = input(a + 2n);
+  const inputLimbs = host.readHeader(x).aux1 + host.readHeader(y).aux1;
   const run = () => {
     const p = e.fir_nat_mul_generic(x, y) >>> 0;
     assert.equal(read(p), a * (a + 2n));
     const h = host.readHeader(p);
+    assert.equal(h.aux1 === inputLimbs, fullExtent, 'expected normalization arm');
     release(p);
     new Uint8Array(e.memory.buffer, p + 36, h.bytes - 36).fill(0xa5);
   };

@@ -37,7 +37,7 @@ These are same-toolchain fixture sizes, not consumer speed measurements.
 Focused raw and O3 tests pass 1,828 products each, including aliased/shared values,
 maximal carries, uneven lengths, canonical boundaries and malformed inputs.
 Both also pass 2,000 poisoned-payload reuse rounds with flat warm frontiers.
-Final diagnostic frontier is 118,784 bytes; arena capacity is 131,072 bytes.
+Final diagnostic frontier is 118,776 bytes; arena capacity is 131,072 bytes.
 Persistent promoted outputs retain the existing non-reclaiming convention.
 
 The immutable local package is
