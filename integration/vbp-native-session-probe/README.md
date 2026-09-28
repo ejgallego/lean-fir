@@ -4,8 +4,18 @@ This local-only fixture targets the real
 `VersoBlueprint.Experimental.VirPreview.Renderer.render` root, as revised by
 `ROOT-W7-20260913-002..003`. The directory retains the original request name;
 NativeSession component/session roots are no longer selected.
-It does not implement a browser adapter or exercise React/callback lifetimes.
+The capture/link probe itself does not implement a browser adapter or exercise
+React/callback lifetimes.
 The historical `integration/vbp-verso-viewer/` package is untouched.
+
+## Tracked frozen-package adapter producer
+
+The separate [adapter producer](adapter/README.md) promotes the accepted UTF-8
+depth-scratch host and focused lifecycle controls from frozen package inputs.
+It preserves the compiled renderer Wasm byte-for-byte; it does not run the
+historical capture commands below, change live pins, or establish a public FIR
+runtime API. The producer runs from accepted main's 4.34.1 checkout while its
+BUILD metadata retains the frozen Wasm's original RC2 compilation provenance.
 
 Toolchain routing update (`ROOT-W7-20260915-036`): subsequent VBP work must
 start from official `tooling/lean-4.34` at

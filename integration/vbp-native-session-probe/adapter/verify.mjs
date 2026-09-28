@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {readFileSync,readdirSync} from 'node:fs';
+const hash=value=>createHash('sha256').update(value).digest('hex');
+const here=import.meta.dirname,build=JSON.parse(readFileSync(new URL('./BUILD.json',import.meta.url)));
+assert.equal(hash(readFileSync(new URL('./component.wasm',import.meta.url))),build.baselinePackage.wasmSha256);
+const rows=readFileSync(new URL('./SHA256SUMS',import.meta.url),'utf8').trim().split('\n');
+for(const row of rows){const m=/^([0-9a-f]{64})  (.+)$/.exec(row);assert.ok(m);assert.equal(hash(readFileSync(new URL('./'+m[2],import.meta.url))),m[1]);}
+assert.deepEqual(readdirSync(here).sort(),[...rows.map(row=>row.slice(66)),'SHA256SUMS'].sort());
+const source=readFileSync(new URL('./host-prototype.mjs',import.meta.url),'utf8');
+const start=source.indexOf('  const string = value => {');
+const end=source.indexOf('\n  const result = word => {',start);
+assert.ok(start>=0&&end>start);
+const stringSource=source.slice(start,end);
+assert.ok(stringSource.includes('const scratchIndex = stringScratchDepth++'));
+assert.ok(stringSource.includes('const encoded = encoder.encodeInto(value, scratch)'));
+assert.ok(stringSource.indexOf('p = allocate(size)') < stringSource.indexOf('writeHeader(p, 4, size, 1, length)'));
+assert.ok(stringSource.indexOf('writeHeader(p, 4, size, 1, length)') < stringSource.indexOf('new Uint8Array(memory.buffer, p + HEADER, length)'));
+assert.ok(stringSource.includes('finally {\n      stringScratchDepth = scratchIndex;'));
+assert.ok(source.includes('stringScratch.length = 0;'));
+assert.ok(!source.includes('const bytes = encoder.encode(value)'));
+console.log(JSON.stringify({pass:true,packageId:build.packageId,wasm:build.wasm.sha256,files:rows.length}));

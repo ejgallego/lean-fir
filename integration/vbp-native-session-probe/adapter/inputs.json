@@ -1,0 +1,9 @@
+{
+  "baselinePackage": "1c3b87b3f270114a3a56eeb7",
+  "baselineBuildSHA256": "0d8e63fc792486ba42091197095338384f71b2fcd6b45f2d09748d4415b3ee17",
+  "baselineSumsSHA256": "dfa13acc5d0f3ea7a8fc7cfb8e0ed8c3b02862f9be8cc4e49d17606ece166615",
+  "wasmSHA256": "b70d5b37c7954883a7e456821b7f6d4d31e0ef5903f77ff25c240a9b9f077d87",
+  "acceptedPackage": "b5b3a053e4135f913504a376",
+  "acceptedHostSHA256": "5e6e494ea31860d6af3ee32e14cd4ea5c3d13c0207dd46831021a671d5a0e120",
+  "acceptedSmokeSHA256": "224f97d2d5780b650d4df191ec4b5b9004b254127875c7c28c8ce88b612547df"
+}
