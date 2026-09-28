@@ -67,6 +67,10 @@ profile-check: binaryen-check
 		bash scripts/quiet-run.sh tooling-profile -- node --test tooling/profile/node-profile.test.mjs
 
 array-probe-check: binaryen-check
+	@cmp -s "$(ARRAY_PROBE_DIR)/lean-toolchain" "$(REPO_ROOT)/lean-toolchain" || { \
+		echo "Array probe must use FIR's current Lean toolchain" >&2; \
+		exit 1; \
+	}
 	cd "$(ARRAY_PROBE_DIR)" && \
 		LAKE_CACHE_DIR="$(FIR_LAKE_CACHE_DIR)" \
 		LAKE_ARTIFACT_CACHE=true \

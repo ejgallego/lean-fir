@@ -12,8 +12,11 @@ Run the complete probe gate from the FIR root:
 make tooling-check
 ```
 
-The target builds the ordinary Lean source with FIR's artifact-cache settings,
-checks the raw module, creates the optimized and stripped diagnostic artifact,
+The target builds the ordinary Lean source with FIR's artifact-cache settings
+and the same Lean toolchain as the FIR root (currently 4.34.0-rc2). A mismatched
+nested pin fails rather than producing misleading evidence. The package records
+a toolchain-specific input layout in `BUILD.json`. The target checks the raw
+module, creates the optimized and stripped diagnostic artifact,
 verifies identity capture against an unnamed control build, checks the final
 module, and validates its final-function sidecar. All Lake, Binaryen, and
 adapter scratch remains in this worktree's `.lake`, `.deps`, or `_build`
@@ -38,9 +41,11 @@ node benchmark.mjs _build/package/array-probe.wasm
 
 The correctness gate requires read calls to allocate nothing, exclusive
 updates to have the same frontier growth as allocation alone regardless of
-round count, shared mutation to copy once per deliberately retained alias, and
-every success or trap to rewind to the persistent checkpoint. Timings remain
-raw diagnostics with entry execution, rewind, and total kept separate. Each
-configuration uses a fresh instance while sharing one compiled module. The
-client-owned lean-zip workload and VIR browser catalog own comparative
-schedules, summaries, and performance conclusions.
+round count, shared mutation to preserve the pre-update value with the exact
+toolchain-specific copy count, and every success or trap to rewind to the
+persistent checkpoint. Under 4.34, the first shared update copies and later
+updates reuse the new Array. Timings remain raw diagnostics with entry
+execution, rewind, and total kept separate. Each configuration uses a fresh
+instance while sharing one compiled module. The client-owned lean-zip workload
+and VIR browser catalog own comparative schedules, summaries, and performance
+conclusions.

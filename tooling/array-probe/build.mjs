@@ -12,6 +12,17 @@ import { basename, join, resolve } from "node:path";
 const binaryen = process.env.FIR_BINARYEN_DIR;
 assert(binaryen, "set FIR_BINARYEN_DIR to Binaryen's bin directory");
 const root = resolve(import.meta.dirname, "../..");
+const toolchain = readFileSync(resolve(import.meta.dirname, "lean-toolchain"),
+  "utf8").trim();
+const rootToolchain = readFileSync(join(root, "lean-toolchain"), "utf8").trim();
+assert.equal(toolchain, rootToolchain,
+  "Array probe must compile with FIR's current Lean toolchain");
+const inputLayouts = {
+  "leanprover/lean4:v4.33.0": "lean-4.33-Array-UInt32/v1",
+  "leanprover/lean4:v4.34.0-rc2": "lean-4.34-Array-UInt32/v1",
+};
+const inputLayout = inputLayouts[toolchain];
+assert(inputLayout, `unsupported Array-probe toolchain ${toolchain}`);
 const functionTool = join(root, "tooling/wasm/function-index.mjs");
 const output = resolve(import.meta.dirname, "_build/package");
 mkdirSync(output, { recursive: true });
@@ -66,7 +77,7 @@ const build = {
   lean: execFileSync("lean", ["--version"], {
     cwd: import.meta.dirname, encoding: "utf8",
   }).trim(),
-  inputLayout: "lean-4.33-Array-UInt32/v1",
+  inputLayout,
   ownership: {
     memoryOwner: "module",
     input: "one adapter-owned persistent Array per instance",

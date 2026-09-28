@@ -4,8 +4,12 @@ import { readFileSync } from "node:fs";
 import { createArrayProbe } from "./adapter.mjs";
 
 const path = process.argv[2] ?? "_build/array-probe.raw.wasm";
-const toolchain = readFileSync(new URL("../../lean-toolchain", import.meta.url),
+const toolchain = readFileSync(new URL("./lean-toolchain", import.meta.url),
   "utf8").trim();
+const rootToolchain = readFileSync(new URL("../../lean-toolchain", import.meta.url),
+  "utf8").trim();
+assert.equal(toolchain, rootToolchain,
+  "Array probe must compile with FIR's current Lean toolchain");
 assert.ok(["leanprover/lean4:v4.33.0", "leanprover/lean4:v4.34.0-rc2"]
   .includes(toolchain), `unsupported Array-probe toolchain ${toolchain}`);
 const values = Array.from({ length: 32 }, (_, index) => 3 * index + 1);
