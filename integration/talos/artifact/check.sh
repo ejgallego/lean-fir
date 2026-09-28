@@ -5,9 +5,9 @@ here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 root_toolchain="$(tr -d '\r\n' < "$root/lean-toolchain")"
 artifact_toolchain="$(tr -d '\r\n' < "$here/lean-toolchain")"
-if [[ "$root_toolchain" != leanprover/lean4:v4.34.0-rc2 ||
+if [[ "$root_toolchain" != leanprover/lean4:v4.34.1 ||
       "$artifact_toolchain" != "$root_toolchain" ]]; then
-  echo "Talos artifact check requires the same Lean 4.34.0-rc2 toolchain in FIR and FirWasmArtifact" >&2
+  echo "Talos artifact check requires the same Lean 4.34.1 toolchain in FIR and FirWasmArtifact" >&2
   exit 1
 fi
 root_lake=(elan run "$root_toolchain" lake -d "$root")
