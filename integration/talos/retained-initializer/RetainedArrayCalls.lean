@@ -10,6 +10,7 @@ import FirTalos.ConcreteValidatedLet
 import FirTalos.ConcreteRootedDispatch
 import FirTalos.ConcreteRegionTransport
 import FirTalos.ConcreteFreshYield
+import FirTalos.ConcreteRegionEntry
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -552,35 +553,32 @@ theorem literals_mkEmpty_box
     (capacityKind : findLocalKind? context.localKinds capacityId = some .tagged)
     (arrayKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
     (boxKind : findLocalKind? context.localKinds boxSite.fvarId = some .tagged)
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
-      labels runtime env initializerBody store locals code witness source target)
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels runtime store witness [] remainingBytes runtime env initializerBody
+      store locals code witness source target)
     (handler : ∀ request,
       ConcreteExternalRequestRel witness request
         (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
       EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
-    (budget : store.host.runtime.heap.AddressSpaceBudget remainingBytes)
     (fits : residentArrayAllocationBytes 5 ≤ remainingBytes) :
     ∃ prefixLength nextStore nextWitness sourceAfter targetAfter resumedLocals rest,
       ExecSteps externals 6 source sourceAfter ∧
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
         (prefixLength + 9) target targetAfter ∧
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+        labels runtime store witness [] (remainingBytes - residentArrayAllocationBytes 5)
         (afterMkEmpty runtime)
         (bind (bind (literalEnv env) mkEmptySite.fvarId
           (.object (.heap runtime.nextLocation))) boxSite.fvarId (.object (.tagged 0)))
         pushCode nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
-      nextStore.host.runtime.heap.AddressSpaceBudget
-        (remainingBytes - residentArrayAllocationBytes 5) ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
-      nextStore.host.externals = store.host.externals ∧
-      RuntimeStepTransports runtime (afterMkEmpty runtime) store nextStore witness nextWitness ∧
-      HeapRegionClosed runtime.nextLocation (afterMkEmpty runtime).heap := by
+      nextStore.host.externals = store.host.externals := by
   obtain ⟨prefixLength, nextStore, nextWitness, sourceMid, targetMid, midLocals,
       midCode, prefixSteps, prefixPath, focus, residual, joins, frames, targetFrames,
       externalsEq, transports⟩ :=
     literals_mkEmpty_stage_call_bind programEq spec contract scalarKind capacityKind
-      arrayKind related handler budget fits
+      arrayKind active.focus handler active.scope.budgetedPureExternal.1.2 fits
   change ConcreteStructuredCodeFocus _ _ _ _ _ _ (.let boxSite pushCode)
     _ _ _ _ _ _ at focus
   have valueKind : letValueKind boxSite = .ok .tagged := by
@@ -598,15 +596,14 @@ theorem literals_mkEmpty_box
       joins', frames', targetFrames'⟩ := focus.advance_boxUInt8 spec rfl valueKind
     (by simp [getLocal, scalarKind]) literalAbiTypes.1
     (by simp [getLocal, boxKind]) scalarLookup (externals := externals)
-  have entryClosed : HeapRegionClosed runtime.nextLocation (arrayEntry runtime).heap :=
-    HeapRegionClosed.of_liveHeapRel related.stateRelated.1.heap
   have region : HeapRegionClosed runtime.nextLocation (afterMkEmpty runtime).heap := by
-    apply entryClosed.alloc (object := .array #[] 5) (persistent := false) rfl
+    apply active.region.alloc (object := .array #[] 5) (persistent := false) rfl
     simp [HeapObject.ownedValues]
   refine ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
-    rest, execSteps_trans_exact prefixSteps (.step step (.refl _)), ?_, next, residual,
+    rest, execSteps_trans_exact prefixSteps (.step step (.refl _)), ?_,
+    active.afterBody_withoutReuseFacts transports externalsEq next residual (fun _ => region),
     joins'.trans joins, frames'.trans frames, targetFrames'.trans targetFrames,
-    externalsEq, transports, region⟩
+    externalsEq⟩
   simpa [Nat.add_assoc] using prefixPath.trans path
 
 def bodyResultEnv (env : Env) (runtime : RuntimeState) : Env :=
@@ -636,8 +633,9 @@ theorem body_returns
     (arrayKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
     (boxKind : findLocalKind? context.localKinds boxSite.fvarId = some .tagged)
     (resultKind : findLocalKind? context.localKinds pushSite.fvarId = some .object)
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
-      labels runtime env initializerBody store locals code witness source target)
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels runtime store witness [] remainingBytes runtime env initializerBody
+      store locals code witness source target)
     (emptyHandler : ∀ request,
       ConcreteExternalRequestRel witness request
         (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
@@ -649,8 +647,6 @@ theorem body_returns
       request.name = `Array.push →
       request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
       ArrayPushInPlaceHandlerAt store.host.externals request before address word)
-    (bodyFrame : ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
-      externals [] remainingBytes runtime env store locals witness)
     (fits : residentArrayAllocationBytes 5 ≤ remainingBytes) :
     ∃ targetSteps nextStore nextWitness resultLocals physical sourceAfter targetAfter,
       ExecSteps externals 10 source sourceAfter ∧
@@ -662,12 +658,10 @@ theorem body_returns
         .object runtime.nextLocation physical sourceAfter targetAfter ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
-  have initialScope := ConcreteStructuredResourceScope.root bodyFrame
-  have budget := initialScope.budgetedPureExternal.1.2
   obtain ⟨prefixLength, midStore, nextWitness, sourceMid, targetMid, midLocals,
-      midCode, prefixSteps, prefixPath, focus, residual, joins, frames, targetFrames,
-      externalsEq, prefixTransports, prefixRegion⟩ := literals_mkEmpty_box programEq spec contract scalarKind capacityKind
-        arrayKind boxKind related emptyHandler budget fits
+      midCode, prefixSteps, prefixPath, prefixActive, joins, frames, targetFrames,
+      externalsEq⟩ := literals_mkEmpty_box programEq spec contract scalarKind capacityKind
+        arrayKind boxKind active emptyHandler fits
   have arrayValue : lookup
       (bind (bind (literalEnv env) mkEmptySite.fvarId
         (.object (.heap runtime.nextLocation))) boxSite.fvarId (.object (.tagged 0)))
@@ -678,29 +672,36 @@ theorem body_returns
       pushSteps, pushPath, returnFocus, finalBudget, pushJoins, pushFrames, pushTargetFrames,
       pushExternals, pushTransports⟩ :=
     push_stage_call_bind programEq spec contract arrayKind boxKind resultKind arrayValue
-      (lookup_bind_self _ _ _) focus
+      (lookup_bind_self _ _ _) prefixActive.focus
       (fun request address word mapped tagged named args => by
         rw [externalsEq]
-        exact pushHandler _ nextWitness request address word focus.stateRelated.1
-          mapped tagged named args) residual
+        exact pushHandler _ nextWitness request address word prefixActive.focus.stateRelated.1
+          mapped tagged named args) prefixActive.scope.budgetedPureExternal.1.2
   change ConcreteStructuredCodeFocus _ _ _ _ _ _ (.return pushSite.fvarId)
     _ _ _ _ _ _ at returnFocus
+  have returnActive := prefixActive.afterBody_withoutReuseFacts pushTransports pushExternals
+    returnFocus finalBudget
+    (fun closed => closed.pushFreshTagged (entry := arrayEntry runtime) (payload := 0))
   obtain ⟨kind, physical, sourceAfter, targetAfter, compiled, returnStep, returnPath,
-      yielded, returnJoins, returnFrames, returnTargetFrames⟩ :=
-    returnFocus.advance_return spec.localsAligned (lookup_bind_self _ _ _)
-      (externals := externals) (module := targetModule.wasmModule) (hostEnv := hosts.env)
+      returned, returnJoins, returnFrames, returnTargetFrames⟩ :=
+    returnActive.advance_return spec.localsAligned (lookup_bind_self _ _ _) (Nat.le_refl _)
+      (module := targetModule.wasmModule) (hostEnv := hosts.env)
   have kindEq : kind = .object := by
     simpa [getLocal, resultKind] using compiled.symm
   subst kind
+  -- Regression: publication must protect the original caller boundary, not
+  -- re-anchor at the now result-containing runtime and witness.
+  fail_if_success
+    have : ConcreteStructuredFreshYieldCore context sourceModule sourceFunction externals
+        (afterPush runtime) nextStore nextWitness []
+        (remainingBytes - residentArrayAllocationBytes 5) (afterPush runtime)
+        (bodyResultEnv env runtime) nextStore resultLocals nextWitness
+        .object runtime.nextLocation physical sourceAfter targetAfter := by
+      exact returned
   refine ⟨_, nextStore, nextWitness, resultLocals, physical, sourceAfter, targetAfter,
     execSteps_trans_exact prefixSteps
       (execSteps_trans_exact pushSteps (.step returnStep (.refl _))),
-    prefixPath.trans (pushPath.trans returnPath),
-    ConcreteStructuredFreshYieldCore.of_body initialScope
-      (prefixTransports.trans pushTransports) (pushExternals.trans externalsEq)
-      yielded finalBudget
-      (prefixRegion.pushFreshTagged (entry := arrayEntry runtime) (payload := 0))
-      (Nat.le_refl _),
+    prefixPath.trans (pushPath.trans returnPath), returned,
     returnJoins.trans (pushJoins.trans joins), returnFrames.trans (pushFrames.trans frames),
     returnTargetFrames.trans (pushTargetFrames.trans targetFrames)⟩
 
@@ -730,15 +731,14 @@ theorem body_publishes_and_resumesCaller
     (callerScope : ConcreteStructuredResourceScope callerContext sourceModule callerFunction
       externals outerRuntime outerStore outerWitness callerFacts callerBytes
       runtime callerEnv store callerLocals witness)
-    (bodyFrame : ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
-      externals [] remainingBytes runtime env store locals witness)
     (scalarKind : findLocalKind? context.localKinds scalarSite.fvarId = some .uint8)
     (capacityKind : findLocalKind? context.localKinds capacityId = some .tagged)
     (arrayKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
     (boxKind : findLocalKind? context.localKinds boxSite.fvarId = some .tagged)
     (resultKind : findLocalKind? context.localKinds pushSite.fvarId = some .object)
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
-      runtime env initializerBody store locals code witness source target)
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels runtime store witness [] remainingBytes runtime env initializerBody
+      store locals code witness source target)
     (emptyHandler : ∀ request,
       ConcreteExternalRequestRel witness request
         (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
@@ -785,7 +785,7 @@ theorem body_publishes_and_resumesCaller
       targetReturned, sourceBody, targetBody, returned, _joins,
       sourceFramesEq, targetFramesEq⟩ :=
     body_returns spec.contextProgram spec contract scalarKind capacityKind arrayKind
-      boxKind resultKind related emptyHandler pushHandler bodyFrame fits
+      boxKind resultKind active emptyHandler pushHandler fits
   have yielded := returned.focus
   obtain ⟨runtimeAfter, sourceAfter, targetAfter, resumedLocals, sourceSuffix,
       targetSuffix, core, joins, sourceFrames', targetFrames'⟩ :=
@@ -872,13 +872,13 @@ theorem lazyMiss_publishes_and_resumesCaller
       callerSpec.adapted RetainedRC2.initializer.findDecl bodyEq classified
   obtain ⟨scalarKind, capacityKind, arrayKind, boxKind, resultKind⟩ :=
     initializer_bindingKinds row callerSpec.programNamesUnique callerSpec.lowered
-  obtain ⟨sourceEntry, targetEntry, sourceStep, targetPath, focus, bodyFrame,
+  obtain ⟨sourceEntry, targetEntry, sourceStep, targetPath, active,
       _joins, sourceStack, targetStack⟩ :=
-    ready.enterBody scope callerSpec.contextProgram row empty
+    ready.enterRegion scope callerSpec.contextProgram row empty
   obtain ⟨steps, nextStore, nextWitness, resumedLocals, sourceAfter, targetAfter,
       bodySteps, bodyPath, core, joins, sourceFramesEq, targetFramesEq⟩ :=
     body_publishes_and_resumesCaller callerSpec (row.fromSupportedFunction callerSpec)
-      contract scope bodyFrame scalarKind capacityKind arrayKind boxKind resultKind focus
+      contract scope scalarKind capacityKind arrayKind boxKind resultKind active
       emptyHandler pushHandler fits ready.initializerFound ready.signature ready.cacheSetCall
       sourceStack targetStack ready.continuationAdapted ready.resultFound ready.resultKindAt tail
   exact ⟨3 + steps, nextStore, nextWitness, resumedLocals, sourceAfter, targetAfter,

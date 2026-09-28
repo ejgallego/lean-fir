@@ -1,5 +1,6 @@
 import FirTalos.TrustInventory
 import FirTalos.ConcreteRegionTransport
+import FirTalos.ConcreteRegionEntry
 import FirTalos.TrustAuditTests
 import FirTalos.ConcreteObservationSensitivity
 import FirTalos.ConcreteTerminalCorrectness

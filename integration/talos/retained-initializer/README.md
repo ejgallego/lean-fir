@@ -247,6 +247,17 @@ global relation, starting at the actual related target state. The remaining
 gap is general intermediate lazy-state closure, not another independent
 publication or post-body resource premise.
 
+The active-code companion is `ConcreteStructuredRegionCodeCore`. Cache-miss
+`enterRegion` constructs it with the actual saved continuation frames and the
+unchanged entry cutoff. The six-step allocation/boxing prefix and three-step
+push block retain it, and `advance_return` turns it into the fresh-result
+relation in one source/two target steps. No scope is reconstructed from scratch
+at return. A negative check rejects re-anchoring the returned relation at the
+current allocation frontier. The thirteen-/fourteen-step public signatures
+are unchanged; internal body helpers now consume the active relation.
+This does not yet relate each external staging/bind state inside those blocks
+or supply a general nested heap-lazy suspended-frame constructor.
+
 Remaining premises are the supported caller and its current validated relation,
 the initializer call's identity, empty cache, source primitive contracts,
 installed handler laws and finite headroom. No independent call-admission,
