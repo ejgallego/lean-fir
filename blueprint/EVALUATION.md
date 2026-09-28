@@ -23,10 +23,13 @@ The compact group view is useful; the full 24-node fit view needs zoom to read
 individual labels comfortably at a 1440-pixel viewport. This is a baseline UX
 observation, not a claim that the graph renderer failed.
 
-The pilot also includes [two exact contribution packets](TASKS.md) for removing
-native axiom debt from already-proved scalar lemmas. They expose proof-quality
-work that ordinary open/proved status does not represent. W6 review and public
-contribution-service publication remain separate next steps.
+The pilot also includes [scalar-boxing trust-reduction packets](TASKS.md) for
+already-proved declarations. W6's scope review found the original full T1/T2
+replacements blocked by opaque `Expr.eqv`; only T1's impossible UInt64 branch
+is a smaller candidate, still unassigned and awaiting an exact compiled trust
+audit. These packets expose work that ordinary open/proved status does not
+represent. No proof lease or public contribution-service publication is in
+effect.
 
 ## Findings
 

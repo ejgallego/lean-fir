@@ -6,9 +6,13 @@ An open Blueprint node is not automatically a ready Prove2Me task.
 
 ## Candidate selection
 
-[Two exact proof-replacement packets](TASKS.md) are drafted for W6 review.
-They preserve existing scalar decoding/boxing signatures and target ten and
-seven generated axiom dependencies respectively.
+[The scalar trust-reduction packets](TASKS.md) preserve existing decoding and
+boxing signatures. W6 reviewed them: the full replacements are blocked by
+opaque `Lean.Expr.eqv`; their current trust inventories contain ten and seven
+generated dependencies respectively. The only smaller candidate is removing
+the contradictory UInt64 branch from T1, with a source-based expected change
+of ten to six dependencies. That delta still needs an exact compiled audit.
+It is unassigned; no proof lease or external service task exists.
 
 W6 is selecting small stable obligations through local coordination thread
 `ROOT-W6-20260928-100`. The current candidate areas are:
@@ -17,7 +21,7 @@ W6 is selecting small stable obligations through local coordination thread
 | --- | --- | --- |
 | A non-directional producer/use-site fact | Remove a semantic argument or return-provenance input at an existing admission consumer | Select an exact production use and review its quantified statement |
 | A construction-preservation lemma | Carry entry cutoff/scope through an intermediate initializer state | Check W6 ownership and current invariant migration before assigning |
-| A contained native-axiom replacement | Reduce an exact transitive trust inventory using a kernel proof | Select the dependency and identify all audited consumers |
+| A contained native-axiom reduction | Reduce an exact transitive trust inventory using a kernel proof | Only the T1 UInt64 branch is currently ready to scope; full T1/T2 need a reviewed proof interface |
 
 These are selection categories, not three assigned theorem tasks. General heap
 lazy-miss closure and the entire fault counterpart are too broad for the first
