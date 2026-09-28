@@ -1,6 +1,6 @@
 import FirTalos.ConcreteArrayPushExternalEvidence
 import FirTalos.ConcreteExternalCallRequest
-import FirTalos.ConcreteBodyResources
+import FirTalos.ConcreteRegionExternal
 
 namespace FirTalos.Concrete
 
@@ -35,7 +35,7 @@ theorem ConstructorArgumentsRelated.arrayPushOperands
 
 /-- Fresh non-full Array push through the existing imported-call and bind
 machine rules. Operand addresses are reconstructed, not client premises. -/
-theorem ConcreteStructuredExternalCallControl.advance_pushFreshTagged_bind
+theorem ConcreteStructuredRegionExternalCall.advance_pushFreshTagged_bind
     {program : Fir.LeanIR.ImpureProgram} {context : Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
     {targetModule : AdaptedModule} {hosts : ResolvedHosts}
@@ -54,8 +54,11 @@ theorem ConcreteStructuredExternalCallControl.advance_pushFreshTagged_bind
     {witness : RefinementWitness} {physicalArgs : List Wasm.Value}
     {callIndex resultIndex remainingBytes : Nat} {source : MachineState}
     {target : StructuredWasmState Host}
-    (related : ConcreteStructuredExternalCallControl program context sourceModule
-      sourceFunction targetModule hosts externals site operation resolvedResultKind
+    {entryRuntime : RuntimeState} {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} {facts : ReuseCapacityFacts}
+    (ready : ConcreteStructuredRegionExternalCall program context sourceModule
+      sourceFunction targetModule hosts externals entryRuntime entryStore entryWitness
+      facts remainingBytes site operation resolvedResultKind
       targetImport labels continuation callerJoins sourceFrames targetStore callerLocals
       callerRemainder targetRest targetFrames witness physicalArgs callIndex resultIndex
       source target)
@@ -74,22 +77,24 @@ theorem ConcreteStructuredExternalCallControl.advance_pushFreshTagged_bind
       ValueRel witness .tobject (.word32 word) (.object (.tagged payload)) →
       ArrayPushInPlaceHandlerAt targetStore.host.externals
         (concreteExternalRequest operation .object concreteArgs.toArray)
-        targetStore.host.runtime address word)
-    (budget : targetStore.host.runtime.heap.AddressSpaceBudget remainingBytes) :
+        targetStore.host.runtime address word) :
     ∃ nextStore physicalResult sourceAfter targetAfter updated resumedLocals,
       ExecSteps externals 2 source sourceAfter ∧
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target targetAfter ∧
       callerLocals.set? resultIndex physicalResult = some updated ∧
       resumedLocals = { updated with values := callerRemainder } ∧
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals labels
+        entryRuntime entryStore entryWitness (eraseReuseCapacityFact facts decl.fvarId)
+        remainingBytes
         nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
         nextStore resumedLocals targetRest witness sourceAfter targetAfter ∧
-      nextStore.host.runtime.heap.AddressSpaceBudget remainingBytes ∧
       sourceAfter.joins = callerJoins ∧ sourceAfter.frames = sourceFrames ∧
       targetAfter.frames = targetFrames ∧
       nextStore.host.externals = targetStore.host.externals ∧
       RuntimeStepTransports (semanticArrayResult entry #[] capacity) nextRuntime
         targetStore nextStore witness witness := by
+  have related := ready.control
+  have budget := ready.scope.budgetedPureExternal.1.2
   have resolved : resolvedResultKind = .object := by
     have h := congrArg (fun results : Array AbiKind => results[0]?) related.resultSignature
     simpa [related.parameterSignature, resultKind] using h.symm
@@ -131,14 +136,20 @@ theorem ConcreteStructuredExternalCallControl.advance_pushFreshTagged_bind
       physicalArgs (semanticArrayResult entry #[] capacity) nextRuntime sourceValue witness
       nextStore witness physicalResult := by
     simpa [resolved, runtimeEq, valueEq] using evidence
-  obtain ⟨sourceMid, targetMid, sourceCall, targetCall, bound⟩ := related.advance_call evidence'
+  have preservesRegion : HeapRegionClosed entryRuntime.nextLocation
+      (semanticArrayResult entry #[] capacity).heap →
+      HeapRegionClosed entryRuntime.nextLocation nextRuntime.heap := by
+    intro closed
+    rw [runtimeEq]
+    exact closed.pushFreshTagged
+  obtain ⟨sourceMid, targetMid, sourceCall, targetCall, bound⟩ :=
+    ready.advance_call (cost := 0) evidence' (by simpa using residual) preservesRegion
   obtain ⟨sourceAfter, targetAfter, updated, resumedLocals, sourceBind, targetBind,
       set, resumed, focus, joins, frames, targetFrames⟩ :=
-    bound.advance (externals := externals)
-      (module := targetModule.wasmModule) (hostEnv := hosts.env)
+    bound.advance (module := targetModule.wasmModule) (hostEnv := hosts.env)
   exact ⟨nextStore, physicalResult, sourceAfter, targetAfter, updated, resumedLocals,
     .step sourceCall (.step sourceBind (.refl _)), targetCall.trans targetBind,
-    set, resumed, focus, residual, joins, frames, targetFrames,
+    set, resumed, focus, joins, frames, targetFrames,
     evidence'.externalsPreserved, evidence'.transports⟩
 
 end FirTalos.Concrete

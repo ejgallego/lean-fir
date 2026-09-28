@@ -149,6 +149,16 @@ The push handler law is restricted to states related to this fresh empty Array,
 represented operands and the exact named request; it does not assume that all
 Array pushes use the in-place branch.
 
+The push block now uses `ConcreteRegionExternal` throughout: active code stages
+to a region-indexed call, the actual host response produces a region-indexed
+pre-bind state, and binding returns active code at the **original initializer
+entry**. The generic host rule separates response refinement from preservation
+of owned edges; the push producer derives the latter from its semantic response
+and `HeapRegionClosed.pushFreshTagged`. Its budget comes from the input scope.
+`body_returns` no longer reconstructs a scope/region after this block. The
+empty-allocation block still uses blockwise transport; general nested lazy-frame
+closure and production handler conformance remain open.
+
 `RetainedInitializer.body_publishes_and_resumesCaller` now composes this body
 with cache publication and the caller's destination bind. It derives twelve
 source transitions and a matching target path, ending in ordinary caller code

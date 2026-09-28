@@ -310,28 +310,29 @@ theorem push_stage_call_bind
     {store : Wasm.Store Host} {locals : Wasm.Locals} {code : Wasm.Program}
     {witness : RefinementWitness} {source : MachineState}
     {target : StructuredWasmState Host} {remainingBytes : Nat}
+    {entryStore : Wasm.Store Host} {entryWitness : RefinementWitness}
     (arrayKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
     (boxKind : findLocalKind? context.localKinds boxSite.fvarId = some .tagged)
     (resultKind : findLocalKind? context.localKinds pushSite.fvarId = some .object)
     (arrayValue : lookup env mkEmptySite.fvarId = some (.object (.heap runtime.nextLocation)))
     (boxValue : lookup env boxSite.fvarId = some (.object (.tagged 0)))
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels runtime entryStore entryWitness [] remainingBytes
       (afterMkEmpty runtime) env pushCode store locals code witness source target)
     (handler : ∀ request address word,
       witness.locations.lookup? runtime.nextLocation = some address →
       ValueRel witness .tobject (.word32 word) (.object (.tagged 0)) →
       request.name = `Array.push →
       request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
-      ArrayPushInPlaceHandlerAt store.host.externals request store.host.runtime address word)
-    (budget : store.host.runtime.heap.AddressSpaceBudget remainingBytes) :
+      ArrayPushInPlaceHandlerAt store.host.externals request store.host.runtime address word) :
     ∃ prefixLength nextStore sourceAfter targetAfter resumedLocals rest,
       ExecSteps externals 3 source sourceAfter ∧
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
         (prefixLength + 2) target targetAfter ∧
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals labels
+        runtime entryStore entryWitness [] remainingBytes
         (afterPush runtime) (bind env pushSite.fvarId (.object (.heap runtime.nextLocation)))
         pushContinuation nextStore resumedLocals rest witness sourceAfter targetAfter ∧
-      nextStore.host.runtime.heap.AddressSpaceBudget remainingBytes ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
       nextStore.host.externals = store.host.externals ∧
@@ -339,29 +340,29 @@ theorem push_stage_call_bind
         store nextStore witness witness := by
   let site := pushCallShape context programEq externals contract runtime env
     arrayKind boxKind resultKind arrayValue boxValue
-  change ConcreteStructuredCodeFocus _ _ _ _ _ _ (.let pushSite pushContinuation)
-    _ _ _ _ _ _ at related
+  change ConcreteStructuredRegionCodeCore _ _ _ _ _ _ _ _ _ _ _ _
+    (.let pushSite pushContinuation) _ _ _ _ _ _ at active
   obtain ⟨physicalArgs, operation, resolvedKind, targetImport, callIndex, resultIndex,
       targetArguments, rest, sourceStaged, targetStaged, staged, argumentPath, control⟩ :=
-    related.advance_external_stage_of_shape spec site spec.localsAligned
+    active.stageExternal spec site
   obtain ⟨nextStore, physicalResult, sourceAfter, targetAfter, updated, resumedLocals,
-      steps, path, _set, _resumed, focus, residual, joins, frames, targetFrames,
+      steps, path, _set, _resumed, focus, joins, frames, targetFrames,
       externalsEq, transports⟩ :=
     control.advance_pushFreshTagged_bind (entry := arrayEntry runtime) (payload := 0)
       rfl rfl rfl rfl contract (by decide)
       (fun address word args physicalEq decoded mapped tagged => by
         apply handler _ _ _ mapped tagged
-        · exact control.operationName
-        · have signature := control.parameterSignature
+        · exact control.control.operationName
+        · have signature := control.control.parameterSignature
           change operation.signature =
             { params := #[.erased, .object, .tobject], results := #[.object] } at signature
           rw [signature, physicalEq] at decoded
           simp [decodePhysicalLanes, decodePhysicalLane, physicalOfLane,
             AbiKind.valueType, Bind.bind, Except.bind, Pure.pure, Except.pure] at decoded
           cases decoded
-          rfl) budget
+          rfl)
   exact ⟨targetArguments.length, nextStore, sourceAfter, targetAfter, resumedLocals,
-    rest, .step staged steps, argumentPath.trans path, focus, residual, joins, frames,
+    rest, .step staged steps, argumentPath.trans path, focus, joins, frames,
     targetFrames, externalsEq, transports⟩
 
 /-- Closed type classification only, following the same audited opaque-Expr
@@ -669,19 +670,16 @@ theorem body_returns
     simp [Fir.LeanIR.Impure.bind, lookup, boxSite, mkEmptyContinuation, mkEmptySite,
       RetainedRC2.initializer]
   obtain ⟨pushLength, nextStore, sourcePushed, targetPushed, resultLocals, returnCode,
-      pushSteps, pushPath, returnFocus, finalBudget, pushJoins, pushFrames, pushTargetFrames,
-      pushExternals, pushTransports⟩ :=
+      pushSteps, pushPath, returnActive, pushJoins, pushFrames, pushTargetFrames,
+      _pushExternals, _pushTransports⟩ :=
     push_stage_call_bind programEq spec contract arrayKind boxKind resultKind arrayValue
-      (lookup_bind_self _ _ _) prefixActive.focus
+      (lookup_bind_self _ _ _) prefixActive
       (fun request address word mapped tagged named args => by
         rw [externalsEq]
         exact pushHandler _ nextWitness request address word prefixActive.focus.stateRelated.1
-          mapped tagged named args) prefixActive.scope.budgetedPureExternal.1.2
-  change ConcreteStructuredCodeFocus _ _ _ _ _ _ (.return pushSite.fvarId)
-    _ _ _ _ _ _ at returnFocus
-  have returnActive := prefixActive.afterBody_withoutReuseFacts pushTransports pushExternals
-    returnFocus finalBudget
-    (fun closed => closed.pushFreshTagged (entry := arrayEntry runtime) (payload := 0))
+          mapped tagged named args)
+  change ConcreteStructuredRegionCodeCore _ _ _ _ _ _ _ _ _ _ _ _
+    (.return pushSite.fvarId) _ _ _ _ _ _ at returnActive
   obtain ⟨kind, physical, sourceAfter, targetAfter, compiled, returnStep, returnPath,
       returned, returnJoins, returnFrames, returnTargetFrames⟩ :=
     returnActive.advance_return spec.localsAligned (lookup_bind_self _ _ _) (Nat.le_refl _)

@@ -69,7 +69,7 @@ bytes, or the complete lean-zip application.
 | First actual lean-zip initializer | `rootedLet_publishes_and_resumesCaller`: fourteen source steps and matching target path to validated continuation and rooted global relation at the original export ABI; admission/cache/callee/local facts derived | Installed Array handlers, intermediate heap-result lazy-frame closure, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
 | Fresh heap cache publication | `ConcreteStructuredFreshYieldCore` is produced by the actual retained body and consumed by `publishAtRoot` to rejoin the rooted global relation | Carry this dynamic evidence through general intermediate lazy states and wire central admission |
-| Active construction states | `ConcreteStructuredRegionCodeCore` carries the original cutoff/scope from `enterRegion` through the retained construction blocks and `advance_return` | External staging states and a general saved validated lazy-frame companion |
+| Active construction states | `ConcreteStructuredRegionCodeCore` carries the original cutoff/scope from `enterRegion` through construction and return; `Array.push` now preserves it through staging, host execution and binding separately | Empty-allocation/literal intermediate states and a general saved validated lazy-frame companion |
 | Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
@@ -370,12 +370,31 @@ history. A negative check rejects re-anchoring that result at the current,
 result-containing runtime. The thirteen-/fourteen-step public APIs are unchanged.
 
 This is blockwise active-code closure plus a one-step return rule, not full
-small-step closure. Next retain this evidence across the external-ready/bind
-states inside those blocks, and package the saved validated caller alongside
+small-step closure. The external-state successor below starts exposing the
+intermediate states; the saved validated caller still needs packaging alongside
 the active construction scope for general lazy frames. A generic producer must
-still prove region preservation; ordinaryness/ABI alone do not imply it.
+prove region preservation; ordinaryness/ABI alone do not imply it.
 Nested heap-miss admission is not relaxed. All four new generic endpoints use
 only standard Lean axioms; retained concrete dependencies are unchanged.
+
+**External construction states (W6, 2026-09-28).**
+`ConcreteRegionExternal` adds staged-call and pre-bind relations indexed by the
+same original entry runtime/store/witness. `stageExternal` derives the generated
+argument prefix, `advance_call` transports the scope through concrete response
+evidence and a producer's region-preservation law, and `advance` binds the result
+while erasing only the destination's shadowed reuse fact. No post-call scope or
+target path is a premise. Residual allocation headroom remains explicit.
+
+The real retained `Array.push` is the first consumer: its response equation and
+the tagged-element mutation theorem discharge region preservation. The complete
+body theorem now consumes the returned active relation directly instead of
+reconstructing it from push-block transports. The original cutoff survives all
+three source transitions, even though the Array already exists at push entry.
+The public thirteen-/fourteen-step signatures remain unchanged. Next apply this
+interface to `Array.mkEmpty` and expose the literal/boxing intermediate states,
+then package the saved validated lazy frame. Central heap-result lazy admission,
+installed handlers and resident linking remain separate. No new axiom or native
+evaluation is introduced by these rules.
 
 The target callee prefix, represented Array requests and destination binding
 are now composed. Installed handler equations remain explicit; connecting
