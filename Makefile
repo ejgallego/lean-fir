@@ -22,12 +22,13 @@ export FIR_VERBOSE FIR_TOOL_LOG_DIR
 LEAN_ZIP_REPO ?= $(CURDIR)/.deps/retained-inputs/lean-zip
 ZIP_COMMON_REPO ?= $(CURDIR)/.deps/retained-inputs/zip-common
 
-.PHONY: help build examples scalar-surface-check inspect validate-harness validate validate-direct-lcnf validate-v8 validate-source-from-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions proof-trust-sources proof-trust-tests proof-trust no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check clean
+.PHONY: help build examples scalar-surface-check inspect validate-harness validate validate-direct-lcnf validate-v8 validate-source-from-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions proof-trust-sources proof-trust-tests proof-trust no-placeholders mailbox-check mailbox-list mailbox-deliver mailbox-test tooling-unit-check tooling-check check beam talos-setup talos-check blueprint clean
 
 help:
 	@printf '%s\n' 'FIR commands are concise by default; use FIR_VERBOSE=1 for live tool output.' \
 		'  make check              full repository gate' \
 		'  make talos-check        Talos proof gate (after talos-setup)' \
+		'  make blueprint          build the W6 proof map and status experiment' \
 		'  make mailbox-list       actionable coordination threads' \
 		'  scripts/mailbox brief ID  compact event review'
 
@@ -186,3 +187,8 @@ retained-initializer-check:
 
 clean:
 	@bash scripts/quiet-run.sh clean -- lake clean
+
+# Separate documentation workspace; imports the accepted RC2 Talos overlay.
+blueprint: talos-setup
+	@mkdir -p .deps/tmp
+	@cd blueprint && TMPDIR="$(CURDIR)/.deps/tmp" bash ../scripts/quiet-run.sh blueprint -- lake exe vbp build

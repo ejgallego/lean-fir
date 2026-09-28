@@ -13,6 +13,16 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## W6 Blueprint pilot (2026-09-28)
+
+Status: active. Root owns `docs/w6-blueprint-pilot` in
+`.worktrees/w6-blueprint-pilot`, based on `81bb0e2ab`. Maintainer authorized
+an executable Blueprint of the W6 argument and an evaluation of dependency
+graph/frontier status limitations. Scope: new `blueprint/` documentation
+package, root documentation/build wiring and this board. W6 owns all
+production proofs and its live plan; candidate contributor obligations are
+coordinated in `ROOT-W6-20260928-100`. Publication is local only.
+
 ## Public export contract regressions (2026-09-28)
 
 Status: released. Root completed the maintainer-requested test milestone on

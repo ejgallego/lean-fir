@@ -24,6 +24,11 @@ from final impure LCNF while the Wasm backend develops against the same
 interpreter and semantic ABI. See `docs/pass-correctness-plan.md` for the
 implemented foundation and the remaining proof order.
 
+The [W6 Blueprint pilot](blueprint/README.md) maps the current proof argument
+and open obligations to Lean declarations. Run `make blueprint` to build it.
+Its [evaluation](blueprint/EVALUATION.md) records dependency-graph and frontier
+status limitations for the Verso Blueprint development experiment.
+
 ## Requirements
 
 - Lean toolchain: `leanprover/lean4:v4.34.0-rc2`
