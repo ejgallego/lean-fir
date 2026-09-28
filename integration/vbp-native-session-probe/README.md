@@ -17,7 +17,9 @@ historical capture commands below, change live pins, or establish a public FIR
 runtime API. The producer runs from accepted main's 4.34.1 checkout while its
 BUILD metadata retains the frozen Wasm's original RC2 compilation provenance.
 
-Toolchain routing update (`ROOT-W7-20260915-036`): subsequent VBP work must
+The following toolchain-routing record predates the accepted stable 4.34.1
+migration; it is historical, not the adapter producer's setup instructions.
+Toolchain routing update (`ROOT-W7-20260915-036`): subsequent VBP work was to
 start from official `tooling/lean-4.34` at
 `348f42f832983949dd1514ed700820cf9c6c05c3`, or a W7-owned child of that lane.
 The source-view commands below record the preceding diagnostic setup, including
