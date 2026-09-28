@@ -39,3 +39,16 @@ Full root/Talos/artifact gates and any consumer package/campaign are separate.
 The emitted digest identifies this diagnostic, not a client release. The client
 owns matched end-to-end performance qualification; no old RC2 timings are used
 to claim a speedup on 4.34.1. Full multiplication refinement remains W6 work.
+
+After committing the candidate, create a self-contained local diagnostic package
+with the existing immutable-package utility (no canonical pointer is moved):
+
+```sh
+.deps/lcnf-c-wasm/emsdk/upstream/bin/wasm-opt .deps/nat-multiplication.wasm -O3 -o .deps/nat-multiplication-opt.wasm
+cp .deps/nat-multiplication.wasm.json .deps/nat-multiplication-opt.wasm.json
+node Fir/Wasm/Emit/Tests/nat-multiplication.mjs .deps/nat-multiplication-opt.wasm
+node Fir/Wasm/Emit/Tests/package-nat-multiplication.mjs .deps/nat-multiplication.wasm .deps/nat-multiplication-opt.wasm .deps/packages
+```
+
+The package includes both binaries, manifest, BUILD identities, complete checksums
+and a standalone Node smoke. Its diagnostic exports are not a consumer package ABI.
