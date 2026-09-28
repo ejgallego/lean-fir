@@ -1,44 +1,55 @@
 # wasm-gen lane
 
-Checked structural final-LCNF source boundary for `ROOT-W7-20260925-001`.
-Root remains integration owner; W6 owns the initializer proof downstream.
+Generic resident limb multiplication, ROOT-W7-20260928-002.
+Root owns integration; math-browser owns matched consumer timings/full-suite acceptance.
 
 ```text
 lane: wasm-gen
 owner: fir/wasm-gen
-branch: wasm/lcnf-reification-434
-worktree: .worktrees/wasm-lcnf-reification-434
+branch: wasm/nat-mul-4341
+worktree: .worktrees/wasm-nat-mul-4341
 state: ready
-base: 97c257cc4e0ed815daedf47a5161bd0c958f63a0
-functional-head: 249f476d5c4b9f3bc08781a0fc9542d87f4f8b4d
-contract-base: 97c257cc4e0ed815daedf47a5161bd0c958f63a0
+base: a30ae0e173fccb2b5a94245bf72f5011ea8b5322
+functional-head: d282b6681129620b0f8052fab38fd4d7ee045f24
+contract-base: c32fdb8d3e9b89ab99643deaf456f5452f6217d6
 clean-at-update: true
-slice: Kernel-checked ImpureProgram definition, exact structural readback, initializer equations, and production lowering of that same checked program.
-files: Fir/Compiler/LCNF/{Structural,Reify,ReifyExamples}.lean; README and retained-example templates; this snapshot
-contracts: none; production capture-interface addition only, under root's narrow lease
-checks: On functional head 249f476d5, Beam and fresh batch codec/corpus checks pass; focused 7-job cone passes; retained source 65-job build and fresh-process import pass; git diff --check, make check, make talos-setup, make talos-check and bash integration/talos/artifact/check.sh pass. This snapshot is documentation-only. No fresh browser campaign claimed.
+slice: General base-2^32 schoolbook Nat multiplication within the unchanged 64-bit limb representation.
+files: Fir/Wasm/Emit/ResidentNatMultiplication.lean; ResidentNatArithmetic.lean; Tests/; this snapshot
+contracts: none; existing signature, canonical layout, borrowed inputs and exact-extent recycler retained
+checks: Runtime head eaa1a5e6 passes make check, make talos-setup/check, full deterministic artifact gate, focused build, raw/O3 Node differentials. Packaging successor d282b668 adds only diagnostic packaging/tests and documentation; standalone checksum/smoke passes. New helper/test Beam passes; arithmetic umbrella also passes after Beam refresh resolved its initial sync-barrier timeout.
 bug-cards: none
-blockers: none for the nominated Stored entry. Original diagnostic's unrelated Level1/Entry imports hit RC2 kernel recursion in Zip.Native.DeflateParse:361,367; unchanged real Stored owning-module capture passes.
-handoff: Exact clean containing checkpoint is pinned by the canonical completion. Root reviews/lands; no main advance, push, package publication or W6 implementation by W7.
-next: W6 consumes RetainedRC2.program and initializer.findDecl/body; root serializes integration against newer main.
+blockers: none for generation-ready candidate
+handoff: Clean exact containing checkpoint is pinned in the canonical completion; root alone reviews/lands. No consumer release/pointer, pin, ABI, W6 source, or push changes.
+next: Root review/integration and client-owned matched stable-4.34.1 timing/full suite; no multiplication-refinement claim.
 ```
 
-The authenticated source commits remain lean-zip `273d0d6c` and zip-common
-`4425bab1`; no source file was ported or patched. Official Lean is 4.34.0-rc2,
-commit `6a10ac8c`. The historical 4.33 olean remains evidence only.
+The generic helper no longer repeatedly doubles/adds whole Nats. Each digit
+accumulation fits unsigned i64 exactly; the high 32 bits are its carry.
+One upper-bound result extent is allocated, with a second exact allocation only
+when canonicalization requires trimming. One-limb results use existing
+`makeNatural`. A result equal to an input receives its owned reference via the
+existing increment helper. Under-construction buffers never reach Nat consumers.
 
-The new source artifact is under `.deps/retained-rc2/` in this worktree.
-`RetainedRC2.program` contains 21 declarations/14 externals. Its generated
-lookup equation inherits only standard `propext`; its concrete definition and
-initializer-body equation use no axioms. Fresh-process structural readback is
-checked without recapture. Production lowering uses that readback, not the
-transient capture or a printed/copied initializer.
+The unchanged production arithmetic fixture grows from 22,142 to 22,613 bytes
+raw (+471), and from 15,837 to 16,064 bytes under the same Binaryen `-O3` (+227).
+These are same-toolchain fixture sizes, not consumer speed measurements.
 
-Ordinary/closed Wasm: 1,983 bytes each. Resident: 13,236 bytes, zero imports,
-zero remaining runtime operations; V8 validates its module-owned memory.
-All three byte sequences match the historical diagnostic, without claiming
-cross-version AST/proof identity or a new runtime-refinement theorem.
+Focused raw and O3 tests pass 1,828 products each, including aliased/shared values,
+maximal carries, uneven lengths, canonical boundaries and malformed inputs.
+Both also pass 2,000 poisoned-payload reuse rounds with flat warm frontiers.
+Final diagnostic frontier is 118,784 bytes; arena capacity is 131,072 bytes.
+Persistent promoted outputs retain the existing non-reclaiming convention.
 
-Reproduction, exact source/setup/output digests and limitations are in
-`Fir/Compiler/LCNF/README.md` (SHA-256
-`505d488f624a112805d04efba1cce95a05bc5af65c0eb4ccbc6a0be470f9ada1`).
+The immutable local package is
+`.deps/packages/nat-mul-d282b6681129620b0f8052fab38fd4d7ee045f24-c02d47a8aa15/`.
+Its standalone smoke verifies every checksum and 80 oracle products for each
+binary. Raw diagnostic: 22,650 bytes,
+`c02d47a8aa15fab69e29f612e634ad7d235f45a54806efbb20da3b184f8b26ee`.
+O3 diagnostic: 16,239 bytes,
+`0be3dbe599216e6f3d5bda2d894210fc3b73a75b403c1cb233596a0c732023f0`.
+Both define memory and have zero imports. Diagnostic helper exports are not a
+consumer ABI. Reproduction is in `Fir/Wasm/Emit/Tests/README.md`.
+
+The former checked final-LCNF handoff remains immutable on
+`wasm/lcnf-reification-434`; the UTF-8 producer remains preserved at `05671f39`.
+Neither branch nor its packages were changed by this task.
