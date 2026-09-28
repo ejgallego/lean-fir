@@ -10,13 +10,13 @@ branch: wasm/nat-mul-4341
 worktree: .worktrees/wasm-nat-mul-4341
 state: ready
 base: a30ae0e173fccb2b5a94245bf72f5011ea8b5322
-functional-head: d282b6681129620b0f8052fab38fd4d7ee045f24
+functional-head: f6c43d07e98a15eee870fe53235dcdf5cf31aeb5
 contract-base: c32fdb8d3e9b89ab99643deaf456f5452f6217d6
 clean-at-update: true
 slice: General base-2^32 schoolbook Nat multiplication within the unchanged 64-bit limb representation.
 files: Fir/Wasm/Emit/ResidentNatMultiplication.lean; ResidentNatArithmetic.lean; Tests/; this snapshot
 contracts: none; existing signature, canonical layout, borrowed inputs and exact-extent recycler retained
-checks: Runtime head eaa1a5e6 passes make check, make talos-setup/check, full deterministic artifact gate, focused build, raw/O3 Node differentials. Packaging successor d282b668 adds only diagnostic packaging/tests and documentation; standalone checksum/smoke passes. New helper/test Beam passes; arithmetic umbrella also passes after Beam refresh resolved its initial sync-barrier timeout.
+checks: Runtime head eaa1a5e6 passes make check, make talos-setup/check, full deterministic artifact gate, focused build, raw/O3 Node differentials. Packaging d282b668 and full/trimmed-reuse fixture f6c43d07 leave runtime source/bytes unchanged; package checksum/smoke and focused tests pass. Serial make check passes again at f6c43d07; Talos and artifact gates also rerun green on unchanged runtime. Beam helper/test/arithmetic sync+save pass after refresh resolved an initial umbrella timeout.
 bug-cards: none
 blockers: none for generation-ready candidate
 handoff: Clean exact containing checkpoint is pinned in the canonical completion; root alone reviews/lands. No consumer release/pointer, pin, ABI, W6 source, or push changes.
