@@ -72,11 +72,7 @@ def audit_compiled(root: Path) -> int:
         cwd=root, env=env, check=True,
     )
     toolchain = (project / "lean-toolchain").read_text(encoding="utf-8").strip()
-    profiles = {
-        "leanprover/lean4:v4.34.0-rc2": "lean-4.34-rc2",
-        "leanprover/lean4:v4.34.1": "lean-4.34.1",
-    }
-    profile = profiles.get(toolchain)
+    profile = "lean-4.34.1" if toolchain == "leanprover/lean4:v4.34.1" else None
     if profile is None:
         raise RuntimeError(f"unreviewed Talos toolchain: {toolchain!r}")
     subprocess.run(

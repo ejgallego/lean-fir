@@ -26,16 +26,6 @@ class AuditProfile:
 
 AUDIT_PROFILES = {
     DEFAULT_PROFILE: AuditProfile(
-        pin="leanprover/lean4:v4.33.0",
-        version="4.33.0",
-        githash="d8b18978322de05a8f3dba51ef03cf5461676c17",
-    ),
-    "lean-4.34-rc2": AuditProfile(
-        pin="leanprover/lean4:v4.34.0-rc2",
-        version="4.34.0-rc2",
-        githash="6a10ac8c22beadecabdbb0919c2b50214762f91d",
-    ),
-    "lean-4.34.1": AuditProfile(
         pin="leanprover/lean4:v4.34.1",
         version="4.34.1",
         githash="5045d0056413266e57c625dcd7c365b10e377c52",

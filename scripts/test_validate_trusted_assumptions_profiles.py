@@ -25,22 +25,6 @@ class TrustedAssumptionProfileTests(unittest.TestCase):
     def test_only_exact_reviewed_identity_pairs_are_selected(self) -> None:
         self.assertEqual(
             AUDIT.select_profile(
-                "leanprover/lean4:v4.33.0",
-                "4.33.0",
-                "d8b18978322de05a8f3dba51ef03cf5461676c17",
-            ),
-            "lean-4.33",
-        )
-        self.assertEqual(
-            AUDIT.select_profile(
-                "leanprover/lean4:v4.34.0-rc2",
-                "4.34.0-rc2",
-                "6a10ac8c22beadecabdbb0919c2b50214762f91d",
-            ),
-            "lean-4.34-rc2",
-        )
-        self.assertEqual(
-            AUDIT.select_profile(
                 "leanprover/lean4:v4.34.1",
                 "4.34.1",
                 "5045d0056413266e57c625dcd7c365b10e377c52",
@@ -55,12 +39,12 @@ class TrustedAssumptionProfileTests(unittest.TestCase):
         self.assertIsNone(AUDIT.select_profile(
             "leanprover/lean4:v4.34.0-rc2",
             "4.34.0-rc2",
-            "d8b18978322de05a8f3dba51ef03cf5461676c17",
+            "6a10ac8c22beadecabdbb0919c2b50214762f91d",
         ))
         self.assertIsNone(AUDIT.select_profile(
             "leanprover/lean4:v4.33.0",
             "4.33.0",
-            "6a10ac8c22beadecabdbb0919c2b50214762f91d",
+            "d8b18978322de05a8f3dba51ef03cf5461676c17",
         ))
         self.assertIsNone(AUDIT.select_profile(
             "leanprover/lean4:v4.34.1",
