@@ -723,7 +723,9 @@ def shiftLeftFunction : Function := {
     .localGet resultLocal,
     .ret] }
 
-private def genericDivStep : List Instruction :=
+/-- `withQuotient` is a generator-time choice, never a Wasm branch. Remainder
+does not need the doubled/updated quotient or its allocations and releases. -/
+private def genericDivStep (withQuotient : Bool) : List Instruction :=
   doubleLocal remainderLocal ++ [
   .localGet wordLocal,
   .localGet maskLocal,
@@ -731,14 +733,16 @@ private def genericDivStep : List Instruction :=
   .i32Const .uint32 0,
   .i32Eq,
   .ifElse [] (replaceWithSum remainderLocal resultParam)] ++
-  doubleLocal quotientLocal ++ compareValues remainderLocal rightParam comparisonLocal ++ [
+  (if withQuotient then doubleLocal quotientLocal else []) ++
+  compareValues remainderLocal rightParam comparisonLocal ++ [
   .localGet comparisonLocal,
   .i32Const .uint32 1,
   .i32Eq,
   .ifElse [] (subValues remainderLocal rightParam temporaryLocal ++
     releaseLocal remainderLocal ++ [
       .localGet temporaryLocal,
-      .localSet remainderLocal] ++ replaceWithSum quotientLocal resultParam)] ++ [
+      .localSet remainderLocal] ++
+      (if withQuotient then replaceWithSum quotientLocal resultParam else []))] ++ [
   .localGet maskLocal,
   .i32Const .uint32 1,
   .i32ShrU,
@@ -747,8 +751,7 @@ private def genericDivStep : List Instruction :=
 private def divFinish : List Instruction :=
   releaseLocal remainderLocal ++ [.localGet quotientLocal, .ret]
 
-private def modFinish : List Instruction :=
-  releaseLocal quotientLocal ++ [.localGet remainderLocal, .ret]
+private def modFinish : List Instruction := [.localGet remainderLocal, .ret]
 
 private def divLeadingBody (finish : List Instruction) : List Instruction := [
   .localGet wordLocal,
@@ -767,13 +770,13 @@ private def divLeadingBody (finish : List Instruction) : List Instruction := [
     .ifElse finish [],
     .br divLeadingLoop] []]
 
-private def divBitBody : List Instruction := [
+private def divBitBody (withQuotient : Bool) : List Instruction := [
   .localGet maskLocal,
   .i32Const .uint32 0,
   .i32Eq,
-  .ifElse [.br divPartLoop] []] ++ genericDivStep ++ [.br divBitLoop]
+  .ifElse [.br divPartLoop] []] ++ genericDivStep withQuotient ++ [.br divBitLoop]
 
-private def divPartBody (finish : List Instruction) : List Instruction := [
+private def divPartBody (withQuotient : Bool) (finish : List Instruction) : List Instruction := [
   .localGet partIndexLocal,
   .i32Const .uint32 0,
   .i32Eq,
@@ -790,18 +793,17 @@ private def divPartBody (finish : List Instruction) : List Instruction := [
   .localGet partCountLocal,
   .i32Eq,
   .ifElse [.loop divLeadingLoop (divLeadingBody finish)] [],
-  .loop divBitLoop divBitBody]
+  .loop divBitLoop (divBitBody withQuotient)]
 
-private def genericDivBody (finish : List Instruction) : List Instruction := [
+private def genericDivBody (withQuotient : Bool) (finish : List Instruction) : List Instruction := [
   .i32Const .tobject 1,
-  .localSet remainderLocal,
-  .i32Const .tobject 1,
-  .localSet quotientLocal,
+  .localSet remainderLocal] ++
+  (if withQuotient then [.i32Const .tobject 1, .localSet quotientLocal] else []) ++ [
   .i32Const .tobject 3,
   .localSet resultParam] ++ computePartCount leftParam leftCountLocal ++ [
   .localGet partCountLocal,
   .localSet partIndexLocal,
-  .loop divPartLoop (divPartBody finish)]
+  .loop divPartLoop (divPartBody withQuotient finish)]
 
 def divGenericFunction : Function := {
   name := divGenericName
@@ -812,7 +814,7 @@ def divGenericFunction : Function := {
     (maskLocal, .uint32), (remainderLocal, .tobject),
     (quotientLocal, .tobject), (resultParam, .tobject),
     (temporaryLocal, .tobject), (comparisonLocal, .uint32)]
-  body := validateInputs ++ naturalCount leftParam leftCountLocal ++ genericDivBody divFinish }
+  body := validateInputs ++ naturalCount leftParam leftCountLocal ++ genericDivBody true divFinish }
 
 def modGenericFunction : Function := {
   name := modGenericName
@@ -821,9 +823,9 @@ def modGenericFunction : Function := {
   locals := #[(leftCountLocal, .uint32), (partCountLocal, .uint32),
     (partIndexLocal, .uint32), (wordLocal, .uint32),
     (maskLocal, .uint32), (remainderLocal, .tobject),
-    (quotientLocal, .tobject), (resultParam, .tobject),
+    (resultParam, .tobject),
     (temporaryLocal, .tobject), (comparisonLocal, .uint32)]
-  body := validateInputs ++ naturalCount leftParam leftCountLocal ++ genericDivBody modFinish }
+  body := validateInputs ++ naturalCount leftParam leftCountLocal ++ genericDivBody false modFinish }
 
 private def callGenericDiv : List Instruction := [
   .localGet leftParam,
@@ -1009,6 +1011,12 @@ private partial def callSiteContains (needle : Instruction) :
 #guard landCallSiteRewrite.body.any (callSiteContains .i32And)
 #guard modCallSiteRewrite.body.any (callSiteContains .i32RemU)
 #guard mulCallSiteRewrite.body.any (callSiteContains .i64Mul)
+
+-- No hidden quotient transport may return to the remainder-only helper.
+#guard !modGenericFunction.locals.any (fun binding => binding.1 == quotientLocal)
+#guard !modGenericFunction.body.any (callSiteContains (.localGet quotientLocal))
+#guard !modGenericFunction.body.any (callSiteContains (.localSet quotientLocal))
+#guard divGenericFunction.body.any (callSiteContains (.localGet quotientLocal))
 
 def externalFunctions : Array Function := #[
   mulFunction, powFunction, landFunction, lorFunction, divFunction, modFunction,
