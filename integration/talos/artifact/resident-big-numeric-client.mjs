@@ -82,6 +82,67 @@ function checkNaturalAddition(host, natAdd, {
   assert.equal(naturalValue(host, result), left + right);
 }
 
+function checkIntegerNegation(host, intNeg, frontier) {
+  const maxImmediate = 0x7fffffffn;
+  const minSigned = -0x80000000n;
+  for (const value of [
+    0n, 1n, -1n, 52n, -52n,
+    maxImmediate - 1n, -(maxImmediate - 1n),
+    maxImmediate, -maxImmediate, 0x80000000n, minSigned,
+    0x80000001n, -0x80000001n,
+    (1n << 130n) + 7n, -((1n << 130n) + 7n),
+  ]) {
+    const operand = integerInput(host, value);
+    const operandHeader = host.classify(operand) === "heap"
+      ? host.readHeader(operand) : null;
+    const before = frontier() >>> 0;
+    const result = intNeg(operand);
+    const after = frontier() >>> 0;
+    const expected = -value;
+    assert.equal(integerValue(host, result), expected, `Int.neg(${value})`);
+    const immediate = expected >= 0n && expected <= maxImmediate;
+    assert.equal(host.classify(result), immediate ? "immediate" : "heap",
+      `Int.neg(${value}) concrete class`);
+    if (immediate) {
+      assert.equal(after, before, `Int.neg(${value}) allocated for an immediate result`);
+    } else {
+      const header = host.readHeader(result);
+      if (expected < 0n && expected >= minSigned) {
+        assert.equal(header.kind, 5, `Int.neg(${value}) promoted kind`);
+        assert.equal(header.aux0, 1, `Int.neg(${value}) promoted marker`);
+        assert.equal(header.persistent, true, `Int.neg(${value}) promoted ownership`);
+      } else {
+        assert.equal(header.kind, 6, `Int.neg(${value}) integer kind`);
+        assert.equal(header.aux0, 1, `Int.neg(${value}) integer marker`);
+      }
+    }
+    if (operandHeader !== null) {
+      assert.deepStrictEqual(host.readHeader(operand), operandHeader,
+        `Int.neg(${value}) mutated its operand`);
+      assert.equal(integerValue(host, operand), value,
+        `Int.neg(${value}) changed its operand value`);
+    }
+  }
+
+  const promotedAlias = integerInput(host, -42n);
+  const promotedHeader = host.readHeader(promotedAlias);
+  for (let index = 0; index < 2; index += 1) {
+    assert.equal(integerValue(host, intNeg(promotedAlias)), 42n);
+  }
+  assert.deepStrictEqual(host.readHeader(promotedAlias), promotedHeader,
+    "Int.neg changed an aliased promoted operand");
+
+  const sharedHeap = integerInput(host, (1n << 130n) + 7n);
+  host.writeHeader(sharedHeap, { ...host.readHeader(sharedHeap), rc: 2 });
+  const sharedHeader = host.readHeader(sharedHeap);
+  for (let index = 0; index < 2; index += 1) {
+    assert.equal(integerValue(host, intNeg(sharedHeap)), -((1n << 130n) + 7n));
+  }
+  assert.deepStrictEqual(host.readHeader(sharedHeap), sharedHeader,
+    "Int.neg changed a shared heap operand");
+  expectTrap(() => intNeg(0), "Int.neg malformed heap operand");
+}
+
 function checkStackSafeWalkers(host, {
   intOfNat,
   natAdd,
@@ -148,18 +209,7 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
     assert.equal(integerValue(host, intNegSucc(naturalInput(host, value))),
       -(value + 1n), `Int.negSucc(${value})`);
   }
-  for (const value of [
-    0n,
-    1n,
-    -1n,
-    52n,
-    -52n,
-    (1n << 130n) + 7n,
-    -((1n << 130n) + 7n),
-  ]) {
-    assert.equal(integerValue(host, intNeg(integerInput(host, value))), -value,
-      `Int.neg(${value})`);
-  }
+  checkIntegerNegation(host, intNeg, frontier);
   for (const [left, right] of [
     [0n, 0n],
     [-1n, 0n],

@@ -1869,17 +1869,46 @@ def intSubFunction : Function := {
     .call (.declaration integerCombineName)] ++
     retypeRawResult .tobject objectResultLocal }
 
+/-- Canonical small positive Ints are tagged immediates; canonical small
+negative Ints are promoted sign-extended words in persistent Natural objects.
+Negating the latter's low word also handles the `-2^31` boundary through
+`makeInteger`, while ordinary heap Integers retain the generic path. -/
 def intNegFunction : Function := {
   name := externalName `Int.neg
   params := #[(valueParam, .tobject)]
   results := #[.tobject]
-  locals := objectResultLocals
+  locals := objectResultLocals ++ #[(lowLocal, .uint32)]
   body := [
-    .i32Const .tobject 1,
     .localGet valueParam,
     .i32Const .uint32 1,
-    .call (.declaration integerCombineName)] ++
-    retypeRawResult .tobject objectResultLocal }
+    .i32And,
+    .ifElse
+      ([.i32Const .uint32 1,
+        .localGet valueParam,
+        .i32Const .uint32 1,
+        .i32ShrU,
+        .i32Const .uint32 0,
+        .call (.declaration ResidentNumeric.makeIntegerName)] ++
+        retypeRawResult .tobject objectResultLocal)
+      ([.localGet valueParam,
+        .call (.declaration validateIntegerName)] ++
+        load32 valueParam headerKindOffset ++
+        equalsConst .uint32 ObjectKind.natural.code ++
+        [.ifElse
+          ([.i32Const .uint32 0] ++
+            load32 valueParam headerBytes ++
+            [.i32Sub,
+              .localSet lowLocal,
+              .i32Const .uint32 0,
+              .localGet lowLocal,
+              .i32Const .uint32 0,
+              .call (.declaration ResidentNumeric.makeIntegerName)] ++
+            retypeRawResult .tobject objectResultLocal)
+          ([.i32Const .tobject 1,
+            .localGet valueParam,
+            .i32Const .uint32 1,
+            .call (.declaration integerCombineName)] ++
+            retypeRawResult .tobject objectResultLocal)])] }
 
 def intNegSuccFunction : Function := {
   name := externalName `Int.negSucc
