@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentBigNumeric
+import Fir.Wasm.Emit.ResidentNatMultiplication
 import Fir.Wasm.Emit.ResidentCallSite
 import Fir.Wasm.Emit.ResidentNatShift
 import Fir.Wasm.Emit.ResidentReferenceCount
@@ -18,8 +19,8 @@ This family closes the arithmetic frontier exercised by the production
 lean-zip Level-1 entry without narrowing Lean Naturals to wasm32. It reuses the
 accepted arbitrary-limb resident layout and the existing stack-safe Nat
 add/sub/compare helpers. Small 32-bit multiplication takes a direct word path;
-larger multiplication and division use structured bit walkers over the same
-generic representation.
+larger multiplication uses base-2^32 schoolbook accumulation over the existing
+64-bit limbs. Division retains its structured bit walker.
 -/
 
 inductive LinkError where
@@ -103,8 +104,6 @@ private def productLocal : FVarId := ⟨`product⟩
 private def integerLocal : FVarId := ⟨`integerValue⟩
 
 private def mulSmallLoop : FVarId := ⟨`natMulSmallLoop⟩
-private def mulPartLoop : FVarId := ⟨`natMulPartLoop⟩
-private def mulBitLoop : FVarId := ⟨`natMulBitLoop⟩
 private def landScanLoop : FVarId := ⟨`natLandScanLoop⟩
 private def landWriteLoop : FVarId := ⟨`natLandWriteLoop⟩
 private def lorWriteLoop : FVarId := ⟨`natLorWriteLoop⟩
@@ -295,82 +294,8 @@ private def smallMulBody : List Instruction := [
     .localSet leftHighLocal,
     .br mulSmallLoop]]
 
-private def genericMulBit : List Instruction := [
-  .localGet wordLocal,
-  .i32Const .uint32 1,
-  .i32And,
-  .ifElse (replaceWithSum resultLocal addendLocal) [],
-  .localGet wordLocal,
-  .i32Const .uint32 1,
-  .i32ShrU,
-  .localSet wordLocal] ++ doubleLocal addendLocal ++ [
-  .localGet bitIndexLocal,
-  .i32Const .uint32 1,
-  .i32Add,
-  .localSet bitIndexLocal]
-
-private def genericMulBitBody : List Instruction := [
-  .localGet bitIndexLocal,
-  .i32Const .uint32 32,
-  .i32Eq,
-  .ifElse [
-    .localGet partIndexLocal,
-    .i32Const .uint32 1,
-    .i32Add,
-    .localSet partIndexLocal,
-    .br mulPartLoop] []] ++ genericMulBit ++ [.br mulBitLoop]
-
-private def genericMulPartBody : List Instruction := [
-  .localGet partIndexLocal,
-  .localGet partCountLocal,
-  .i32Eq,
-  .ifElse (releaseLocal addendLocal ++ [.localGet resultLocal, .ret]) []] ++
-  naturalPart multiplierLocal partIndexLocal wordLocal ++ [
-  .i32Const .uint32 0,
-  .localSet bitIndexLocal,
-  .loop mulBitLoop genericMulBitBody]
-
-private def genericMulBody : List Instruction := [
-  .localGet leftCountLocal,
-  .localGet rightCountLocal,
-  .i32LtU,
-  .ifElse [
-    .localGet rightParam,
-    .localSet addendLocal,
-    .localGet leftParam,
-    .localSet multiplierLocal,
-    .localGet leftCountLocal,
-    .localSet countLocal] [
-    .localGet leftParam,
-    .localSet addendLocal,
-    .localGet rightParam,
-    .localSet multiplierLocal,
-    .localGet rightCountLocal,
-    .localSet countLocal],
-  .localGet addendLocal,
-  .call (.declaration ResidentReferenceCount.incrementOnceName),
-  .i32Const .tobject 1,
-  .localSet resultLocal,
-  .i32Const .uint32 0,
-  .localSet partIndexLocal,
-  .localGet countLocal,
-  .localGet countLocal,
-  .i32Add,
-  .localSet partCountLocal,
-  .loop mulPartLoop genericMulPartBody]
-
-def mulGenericFunction : Function := {
-  name := mulGenericName
-  params := #[(leftParam, .tobject), (rightParam, .tobject)]
-  results := #[.tobject]
-  locals := #[(leftCountLocal, .uint32), (rightCountLocal, .uint32),
-    (countLocal, .uint32), (partCountLocal, .uint32),
-    (partIndexLocal, .uint32), (bitIndexLocal, .uint32),
-    (wordLocal, .uint32), (resultLocal, .tobject),
-    (temporaryLocal, .tobject), (addendLocal, .tobject),
-    (multiplierLocal, .tobject)]
-  body := validateInputs ++ naturalCount leftParam leftCountLocal ++
-    naturalCount rightParam rightCountLocal ++ genericMulBody }
+def mulGenericFunction : Function :=
+  ResidentNatMultiplication.function mulGenericName
 
 private def callGenericMul : List Instruction := [
   .localGet leftParam,
