@@ -15,13 +15,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## W6 Blueprint pilot (2026-09-28)
 
-Status: active. Root owns `docs/w6-blueprint-pilot` in
-`.worktrees/w6-blueprint-pilot`, based on `81bb0e2ab`. Maintainer authorized
+Status: released. Root completed `docs/w6-blueprint-pilot` in
+`.worktrees/w6-blueprint-pilot`, initially based on `81bb0e2ab` and refreshed
+onto `c4b9f3ea0`. Maintainer authorized
 an executable Blueprint of the W6 argument and an evaluation of dependency
 graph/frontier status limitations. Scope: new `blueprint/` documentation
 package, root documentation/build wiring and this board. W6 owns all
 production proofs and its live plan; candidate contributor obligations are
 coordinated in `ROOT-W6-20260928-100`. Publication is local only.
+The pilot links 18 declarations and six open targets; its full graph has 34
+edges. Eight evaluation findings cover premise discharge, frontier readiness,
+edge provenance, trust/integration evidence, graph views, adoption and query
+UX. Two exact scalar proof-replacement packets await W6 review. Clean batch
+`lake build FirBlueprint`, `make blueprint`, persisted `vbp check` (48 paired
+entries), Chrome full/group views and `git diff --check` pass. `make check`
+passes at functional checkpoint `4617b83ed`; this report is a documentation-only
+successor. Production proofs, semantic contracts and trust inventories are
+unchanged; no external task or site was published.
 
 ## Public export contract regressions (2026-09-28)
 

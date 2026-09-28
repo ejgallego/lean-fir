@@ -156,3 +156,26 @@ These are proposed requirements, not claims that new metadata fields already
 exist. Before changing Blueprint, replay the cases above against its current
 query/UI behavior and agree which belong in core semantics versus a project
 planning layer. No upstream implementation change is part of this FIR pilot.
+
+## Validation of this pilot
+
+- Clean batch `lake build FirBlueprint` and `make blueprint` passed; all 18
+  declaration associations resolve. Existing upstream docstring/universe
+  warnings are visible; no missing declaration or placeholder is accepted.
+- `vbp check` on the persisted site passed with 48 manifest/cache entries and
+  zero errors. Chrome rendered 24 nodes/34 edges, switched full/group views,
+  and reported no JavaScript errors.
+- `make check` passed at functional commit `4617b83ed4637ce9f16e7ca71173a7eb05b92d78`
+  after refresh onto `c4b9f3ea0`. This validation paragraph and the board closure
+  are documentation-only successors. No production proof or trust inventory
+  changed; no fresh full Talos gate is claimed for the documentation successor.
+- An incremental Beam importer check encountered a permission error replacing
+  a restored `.ilean`; Beam was stopped and the package was cleaned before the
+  successful batch check. The first chapter's earlier Beam check was ready
+  with zero errors. This build-state incident is separate from Blueprint's
+  graph/frontier findings.
+
+The local build remains opt-in (`make blueprint`); the pilot does not yet add a
+hosted site or a required Blueprint CI job. Generated outputs and screenshots
+are disposable. Reproduction commands and findings above are the enduring
+record.
