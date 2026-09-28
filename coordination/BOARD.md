@@ -13,6 +13,22 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Public export contract regressions (2026-09-28)
+
+Status: released. Root completed the maintainer-requested test milestone on
+`tooling/export-contract-regressions` in `.worktrees/export-contract-regressions`,
+initially based on `14be5c08b` and refreshed onto accepted `bf1f22fe`. The narrow
+test lease covers the new
+`integration/talos/FirTalos/ConcreteExportContractTests.lean` and its wiring in
+`TrustAudit.lean`, plus root documentation. Coordination is recorded in
+`ROOT-W6-20260928-090`; W6 confirmed only an independent import addition overlaps.
+Production proofs, semantic definitions, admission policy and axiom inventories
+are unchanged. Four public export signatures and their observable result/fault/
+trace contracts are checked; ten deliberately weakened statements retain the
+original axiom inventories and are rejected. The forced audit runs the checks
+even with cached test modules. Beam, the clean batch test cone, `make check`,
+`make talos-check` and `git diff --check` pass. Publication is local-only.
+
 ## Proof harness gate alignment (2026-09-28)
 
 Status: released. Maintainer-requested root tooling work on branch

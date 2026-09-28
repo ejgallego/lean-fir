@@ -213,6 +213,14 @@ Measured proof trust:
   set. Changed dependencies, missing or
   non-theorem endpoints, and placeholder axioms fail the audit. Removing a
   dependency also requires an explicit inventory update.
+- `ConcreteExportContractTests.lean` independently states the public rooted
+  evaluation/run, fault-simulation and current-admission prefix contracts.
+  The forced audit checks their signatures and rejects ten same-axiom
+  weakenings, including loss of exact ABI/source-observation identity and
+  an added false premise. Separate kernel-checked clients extract actual
+  target execution, represented results, structured faults, runtime state
+  and ordered trace contents. Intentional signature changes, including
+  strengthened theorems with fewer premises, require explicit fixture review.
 - CI additionally reconstructs the immutable retained initializer input and
   directly elaborates its proof consumers and separate exact inventories via
   `make retained-initializer-check`. Local runs accept `LEAN_ZIP_REPO` and

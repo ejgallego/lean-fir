@@ -57,6 +57,14 @@ adapter, and forces direct elaboration of the exact compiled axiom inventories.
 `make proof-trust` prepares the same project and runs the audit independently.
 Neither command issues a persistent acceptance receipt.
 
+The same gate checks independent client contracts for the rooted return,
+source-run return, fault-simulation, and finite-prefix export endpoints.
+Regressions protect the selected result ABI/value, structured faults, actual
+target execution, and ordered external observations. Deliberately weakened
+theorems must be rejected even when their axiom inventories are unchanged.
+These checks preserve the endpoints' current explicit premises; they do not
+discharge compiler admission or the fault-simulation certificate.
+
 CI also runs `make retained-initializer-check` against immutable lean-zip and
 zip-common source commits. This reconstructs the checked compiler input,
 checks readback in a fresh process, and directly elaborates the retained proof

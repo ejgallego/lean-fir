@@ -3,6 +3,7 @@ import FirTalos.ConcreteRegionTransport
 import FirTalos.ConcreteRegionEntry
 import FirTalos.TrustAuditTests
 import FirTalos.ConcreteObservationSensitivity
+import FirTalos.ConcreteExportContractTests
 import FirTalos.ConcreteTerminalCorrectness
 import FirTalos.ConcreteTerminalExtraction
 import FirTalos.ConcreteTerminalSimulation
@@ -45,6 +46,7 @@ roots, including integration proofs that the root textual gate does not scan.
 
 open Lean Elab Command in
 run_cmd do
+  FirTalos.Concrete.ExportContractTests.audit
   for (endpoint, expected) in FirTalos.TrustAudit.endpointInventory do
     FirTalos.TrustAudit.check endpoint expected
     let generated := expected.filter fun name =>
