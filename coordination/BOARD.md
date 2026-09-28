@@ -13,6 +13,26 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Mailbox retention cleanup (2026-09-28)
+
+Status: released. Maintainer assigned W7 temporary root ownership only for
+this maintenance task, on `integration/mailbox-retention`. Tooling landed at
+`2cf93cb1a`: explicit dry-run/apply archival, full historical validation and
+ID lookup, live-reference protection, shared delivery lock, and an old-reader
+guard. `make check`, all 43 mailbox tests, and diff-check pass; no compiler,
+runtime, package, pin or remote publication changed.
+
+Four stale requester obligations were reconciled from recorded acceptance or
+supersession: `ROOT-W7-20260928-201`, `ROOT-W7-20260928-202`,
+`ROOT-W6-20260928-201`, and `ROOT-TOOLING-20260928-201`. The maintenance pass
+archived 158 terminal threads / 651 messages, retaining 100 referenced terminal
+threads and all unfinished work. All 1,604 existing message hashes were
+unchanged; 953 events remained flat and 96 completed threads awaited review
+at that instant. These are historical counts, not a live backlog. No evidence
+was deleted and no disk saving is claimed. Existing routes were notified to
+use primary-checkout `scripts/mailbox` until their normal rebase. The narrow
+role is released; standing `fir/root` and all feature-lane ownership remain.
+
 ## W6 Blueprint pilot (2026-09-28)
 
 Status: released. Root completed `docs/w6-blueprint-pilot` in
