@@ -19,6 +19,7 @@ import {
   moduleShape,
   parseFunctionMap,
   restampCapture,
+  sha256,
   validateSidecar,
   verifyNamedCompanion,
 } from "./function-index-lib.mjs";
@@ -55,7 +56,8 @@ test("tracks all inputs through imported merge/metadce/O3 without changing bytes
       sourceFunctions: ["Fixture.entry", "Fixture.dead"] });
     json("provider.json", { functions: ["Provider.adjust"], residentHelpers: ["Provider.adjust"] });
     const inputs = ["app", "provider"].map(name => ({ wasm: `${name}.wasm`,
-      inventory: `${name}.json`, namedWasm: `${name}.named.wasm` }));
+      inventory: `${name}.json`, namedWasm: `${name}.named.wasm`,
+      wasmSha256: sha256(read(`${name}.wasm`)), inventorySha256: sha256(read(`${name}.json`)) }));
     json("inputs.json", inputs);
     json("opt.json", opt);
     command(["prepare-link", "--inputs", p("inputs.json"), "--capture", p("capture.json")]);
@@ -66,11 +68,17 @@ test("tracks all inputs through imported merge/metadce/O3 without changing bytes
     assert.equal(capture.inputArtifacts.length, 2);
     // Duplicate local indices are safe only inside separately tokenized inputs.
     const duplicated = makeLinkCapture([0, 1].map(() => ({ bytes: read("provider.wasm"),
-      inventory: JSON.parse(read("provider.json")), file: "provider.wasm" })));
+      inventoryBytes: read("provider.json"), file: "provider.wasm",
+      wasmSha256: inputs[1].wasmSha256, inventorySha256: inputs[1].inventorySha256 })));
     assert.equal(new Set(duplicated.capture.identities.map(i => i.token)).size, 4);
     json("bad-inputs.json", [{ ...inputs[0], namedWasm: "app.wasm" }]);
     assert.throws(() => command(["prepare-link", "--inputs", p("bad-inputs.json"),
       "--capture", p("bad.json")]), error => error.stderr.includes("overwrite inputs"));
+    for (const key of ["wasmSha256", "inventorySha256"]) {
+      json("bad-inputs.json", [{ ...inputs[0], [key]: "0".repeat(64) }]);
+      assert.throws(() => command(["prepare-link", "--inputs", p("bad-inputs.json"),
+        "--capture", p("bad.json")]), error => error.stderr.includes("SHA-256 mismatch"));
+    }
     for (const mode of ["plain", "named"]) run("wasm-merge", [...flags,
       ...(mode === "named" ? ["--debuginfo"] : []),
       p(mode === "named" ? "app.named.wasm" : "app.wasm"), "app",
@@ -103,6 +111,7 @@ test("tracks all inputs through imported merge/metadce/O3 without changing bytes
       "multi-input name transport must not change release bytes");
     const sidecar = JSON.parse(read("release.functions.json"));
     assert.equal(sidecar.capture.inputArtifacts.length, 2);
+    assert.equal(sidecar.capture.inputArtifacts[1].inventorySha256, inputs[1].inventorySha256);
     assert.equal(sidecar.functions[2].inputSource.module, 1);
     assert.equal(sidecar.functions[2].inputSource.index, 1);
     assert.equal(sidecar.functions[2].inputSource.sha256, capture.inputArtifacts[1].sha256);
@@ -111,6 +120,11 @@ test("tracks all inputs through imported merge/metadce/O3 without changing bytes
       [2, "Provider.adjust", false], [3, "Fixture.entry", false],
     ]);
     assert.equal(sidecar.functions.some(f => f.name === "Fixture.dead"), false);
+    assert.deepEqual(sidecar.functions[0].finalImport, {module: "host", name: "scale"});
+    const wrongImport = structuredClone(sidecar);
+    wrongImport.functions[0].finalImport.name = "notScale";
+    assert.throws(() => validateSidecar(read("release.wasm"), wrongImport,
+      {strictNames: true}), /final import identity/);
     const instance = new WebAssembly.Instance(new WebAssembly.Module(read("release.wasm")),
       { host: { sink: n => n + 7, scale: n => n * 3 } });
     for (let n = 0; n <= 12; n++) assert.equal(instance.exports["fixture.entry"](n), 10 + 3*n*(n+1)/2);
@@ -122,6 +136,8 @@ test("tracks all inputs through imported merge/metadce/O3 without changing bytes
     assert.equal(verification.nonCustomSectionsEqual, true);
     assert.equal(verification.functions.length, 4);
     assert.equal(verification.verifier.length, 2);
+    command(["verify", "--wasm", p("release.wasm"), "--sidecar", p("release.functions.json"),
+      "--strict-names"]);
     const withoutCapture = makeSidecar(read("release.wasm"),
       {...capture, identities: []}, sidecar.functions.map(f =>
         `${f.index}:${f.optimizerName}`).join("\n"), "digraph call {}\n");
@@ -134,15 +150,20 @@ test("tracks all inputs through imported merge/metadce/O3 without changing bytes
     assert(WebAssembly.validate(differentExport));
     assert.throws(() => verifyNamedCompanion(read("release.wasm"), differentExport, sidecar),
       /changed non-custom sections/);
-    // An unknown optimizer-created definition is named honestly, never as Lean.
+    // Unknown origin is NOT proof of synthesis: ordinary sidecars allow it,
+    // but strict acceptance and companion production must reject it.
     const unknown = structuredClone(sidecar);
     unknown.functions[2].name = null;
     unknown.functions[2].origin = "optimizer-or-linked-runtime";
-    const unknownNamed = makeNamedCompanion(read("release.wasm"), unknown);
-    assert.match(verifyNamedCompanion(read("release.wasm"), unknownNamed, unknown)
-      .functions[2].token, /optimizer-or-linked-runtime/);
-    assert.throws(() => verifyNamedCompanion(read("release.wasm"), unknownNamed, sidecar),
-      /must name every exact final index/);
+    validateSidecar(read("release.wasm"), unknown);
+    assert.throws(() => makeNamedCompanion(read("release.wasm"), unknown), /no proven final name/);
+    json("unknown.json", unknown);
+    assert.throws(() => command(["verify", "--wasm", p("release.wasm"),
+      "--sidecar", p("unknown.json"), "--strict-names"]),
+      error => error.stderr.includes("no proven final name"));
+    const duplicateName = structuredClone(sidecar);
+    duplicateName.functions[2].name = duplicateName.functions[3].name;
+    assert.throws(() => makeNamedCompanion(read("release.wasm"), duplicateName), /ambiguous final name/);
     const wrong = injectFunctionIdentities(read("release.wasm"),
       sidecar.functions.map(f => ({index:f.index, token:`wrong${f.index}`})));
     assert.throws(() => verifyNamedCompanion(read("release.wasm"), wrong, sidecar),
@@ -157,6 +178,11 @@ test("tracks all inputs through imported merge/metadce/O3 without changing bytes
     assert.throws(() => restampCapture(read("named.merged.wasm"), collision,
       mergedCapture.identities.map(i => `${i.index}:${i.upstreamOptimizerName}`).join("\n")),
       /unique across all link inputs/);
+    const misassociated = structuredClone(capture);
+    misassociated.identities[0].token += "$different-input";
+    assert.throws(() => restampCapture(read("named.merged.wasm"), misassociated,
+      mergedCapture.identities.map(i => `${i.index}:${i.upstreamOptimizerName}`).join("\n")),
+      /does not belong to the supplied input capture/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

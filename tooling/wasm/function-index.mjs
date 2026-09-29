@@ -33,7 +33,7 @@ function usage() {
   function-index.mjs restamp --binaryen-dir DIR --wasm FILE --capture FILE --wasm-opt-args FILE --named-wasm FILE --output FILE
   function-index.mjs optimize --binaryen-dir DIR --input FILE --wasm FILE --capture FILE --wasm-opt-args FILE --output FILE
   function-index.mjs finalize --wasm FILE --capture FILE --function-map FILE --call-graph FILE --output FILE
-  function-index.mjs verify --wasm FILE --sidecar FILE
+  function-index.mjs verify --wasm FILE --sidecar FILE [--strict-names]
   function-index.mjs companion --wasm FILE --sidecar FILE --named-wasm FILE
   function-index.mjs verify-companion --wasm FILE --sidecar FILE --named-wasm FILE --output FILE
   function-index.mjs inspect --wasm FILE --sidecar FILE --function INDEX_OR_NAME [--json]
@@ -45,7 +45,7 @@ function arguments_(items) {
   for (let index = 0; index < items.length; index += 1) {
     const name = items[index];
     assert(name.startsWith("--"), `unexpected argument ${name}\n${usage()}`);
-    if (name === "--json") {
+    if (name === "--json" || name === "--strict-names") {
       result.set(name, true);
       continue;
     }
@@ -153,15 +153,19 @@ if (command === "prepare-link") {
       assert.equal(typeof row[key], "string", `link input needs ${key}`);
       assert(row[key].length > 0, `link input needs nonempty ${key}`);
     }
-    return Object.fromEntries(["wasm", "inventory", "namedWasm"].map(key =>
-      [key, resolve(dirname(inputsPath), row[key])]));
+    for (const key of ["wasmSha256", "inventorySha256"])
+      assert.match(row[key] ?? "", /^[0-9a-f]{64}$/, `link input needs ${key}`);
+    return { ...Object.fromEntries(["wasm", "inventory", "namedWasm"].map(key =>
+      [key, resolve(dirname(inputsPath), row[key])])),
+      wasmSha256: row.wasmSha256, inventorySha256: row.inventorySha256 };
   });
   const sources = new Set([inputsPath, ...inputs.flatMap(i => [i.wasm, i.inventory])]);
   const outputs = [...inputs.map(i => i.namedWasm), capturePath];
   assert.equal(new Set(outputs).size, outputs.length, "link output paths must be distinct");
   assert(outputs.every(p => !sources.has(p)), "link outputs must not overwrite inputs");
   const { capture, namedInputs } = makeLinkCapture(inputs.map(i => ({
-    bytes: readFileSync(i.wasm), inventory: readJson(i.inventory), file: basename(i.wasm),
+    bytes: readFileSync(i.wasm), inventoryBytes: readFileSync(i.inventory),
+    wasmSha256: i.wasmSha256, inventorySha256: i.inventorySha256, file: basename(i.wasm),
   })));
   inputs.forEach((input, index) => writeFileSync(input.namedWasm, namedInputs[index]));
   writeJson(capturePath, capture);
@@ -324,7 +328,7 @@ if (command === "prepare-link") {
   }
 } else if (command === "verify") {
   validateSidecar(readFileSync(required(args, "--wasm")),
-    readJson(required(args, "--sidecar")));
+    readJson(required(args, "--sidecar")), { strictNames: args.get("--strict-names") === true });
   process.stdout.write("function sidecar: OK\n");
 } else if (command === "inspect") {
   const wasm = readFileSync(required(args, "--wasm"));

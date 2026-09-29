@@ -275,11 +275,16 @@ export function makeCapture(bytes, inventory, inputFile = null) {
  * supplies its actual map; never concatenate pre-link index spaces. */
 export function makeLinkCapture(inputs) {
   assert(Array.isArray(inputs) && inputs.length > 0, "link capture needs inputs");
-  const captures = inputs.map(({ bytes, inventory, file }, moduleIndex) => {
+  const captures = inputs.map(({ bytes, inventoryBytes, wasmSha256, inventorySha256, file }, moduleIndex) => {
+    assert.equal(sha256(bytes), wasmSha256, "link input Wasm SHA-256 mismatch");
+    assert.equal(sha256(inventoryBytes), inventorySha256, "link input inventory SHA-256 mismatch");
+    const inventory = JSON.parse(inventoryBytes);
     const capture = makeCapture(bytes, inventory, file);
-    return { ...capture, identities: capture.identities.map(identity => ({
+    const binding = sha256(Buffer.from(`${wasmSha256}:${inventorySha256}`));
+    return { ...capture, inputArtifact: { ...capture.inputArtifact,
+      inventorySha256 }, identities: capture.identities.map(identity => ({
       ...identity,
-      token: `fir$link$${moduleIndex}$${identity.index}`,
+      token: `fir$link$${binding}$${moduleIndex}$${identity.index}`,
       inputModule: moduleIndex,
       inputIndex: identity.index,
       inputSha256: capture.inputArtifact.sha256,
@@ -312,6 +317,8 @@ export function restampCapture(bytes, capture, functionMapSource,
   const identities = functionMap.map(({ index, optimizerName }) => {
     const previous = previousIdentities.get(optimizerName);
     if (previous === undefined) {
+      assert(!optimizerName.startsWith("fir$link$"),
+        "linked function token does not belong to the supplied input capture");
       return {
         index,
         token: String(index),
@@ -458,6 +465,8 @@ export function makeSidecar(bytes, capture, functionMapSource,
         identity?.origin ?? "optimizer-or-linked-runtime",
       compilerShape: identity?.compilerShape ?? "unknown",
       imported,
+      ...(imported ? { finalImport: { module: finalImports[index].module,
+        name: finalImports[index].name } } : {}),
       ...(identity?.inputModule !== undefined ? { inputSource: {
         module: identity.inputModule, index: identity.inputIndex,
         sha256: identity.inputSha256,
@@ -491,7 +500,7 @@ export function makeSidecar(bytes, capture, functionMapSource,
   return sidecar;
 }
 
-export function validateSidecar(bytes, sidecar) {
+export function validateSidecar(bytes, sidecar, { strictNames = false } = {}) {
   assert.equal(sidecar.schemaVersion, sidecarSchema,
     `unsupported sidecar schema ${sidecar.schemaVersion}`);
   const shape = moduleShape(bytes);
@@ -513,7 +522,17 @@ export function validateSidecar(bytes, sidecar) {
     name }) => [name, index]));
   const actualExports = new Map();
   const optimizerNames = new Set();
+  const semanticNames = new Set();
+  const imports = WebAssembly.Module.imports(new WebAssembly.Module(bytes))
+    .filter(({ kind }) => kind === "function");
   for (const function_ of sidecar.functions) {
+    if (strictNames) {
+      assert(typeof function_.name === "string" && function_.name.length > 0,
+        `function ${function_.index} has no proven final name`);
+      assert(!semanticNames.has(function_.name),
+        `duplicate or ambiguous final name ${function_.name}`);
+      semanticNames.add(function_.name);
+    }
     assert.equal(typeof function_.optimizerName, "string",
       `function ${function_.index} has no optimizer name`);
     assert(!optimizerNames.has(function_.optimizerName),
@@ -527,6 +546,10 @@ export function validateSidecar(bytes, sidecar) {
         shape.functionImportCount)],
     `function ${function_.index} body size does not match Wasm bytes`);
     if (imported) {
+      if (strictNames || function_.finalImport !== undefined)
+        assert.deepEqual(function_.finalImport,
+          { module: imports[function_.index].module, name: imports[function_.index].name },
+          "final import identity does not match the executable");
       assert.deepEqual(function_.directCallees, [],
         `imported function ${function_.index} cannot have callees`);
       assert.deepEqual(function_.unresolvedCallTargets, [],
@@ -548,18 +571,18 @@ export function validateSidecar(bytes, sidecar) {
 }
 
 function finalNameEntries(sidecar) {
-  // The index prefix makes duplicate semantic names unambiguous. An unknown
-  // definition gets an explicitly artifact-local label, not an invented origin.
+  // Unknown provenance is not evidence of synthesis. Companion production uses
+  // strict validation; ordinary partial sidecars remain supported separately.
   return sidecar.functions.map(f => {
     assert(f.name === null || (typeof f.name === "string" && f.name.length > 0),
       "companion source names must be nonempty strings or explicit null");
     return { index: f.index,
-      token: `wasm-function[${f.index}]::${f.name ?? "[optimizer-or-linked-runtime]"}` };
+      token: `wasm-function[${f.index}]::${f.name}` };
   });
 }
 
 export function makeNamedCompanion(bytes, sidecar) {
-  validateSidecar(bytes, sidecar);
+  validateSidecar(bytes, sidecar, { strictNames: true });
   return injectFunctionIdentities(bytes, finalNameEntries(sidecar));
 }
 
@@ -573,7 +596,7 @@ export function assertSameNonCustomSections(bytes, other) {
 /** Independent check of actual function names and exact encoded executable
  * sections. Re-encoding through a Wasm tool is deliberately not used. */
 export function verifyNamedCompanion(bytes, companion, sidecar) {
-  validateSidecar(bytes, sidecar);
+  validateSidecar(bytes, sidecar, { strictNames: true });
   moduleShape(companion);
   assertSameNonCustomSections(bytes, companion);
   const names = sections(companion).filter(s => isNameSection(companion, s));

@@ -40,10 +40,12 @@ node tooling/wasm/function-index.mjs prepare-link \
 ```
 
 `link-inputs.json` is a nonempty array of `{ "wasm": "app.wasm",
-"inventory": "app.inventory.json", "namedWasm": "app.named.wasm" }` rows,
+"inventory": "app.inventory.json", "namedWasm": "app.named.wasm",
+"wasmSha256": "<64 hex digits>", "inventorySha256": "<64 hex digits>" }` rows,
 with paths relative to that JSON file. Each inventory describes that exact
 input's emitter-final definition order. Inputs and output paths must be distinct.
-The capture records each input hash and uses module-scoped temporary tokens;
+Both input hashes are verified before any output is written. The capture
+records them and uses hash-bound, module-scoped temporary tokens;
 never concatenate independently prepared numeric-token captures. The actual
 linker map supplies post-merge indices, including imports resolved to provider
 definitions. Restamp after merge and metadce as above, then optimize unchanged.
@@ -66,9 +68,12 @@ node tooling/wasm/function-index.mjs verify-companion \
   --named-wasm release.named.wasm --output names-verification.json
 ```
 
-Every import and definition receives `wasm-function[INDEX]::NAME`. Unknown
-definitions use an explicit `[optimizer-or-linked-runtime]` label, never an
-invented source name. The index prefix disambiguates duplicate semantic names.
+Every import and definition receives `wasm-function[INDEX]::NAME`. Companion
+creation/verification requires strict name coverage: unknown definitions,
+missing names and duplicate semantic names are rejected. Unknown provenance is
+not proof of synthesis; this tool does not invent optimizer-origin evidence.
+Ordinary sidecar consumers remain compatible with partial provenance. Use
+`verify --strict-names` to opt into the same strict gate without a companion.
 The verifier checks the actual complete name subsection, every encoded
 non-custom section, and the sidecar's exact release hash. Its report includes
 release, companion, sidecar and verifier-source SHA-256 identities. It does not
@@ -78,7 +83,8 @@ normal checksum inventory; no package is rebuilt by these commands.
 
 The imported two-module regression checks recursive provider identity, linker
 import resolution, final reordering, dead-code removal, unchanged -O3 bytes,
-execution, duplicate-token rejection, incomplete/wrong names, altered executable
+execution, wrong input hashes, duplicate/misassociated tokens, incomplete/wrong
+or ambiguous names, altered executable
 sections and release-hash failures. No VBP source or consumer is needed.
 
 When import/export minification is enabled, Binaryen writes rename diagnostics
