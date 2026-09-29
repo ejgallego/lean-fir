@@ -115,6 +115,16 @@ private def inlineSetIndexLocal : FVarId := ⟨`_fir_inline_Array_set_index⟩
 private def inlineSetCursorLocal : FVarId := ⟨`_fir_inline_Array_set_cursor⟩
 private def inlineSetElementLocal : FVarId := ⟨`_fir_inline_Array_set_element⟩
 private def inlineSetResultLocal : FVarId := ⟨`_fir_inline_Array_set_result⟩
+private def inlineSetBangErasedLocal : FVarId := ⟨`_fir_inline_Array_setBang_erased⟩
+private def inlineSetBangArrayLocal : FVarId := ⟨`_fir_inline_Array_setBang_array⟩
+private def inlineSetBangIndexParamLocal : FVarId :=
+  ⟨`_fir_inline_Array_setBang_index_param⟩
+private def inlineSetBangValueLocal : FVarId := ⟨`_fir_inline_Array_setBang_value⟩
+private def inlineSetBangIndexLocal : FVarId := ⟨`_fir_inline_Array_setBang_index⟩
+private def inlineSetBangCursorLocal : FVarId := ⟨`_fir_inline_Array_setBang_cursor⟩
+private def inlineSetBangElementLocal : FVarId := ⟨`_fir_inline_Array_setBang_element⟩
+private def inlineSetBangEligibleLocal : FVarId := ⟨`_fir_inline_Array_setBang_eligible⟩
+private def inlineSetBangResultLocal : FVarId := ⟨`_fir_inline_Array_setBang_result⟩
 
 private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
 private def retainedCopyLoopLabel : FVarId := ⟨`retainedCopyLoop⟩
@@ -1329,10 +1339,72 @@ private def trustedSetCallSiteRewrite : ResidentCallSite.Rewrite := {
         .localSet inlineSetResultLocal],
     .localGet inlineSetResultLocal] }
 
+/- `Array.set!` also permits an out-of-bounds index. The fast path is taken
+only for an exclusive array and an in-bounds immediate Nat; all other cases
+retain the complete resident helper, including its value-release behavior. -/
+private def trustedSetBangCallSiteRewrite : ResidentCallSite.Rewrite := {
+  target := .declaration `Array.set!
+  signature := {
+    params := #[.erased, .object, .tobject, .tobject]
+    results := #[.object] }
+  locals := #[(inlineSetBangErasedLocal, .erased),
+    (inlineSetBangArrayLocal, .object),
+    (inlineSetBangIndexParamLocal, .tobject),
+    (inlineSetBangValueLocal, .tobject),
+    (inlineSetBangIndexLocal, .uint32),
+    (inlineSetBangCursorLocal, .uint32),
+    (inlineSetBangElementLocal, .tobject),
+    (inlineSetBangEligibleLocal, .uint32),
+    (inlineSetBangResultLocal, .object)]
+  body := [
+    .localSet inlineSetBangValueLocal,
+    .localSet inlineSetBangIndexParamLocal,
+    .localSet inlineSetBangArrayLocal,
+    .localSet inlineSetBangErasedLocal,
+    .i32Const .uint32 0,
+    .localSet inlineSetBangEligibleLocal,
+    .localGet inlineSetBangArrayLocal,
+    .i32Load .uint32 (u32 headerRefCountOffset),
+    .i32Const .uint32 1,
+    .i32Eq,
+    .ifElse [
+      .localGet inlineSetBangIndexParamLocal,
+      .i32Const .uint32 1,
+      .i32And,
+      .ifElse
+        (decodeTrustedNaturalIndex inlineSetBangIndexParamLocal
+          inlineSetBangIndexLocal ++ [
+          .localGet inlineSetBangIndexLocal,
+          .localGet inlineSetBangArrayLocal,
+          .i32Load .uint32 (u32 headerAux1Offset),
+          .i32LtU,
+          .ifElse [
+            .i32Const .uint32 1,
+            .localSet inlineSetBangEligibleLocal] []]) []] [],
+    .localGet inlineSetBangEligibleLocal,
+    .ifElse
+      (elementAddressFor inlineSetBangArrayLocal inlineSetBangIndexLocal
+          inlineSetBangCursorLocal ++ [
+        .localGet inlineSetBangCursorLocal,
+        .i32Load .tobject 0,
+        .localSet inlineSetBangElementLocal] ++
+        storeObjectWord inlineSetBangCursorLocal inlineSetBangValueLocal ++
+        ResidentRelease.checkedDecrementLocal inlineSetBangElementLocal ++ [
+        .localGet inlineSetBangArrayLocal,
+        .localSet inlineSetBangResultLocal])
+      [.localGet inlineSetBangErasedLocal,
+        .localGet inlineSetBangArrayLocal,
+        .localGet inlineSetBangIndexParamLocal,
+        .localGet inlineSetBangValueLocal,
+        .call (.declaration (externalName `Array.set!)),
+        .localSet inlineSetBangResultLocal],
+    .localGet inlineSetBangResultLocal] }
+
 /-- Typed final-LCNF callers mirror upstream's inline exclusive update. Shared
-and persistent arrays retain the complete copy-on-write helper. -/
+and persistent arrays, and the unchecked `set!` index cases, retain the
+complete copy-on-write helper. -/
 def trustedCallSiteRewrites : Array ResidentCallSite.Rewrite := #[
-  trustedSetCallSiteRewrite]
+  trustedSetCallSiteRewrite, trustedSetBangCallSiteRewrite]
 
 private partial def callSiteContains (needle : Instruction) :
     Instruction → Bool
@@ -1347,6 +1419,10 @@ private partial def callSiteContains (needle : Instruction) :
   (callSiteContains (.i32Load .uint32 (u32 headerRefCountOffset)))
 #guard trustedSetCallSiteRewrite.body.any
   (callSiteContains (.call (.declaration (externalName `Array.set))))
+#guard trustedSetBangCallSiteRewrite.body.any
+  (callSiteContains (.call (.declaration (externalName `Array.set!))))
+#guard trustedSetBangCallSiteRewrite.body.any
+  (callSiteContains (.i32Load .uint32 (u32 headerAux1Offset)))
 
 private def setBangOutOfBounds : List Instruction :=
   ResidentRelease.checkedDecrementLocal valueParam ++ [
@@ -1910,6 +1986,7 @@ private def exampleReleaseFunction : Function := {
     .ret] }
 
 def setCallerName : Name := `fir_example_Array_setCaller
+def setBangCallerName : Name := `fir_example_Array_setBangCaller
 
 private def setCallerFunction : Function := {
   name := setCallerName
@@ -1924,6 +2001,20 @@ private def setCallerFunction : Function := {
     .localGet valueParam,
     .localGet proofParam,
     .call (.declaration `Array.set),
+    .ret] }
+
+private def setBangCallerFunction : Function := {
+  name := setBangCallerName
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .tobject), (valueParam, .tobject)]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .localGet erasedParam,
+    .localGet arrayParam,
+    .localGet indexParam,
+    .localGet valueParam,
+    .call (.declaration `Array.set!),
     .ret] }
 
 private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
@@ -1986,7 +2077,9 @@ private def residentExampleInput : Except String Module := do
     releases with
     imports := releases.imports ++ exampleDeclarations.map exampleExternalImport
     functions := releases.functions.push setCallerFunction
-    exports := Fir.Wasm.addUnique releases.exports setCallerName }
+      |>.push setBangCallerFunction
+    exports := Fir.Wasm.addUnique
+      (Fir.Wasm.addUnique releases.exports setCallerName) setBangCallerName }
   pure module
 
 /-- Closed checked/public probe for the resident Array surface. -/
@@ -2038,6 +2131,27 @@ def manifest : Json :=
       match module.functions.find? (·.name == setCallerName) with
       | some caller => caller.locals.size == 8 &&
           caller.body != setCallerFunction.body
+      | none => false
+  | .error _ => false
+
+#guard match residentTrustedExampleModule with
+  | .ok module =>
+      match module.functions.find? (·.name == setBangCallerName) with
+      | some caller => caller.locals.size == 9 &&
+          caller.body != setBangCallerFunction.body &&
+          caller.body.any
+            (callSiteContains (.call
+              (.declaration (externalName `Array.set!))))
+      | none => false
+  | .error _ => false
+
+#guard match residentExampleModule with
+  | .ok module =>
+      match module.functions.find? (·.name == setBangCallerName) with
+      | some caller => caller.locals.isEmpty &&
+          caller.body.any
+            (callSiteContains (.call
+              (.declaration (externalName `Array.set!))))
       | none => false
   | .error _ => false
 

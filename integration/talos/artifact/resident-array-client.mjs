@@ -687,10 +687,12 @@ export async function checkResidentTrustedArraySet(bytes) {
   const { exports } = await WebAssembly.instantiate(module, {});
   const replicate = exports.fir_ext_Array_replicate;
   const setCaller = exports.fir_example_Array_setCaller;
+  const setBangCaller = exports.fir_example_Array_setBangCaller;
   const setBang = exports["fir_ext_Array_set!"];
   const release = exports.resident_array_release;
   equal(typeof replicate, "function", "trusted Array.replicate export");
   equal(typeof setCaller, "function", "trusted Array.set caller export");
+  equal(typeof setBangCaller, "function", "trusted Array.set! caller export");
   equal(typeof setBang, "function", "trusted Array.set! export");
   equal(typeof release, "function", "trusted Array release export");
 
@@ -758,12 +760,73 @@ export async function checkResidentTrustedArraySet(bytes) {
     [81, 70].map(immediateNatural).join(","),
     "trusted Array.set! shared copy");
 
+  const inlineUnique = replicate(
+    0, immediateNatural(2), immediateNatural(90));
+  const inlineFrontier = exports.fir_heap_frontier();
+  equal(setBangCaller(
+    0, inlineUnique, immediateNatural(1), immediateNatural(91)),
+  inlineUnique, "rewritten Array.set! caller exclusive identity");
+  equal(exports.fir_heap_frontier(), inlineFrontier,
+    "rewritten Array.set! caller exclusive allocation");
+  equal(arrayState(exports.memory, inlineUnique).words.join(","),
+    [90, 91].map(immediateNatural).join(","),
+    "rewritten Array.set! caller exclusive result");
+
+  const inlineDiscarded = allocateOwnedOpaque(exports);
+  equal(setBangCaller(0, inlineUnique, immediateNatural(2), inlineDiscarded),
+    inlineUnique, "rewritten Array.set! caller out-of-bounds identity");
+  equal(heapObjectState(exports.memory, inlineDiscarded).kind, KIND_FREED,
+    "rewritten Array.set! caller out-of-bounds replacement release");
+  const inlineHeapIndex = exports.fir_numeric_allocate_one_limb(
+    5, 2, 1, 1, 0, 0, 1);
+  const inlineHeapDiscarded = allocateOwnedOpaque(exports);
+  equal(setBangCaller(0, inlineUnique, inlineHeapIndex, inlineHeapDiscarded),
+    inlineUnique, "rewritten Array.set! caller heap-index identity");
+  equal(heapObjectState(exports.memory, inlineHeapDiscarded).kind, KIND_FREED,
+    "rewritten Array.set! caller heap-index replacement release");
+
+  const inlineShared = replicate(
+    0, immediateNatural(2), immediateNatural(100));
+  new DataView(exports.memory.buffer).setUint32(inlineShared + 8, 2, true);
+  const inlineSharedResult = setBangCaller(
+    0, inlineShared, immediateNatural(0), immediateNatural(101));
+  expect(inlineSharedResult !== inlineShared,
+    "rewritten Array.set! caller reused shared input");
+  equal(arrayState(exports.memory, inlineShared).refCount, 1,
+    "rewritten Array.set! caller shared consumption");
+  equal(arrayState(exports.memory, inlineShared).words.join(","),
+    [100, 100].map(immediateNatural).join(","),
+    "rewritten Array.set! caller changed shared alias");
+  equal(arrayState(exports.memory, inlineSharedResult).words.join(","),
+    [101, 100].map(immediateNatural).join(","),
+    "rewritten Array.set! caller shared result");
+
+  const inlinePersistent = replicate(
+    0, immediateNatural(2), immediateNatural(110));
+  const persistentView = new DataView(exports.memory.buffer);
+  persistentView.setUint32(inlinePersistent + 4, LIVE_PERSISTENT, true);
+  persistentView.setUint32(inlinePersistent + 8, 0, true);
+  const inlinePersistentResult = setBangCaller(
+    0, inlinePersistent, immediateNatural(0), immediateNatural(111));
+  expect(inlinePersistentResult !== inlinePersistent,
+    "rewritten Array.set! caller reused persistent input");
+  equal(arrayState(exports.memory, inlinePersistent).words.join(","),
+    [110, 110].map(immediateNatural).join(","),
+    "rewritten Array.set! caller changed persistent input");
+  equal(arrayState(exports.memory, inlinePersistentResult).words.join(","),
+    [111, 110].map(immediateNatural).join(","),
+    "rewritten Array.set! caller persistent result");
+
   release(unique);
   release(shared);
   release(sharedResult);
   release(setBangUnique);
   release(setBangShared);
   release(setBangSharedResult);
+  release(inlineUnique);
+  release(inlineShared);
+  release(inlineSharedResult);
+  release(inlinePersistentResult);
   return "PASS zero-import trusted Array.set/Array.set! upstream paths";
 }
 
