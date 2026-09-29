@@ -193,6 +193,8 @@ export async function checkResidentScalarBox(bytes) {
     view.setUint32(0, 0xdecafbad, true);
     equal(exports.fir_box_uint8(value) >>> 0, 2 * value + 1,
       `UInt8 ${value} boxed incorrectly`);
+    equal(exports.fir_unbox_uint8(2 * value + 1) >>> 0, value,
+      `UInt8 ${value} unboxed incorrectly`);
     equal(exports.resident_scalar_box_uint8_roundtrip(value) >>> 0, value,
       `UInt8 ${value} round trip failed`);
     equal(view.getUint32(0, true), 0xdecafbad,
@@ -216,8 +218,13 @@ export async function checkResidentScalarBox(bytes) {
   equal(exports.resident_scalar_unbox_uint32(1064) >>> 0, 0xffffffff,
     "promoted UInt32 upper boundary unboxed incorrectly");
 
-  expectTrap(() => exports.fir_unbox_uint8(513),
-    "out-of-range UInt8 immediate did not trap");
+  view.setUint32(0, 0xdecafbad, true);
+  for (const malformed of [0, 2, 512, 513, 0xffffffff]) {
+    expectTrap(() => exports.fir_unbox_uint8(malformed),
+      `malformed or out-of-range UInt8 object ${malformed} did not trap`);
+    equal(view.getUint32(0, true), 0xdecafbad,
+      `malformed UInt8 object ${malformed} changed scratch memory`);
+  }
   expectTrap(() => exports.fir_unbox_uint16(0x20001),
     "out-of-range UInt16 immediate did not trap");
   writePromotedTag(exports.memory, 1104, 0x100000000n);

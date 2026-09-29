@@ -37,7 +37,6 @@ private def rightParam : FVarId := ⟨`right⟩
 private def rawLocal : FVarId := ⟨`raw⟩
 private def raw64Local : FVarId := ⟨`raw64⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
-private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 private def uint8ResultLocal : FVarId := ⟨`uint8Result⟩
 private def uint16ResultLocal : FVarId := ⟨`uint16Result⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
@@ -89,13 +88,21 @@ private def retypeRaw (result : AbiKind) (resultLocal : FVarId) : List Instructi
   .localGet resultLocal,
   .ret]
 
+/- For a checked byte, zero-extending its i32 bits to i64 and wrapping back
+retains the exact bits while selecting the symbolic result kind. Unlike the
+generic retyping path, this needs no scratch-memory save/store/load/restore. -/
+private def returnRetypedUInt8Raw (result : AbiKind) : List Instruction := [
+  .localGet rawLocal,
+  .i64ExtendI32U .uint64,
+  .i32WrapI64 result,
+  .ret]
+
 /-- Upstream `lean_box` specialized to the complete `UInt8` range. -/
 def boxUInt8Function : Function := {
   name := boxUInt8Name
   params := #[(valueParam, .uint8)]
   results := #[.tagged]
-  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
-    (taggedResultLocal, .tagged)]
+  locals := #[(rawLocal, .uint32)]
   body := [
     .localGet valueParam,
     .localGet valueParam,
@@ -103,7 +110,7 @@ def boxUInt8Function : Function := {
     .i32Const .uint32 1,
     .i32Add,
     .localSet rawLocal] ++
-    retypeRaw .tagged taggedResultLocal }
+    returnRetypedUInt8Raw .tagged }
 
 /-- Upstream `lean_box` specialized to the complete `UInt16` range, retaining
 the generic polymorphic result annotation. -/
@@ -226,8 +233,7 @@ def unboxUInt8Function : Function := {
   name := unboxUInt8Name
   params := #[(objectParam, .tobject)]
   results := #[.uint8]
-  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
-    (uint8ResultLocal, .uint8)]
+  locals := #[(rawLocal, .uint32)]
   body :=
     trapUnless ([.localGet objectParam, .i32Const .uint32 1, .i32And] ++
       equalsConst .uint32 1) ++ [
@@ -237,7 +243,7 @@ def unboxUInt8Function : Function := {
       .localSet rawLocal] ++
     trapUnless ([.localGet rawLocal, .i32Const .uint32 0xffffff00, .i32And] ++
       equalsConst .uint32 0) ++
-    retypeRaw .uint8 uint8ResultLocal }
+    returnRetypedUInt8Raw .uint8 }
 
 /-- Upstream `lean_unbox` specialized to a tagged `UInt16`. -/
 def unboxUInt16Function : Function := {
