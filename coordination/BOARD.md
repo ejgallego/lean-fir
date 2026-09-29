@@ -15,10 +15,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Generator integration batch and next leases (2026-09-29)
 
-Status: active. The ordered package stack is integrated at
-`3c795f1ddce8c7ee293c143f27d62b1788b7312b`; at that checkpoint local `main`
-was five commits ahead of `origin/main`. Nothing was pushed. A board-only
-successor records the active leases. The ordered batch is landed:
+Status: active. Local `main` is clean at
+`2e5c15ed6717f25a317910a7f3ba20a009173051`, seven commits ahead of
+`origin/main`; nothing was pushed. The current integration batch is landed:
 
 - Tooling's current-toolchain Array probe repair: `f6b446175`.
 - Gen-astra's strict multi-input Wasm identity/name transport: landed as
@@ -27,6 +26,14 @@ successor records the active leases. The ordered batch is landed:
 - Gen-sol's trusted exclusive `Array.set!` path: landed as `3c795f1dd`,
   cherry-picked with `-x` from exact clean checkpoint `23c1bdd1`. The original
   lane branch remains preserved.
+- Gen-sol's checked `UInt8` box/unbox specialization: landed at `2e5c15ed`.
+  Fresh `make check` and diff-check pass at this head; the focused Lean, Talos,
+  and artifact gates passed at identical-source reviewed checkpoint
+  `237dded24`.
+- Generic Nat remainder's zero-low-limb correctness repair and quotient-free
+  path are also in main (`2ad31a3d2`, `272e46b5d`). Client-owned balanced
+  measurement remains pending under `MATH-FIR-20260928-003`; no performance
+  claim is made yet. The landed small-Int negation path has client qualification.
 
 The Tooling suite and full `make check` pass at the Tooling integration.
 At the gen-astra checkpoint, `make check`, `make -C tooling check`, and the
@@ -34,17 +41,18 @@ full artifact gate pass. At the gen-sol checkpoint, `make check`,
 `make talos-setup`, `make talos-check`, and the full artifact gate pass. A stale
 RC2 Talos scratch tree was preserved at
 `.deps/talos-434-preserved-20260929`; the fresh stable 4.34.1 overlay passes
-its identity gate. No performance improvement is claimed for the Array path.
+its identity gate. No performance improvement is claimed for the Array paths.
 
-Root assigned two non-overlapping W7 emitter leases from this exact main:
-`ROOT-W7-20260929-008` to gen-astra for representation-proved Collatz release
-checks in `ResidentRelease.lean`, and `ROOT-W7-20260929-009` to gen-sol for a
-checked `UInt8` box/unbox candidate in `ResidentScalarBox.lean`. Both use their
-existing generator worktrees on new branches; the old branches/checkpoints are
-preserved. No shared ABI/runtime, W6, host, package-publication, or client timing
-scope is included. The separate full-renderer name request remains in progress
-pending an immutable VBP/VIR/Verso source/setup closure; no recapture is
-authorized.
+Gen-astra's bounded Collatz release-only investigation found no safe rewrite:
+the hot remainder result lacks a proved range fact, and a tagged divisor does
+not cover zero. That thread is closed. The next generic Nat remainder range-fact
+slice is active in `wasm/nat-mod-range-facts-4341` on the exact main above,
+confined to producer analysis and fixtures; the old Collatz checkpoint remains
+preserved. Gen-sol's UInt8 lease is complete; a read-only Life-neighbor Wasm
+attribution is queued under `ROOT-W7-20260929-014`, before any code change.
+Neither scope includes shared ABI/runtime or host edits. The separate
+full-renderer symbol/package task remains distinct from the landed multi-input
+identity tooling.
 
 ## Mailbox retention cleanup (2026-09-28)
 
