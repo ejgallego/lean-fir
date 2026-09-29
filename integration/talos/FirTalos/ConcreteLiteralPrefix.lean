@@ -1,4 +1,4 @@
-import FirTalos.ConcreteStructuredSimulation
+import FirTalos.ConcreteRegionCode
 
 namespace FirTalos.Concrete
 
@@ -6,7 +6,7 @@ open Lean Fir.Wasm Fir.Wasm.Concrete Fir.LeanIR.Impure FirTalos.Correctness
 
 /-- Immediate literal entry, preserving the exact runtime, store and witness.
 The compiler and frame relation determine both local indices and execution. -/
-theorem ConcreteStructuredCodeFocus.advance_immediateLiteral
+theorem ConcreteStructuredRegionCodeCore.advance_immediateLiteral
     {context : Context} {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
     {hosts : Wasm.HostEnv Host} {externals : ExternalImpl} {labels : LabelContext}
@@ -15,21 +15,26 @@ theorem ConcreteStructuredCodeFocus.advance_immediateLiteral
     {locals : Wasm.Locals} {code : Wasm.Program} {witness : RefinementWitness}
     {source : MachineState} {target : StructuredWasmState Host}
     {literal : Compiler.LCNF.LitValue} {kind : AbiKind}
+    {entryRuntime : RuntimeState} {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
     (shape : ImmediateLiteralKind literal kind)
     (valueEq : decl.value = .lit literal)
     (valueKind : letValueKind decl = .ok kind)
     (resultCompiled : getLocal context decl.fvarId = .ok (.localGet decl.fvarId, kind))
     (aligned : LocalLayoutAligned context sourceFunction)
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
-      labels runtime env (.let decl continuation) store locals code witness source target) :
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels entryRuntime entryStore entryWitness facts bytes runtime env
+      (.let decl continuation) store locals code witness source target) :
     ∃ sourceAfter targetAfter resumedLocals rest,
       executeStep externals source = .next sourceAfter ∧
       FinitePath (StructuredWasmStep module hosts) 2 target targetAfter ∧
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals labels
+        entryRuntime entryStore entryWitness (eraseReuseCapacityFact facts decl.fvarId) bytes
         runtime (bind env decl.fvarId shape.sourceValue) continuation
         store resumedLocals rest witness sourceAfter targetAfter ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
+  have related := active.focus
   obtain ⟨valueCode, targetValue, rest, resultIndex, compiled, adapted, resultFound,
       continuationAdapted, codeEq⟩ := CodeAdaptedWithSuffix.let_eq related.adapted
   rw [shape.compileLetValue_eq valueEq valueKind] at compiled
@@ -50,13 +55,14 @@ theorem ConcreteStructuredCodeFocus.advance_immediateLiteral
       (shape.structuredFlatProgram module resultIndex)
       (letStepSimulates_immediateLiteral shape evaluated related.stateRelated
         resultFound kindAt set) nextAligned
-  refine ⟨sourceAfter, targetAfter, _, rest, sourceStep, ?_, focus, joins, frames,
+  refine ⟨sourceAfter, targetAfter, _, rest, sourceStep, ?_,
+    active.afterLocalBind focus resultFound set, joins, frames,
     targetFrames⟩
   simpa using path
 
 /-- Small tagged natural literals do not allocate. This precise result rule
 does not relabel heap naturals or arbitrary `tobject` values as tagged. -/
-theorem ConcreteStructuredCodeFocus.advance_smallTaggedNatural
+theorem ConcreteStructuredRegionCodeCore.advance_smallTaggedNatural
     {program : Fir.LeanIR.ImpureProgram} {context : Context}
     {rootCode : Compiler.LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function} {targetModule : AdaptedModule}
@@ -68,21 +74,26 @@ theorem ConcreteStructuredCodeFocus.advance_smallTaggedNatural
     {continuation : Compiler.LCNF.Code .impure} {store : Wasm.Store Host}
     {locals : Wasm.Locals} {code : Wasm.Program} {witness : RefinementWitness}
     {source : MachineState} {target : StructuredWasmState Host} {value : Nat}
+    {entryRuntime : RuntimeState} {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
     (small : value ≤ maxImmediatePayload)
     (valueEq : decl.value = .lit (.nat value))
     (valueKind : letValueKind decl = .ok .tagged)
     (resultCompiled : getLocal context decl.fvarId = .ok (.localGet decl.fvarId, .tagged))
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
-      labels runtime env (.let decl continuation) store locals code witness source target) :
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels entryRuntime entryStore entryWitness facts bytes runtime env
+      (.let decl continuation) store locals code witness source target) :
     ∃ sourceAfter targetAfter resumedLocals rest,
       executeStep externals source = .next sourceAfter ∧
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2
         target targetAfter ∧
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals labels
+        entryRuntime entryStore entryWitness (eraseReuseCapacityFact facts decl.fvarId) bytes
         runtime (bind env decl.fvarId (.object (.tagged (UInt64.ofNat value)))) continuation
         store resumedLocals rest witness sourceAfter targetAfter ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
+  have related := active.focus
   have sourceSmall : value ≤ maxTaggedPayload := by
     simp [maxImmediatePayload, maxTaggedPayload] at *; omega
   have fits64 : value < UInt64.size := by
@@ -96,7 +107,7 @@ theorem ConcreteStructuredCodeFocus.advance_smallTaggedNatural
       continuationAdapted, codeEq⟩ := CodeAdaptedWithSuffix.let_eq related.adapted
   have compiledEq : compileLetValue context decl =
       .ok [.call (.runtime (.literal (.nat value) .tagged))] := by
-    simp [compileLetValue, valueEq, valueKind, AbiKind.acceptsLiteral, literalKind,
+    simp [compileLetValue, valueEq, valueKind, AbiKind.acceptsLiteral,
       compileLiteral, Bind.bind, Except.bind, Pure.pure, Except.pure]
   rw [compiledEq] at compiled
   cases Except.ok.inj compiled
@@ -133,8 +144,7 @@ theorem ConcreteStructuredCodeFocus.advance_smallTaggedNatural
     rw [related.stateRelated.clearFailure] at nextState
     have allocated : allocateNatural store.host.runtime.heap value =
         .ok (store.host.runtime.heap, word) := by
-      simp [allocateNatural, sourceSmall, encodeTagged_immediate _ _ payloadSmall,
-        word, Bind.bind, Except.bind, Pure.pure, Except.pure]
+      simp [allocateNatural, sourceSmall, encodeTagged_immediate _ _ payloadSmall, word]
     have operation : naturalLiteralStep value store [] = .Return [physical] store := by
       simp [naturalLiteralStep, related.stateRelated.clearFailure, allocated,
         replaceHeap, physical]
@@ -153,7 +163,8 @@ theorem ConcreteStructuredCodeFocus.advance_smallTaggedNatural
       .cons (.importedCall imported) (.cons (.atomic (by trivial)) .nil)
     obtain ⟨sourceAfter, targetAfter, sourceStep, path, focus, joins, frames,
         targetFrames⟩ := related.advance_flatLet codeEq continuationAdapted flat step nextAligned
-    exact ⟨sourceAfter, targetAfter, _, rest, sourceStep, path, focus, joins,
+    exact ⟨sourceAfter, targetAfter, _, rest, sourceStep, path,
+      active.afterLocalBind focus resultFound set, joins,
       frames, targetFrames⟩
 
 end FirTalos.Concrete

@@ -11,6 +11,7 @@ import FirTalos.ConcreteRootedDispatch
 import FirTalos.ConcreteRegionTransport
 import FirTalos.ConcreteFreshYield
 import FirTalos.ConcreteRegionEntry
+import FirTalos.ConcreteFreshLazyFrame
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -240,30 +241,30 @@ theorem mkEmpty_stage_call_bind
     {store : Wasm.Store Host} {locals : Wasm.Locals} {code : Wasm.Program}
     {witness : RefinementWitness} {source : MachineState}
     {target : StructuredWasmState Host} {remainingBytes : Nat}
+    {entryRuntime : RuntimeState} {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
     (capacityKind : findLocalKind? context.localKinds capacityId = some .tagged)
     (resultKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
     (capacityValue : lookupValue env capacityId = .ok (.object (.tagged 5)))
-    (localsAligned : LocalLayoutAligned context sourceFunction)
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
-      labels runtime env (.let mkEmptySite mkEmptyContinuation) store locals code
-      witness source target)
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels entryRuntime entryStore entryWitness [] remainingBytes runtime env
+      (.let mkEmptySite mkEmptyContinuation) store locals code witness source target)
     (handler : ∀ request,
       ConcreteExternalRequestRel witness request
         (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
       EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
-    (budget : store.host.runtime.heap.AddressSpaceBudget remainingBytes)
     (fits : residentArrayAllocationBytes 5 ≤ remainingBytes) :
     ∃ prefixLength nextStore nextWitness sourceAfter targetAfter resumedLocals rest,
       ExecSteps externals 3 source sourceAfter ∧
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
         (prefixLength + 2) target targetAfter ∧
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals labels
+        entryRuntime entryStore entryWitness []
+        (remainingBytes - residentArrayAllocationBytes 5)
         (afterMkEmpty runtime)
         (bind env mkEmptySite.fvarId (.object (.heap runtime.nextLocation)))
         mkEmptyContinuation nextStore resumedLocals rest nextWitness
         sourceAfter targetAfter ∧
-      nextStore.host.runtime.heap.AddressSpaceBudget
-        (remainingBytes - residentArrayAllocationBytes 5) ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
       nextStore.host.externals = store.host.externals ∧
@@ -271,8 +272,9 @@ theorem mkEmpty_stage_call_bind
   let site := mkEmptyCallShape context programEq externals contract runtime env
     capacityKind resultKind capacityValue
   obtain ⟨physicalArgs, operation, resolvedKind, targetImport, callIndex, resultIndex,
-      targetArguments, rest, sourceStaged, targetStaged, staged, argumentPath, control⟩ :=
-    related.advance_external_stage_of_shape spec site localsAligned
+      targetArguments, rest, sourceStaged, targetStaged, staged, argumentPath, ready⟩ :=
+    active.stageExternal spec site
+  have control := ready.control
   have resolved : resolvedKind = .object := by
     have h := congrArg (fun results : Array AbiKind => results[0]?)
       control.resultSignature
@@ -284,16 +286,16 @@ theorem mkEmpty_stage_call_bind
       control.operationName, control.operationMatches.paramTypes,
       control.operationMatches.resultType, site, mkEmptyCallShape, mkEmptyDecl]
   obtain ⟨nextStore, nextWitness, physicalResult, sourceAfter, targetAfter, updated,
-      resumedLocals, steps, path, _set, _resumed, focus, residual, joins,
+      resumedLocals, steps, path, _set, _resumed, focus, joins,
       frames, targetFrames, externalsEq, transports⟩ :=
-    control.advance_emptyArray_bind (capacity := 5) rfl rfl
+    ready.advance_emptyArray_bind (capacity := 5) rfl rfl
       (fun args decode => by
         have same : args = concreteArgs := Except.ok.inj (decode.symm.trans decoded)
         subst args
         exact handler _ (by simpa [resolved, requestEq] using requestRelated))
-      budget fits
+      fits
   exact ⟨targetArguments.length, nextStore, nextWitness, sourceAfter, targetAfter,
-    resumedLocals, rest, .step staged steps, argumentPath.trans path, focus, residual,
+    resumedLocals, rest, .step staged steps, argumentPath.trans path, focus,
     joins, frames, targetFrames, externalsEq, transports⟩
 
 /-- The actual push call executes with reconstructed receiver/element words.
@@ -485,39 +487,41 @@ theorem literals_mkEmpty_stage_call_bind
     {store : Wasm.Store Host} {locals : Wasm.Locals} {code : Wasm.Program}
     {witness : RefinementWitness} {source : MachineState}
     {target : StructuredWasmState Host} {remainingBytes : Nat}
+    {entryRuntime : RuntimeState} {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
     (scalarKind : findLocalKind? context.localKinds scalarSite.fvarId = some .uint8)
     (capacityKind : findLocalKind? context.localKinds capacityId = some .tagged)
     (resultKind : findLocalKind? context.localKinds mkEmptySite.fvarId = some .object)
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
-      labels runtime env initializerBody store locals code witness source target)
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels entryRuntime entryStore entryWitness [] remainingBytes runtime env
+      initializerBody store locals code witness source target)
     (handler : ∀ request,
       ConcreteExternalRequestRel witness request
         (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
       EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
-    (budget : store.host.runtime.heap.AddressSpaceBudget remainingBytes)
     (fits : residentArrayAllocationBytes 5 ≤ remainingBytes) :
     ∃ prefixLength nextStore nextWitness sourceAfter targetAfter resumedLocals rest,
       ExecSteps externals 5 source sourceAfter ∧
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
         (prefixLength + 6) target targetAfter ∧
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals labels
+        entryRuntime entryStore entryWitness []
+        (remainingBytes - residentArrayAllocationBytes 5)
         (afterMkEmpty runtime)
         (bind (literalEnv env) mkEmptySite.fvarId (.object (.heap runtime.nextLocation)))
         mkEmptyContinuation nextStore resumedLocals rest nextWitness sourceAfter targetAfter ∧
-      nextStore.host.runtime.heap.AddressSpaceBudget
-        (remainingBytes - residentArrayAllocationBytes 5) ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames ∧
       nextStore.host.externals = store.host.externals ∧
       RuntimeStepTransports runtime (afterMkEmpty runtime) store nextStore witness nextWitness := by
-  change ConcreteStructuredCodeFocus _ _ _ _ _ _
+  change ConcreteStructuredRegionCodeCore _ _ _ _ _ _ _ _ _ _ _ _
     (.let scalarSite (.let capacitySite (.let mkEmptySite mkEmptyContinuation)))
-    _ _ _ _ _ _ at related
+    _ _ _ _ _ _ at active
   have scalarValueKind : letValueKind scalarSite = .ok .uint8 := literalAbiTypes.1
   have capacityValueKind : letValueKind capacitySite = .ok .tagged := literalAbiTypes.2
   have capacityIdEq : capacitySite.fvarId = capacityId := rfl
   obtain ⟨source1, target1, locals1, rest1, step1, path1, focus1, joins1, frames1,
-      targetFrames1⟩ := related.advance_immediateLiteral (.uint8 0) rfl scalarValueKind
+      targetFrames1⟩ := active.advance_immediateLiteral (.uint8 0) rfl scalarValueKind
     (by simp [getLocal, scalarKind]) spec.localsAligned
     (module := targetModule.wasmModule) (hosts := hosts.env) (externals := externals)
   obtain ⟨source2, target2, locals2, rest2, step2, path2, focus2, joins2, frames2,
@@ -525,12 +529,12 @@ theorem literals_mkEmpty_stage_call_bind
     (by decide) rfl capacityValueKind (by simp [getLocal, capacityIdEq, capacityKind])
     (externals := externals)
   obtain ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter,
-      resumedLocals, rest, steps, path, focus, residual, joins, frames, targetFrames,
+      resumedLocals, rest, steps, path, focus, joins, frames, targetFrames,
       externalsEq, transports⟩ :=
     mkEmpty_stage_call_bind programEq spec contract capacityKind resultKind
-      (by simp [lookupValue, capacityIdEq]) spec.localsAligned focus2 handler budget fits
+      (by simp [lookupValue, capacityIdEq]) focus2 handler fits
   refine ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
-    rest, .step step1 (.step step2 steps), ?_, focus, residual,
+    rest, .step step1 (.step step2 steps), ?_, focus,
     joins.trans (joins2.trans joins1), frames.trans (frames2.trans frames1),
     targetFrames.trans (targetFrames2.trans targetFrames1), externalsEq, transports⟩
   simpa [Nat.add_assoc, Nat.add_comm, Nat.add_left_comm] using path1.trans (path2.trans path)
@@ -576,11 +580,11 @@ theorem literals_mkEmpty_box
       targetAfter.frames = target.frames ∧
       nextStore.host.externals = store.host.externals := by
   obtain ⟨prefixLength, nextStore, nextWitness, sourceMid, targetMid, midLocals,
-      midCode, prefixSteps, prefixPath, focus, residual, joins, frames, targetFrames,
-      externalsEq, transports⟩ :=
+      midCode, prefixSteps, prefixPath, focus, joins, frames, targetFrames,
+      externalsEq, _transports⟩ :=
     literals_mkEmpty_stage_call_bind programEq spec contract scalarKind capacityKind
-      arrayKind active.focus handler active.scope.budgetedPureExternal.1.2 fits
-  change ConcreteStructuredCodeFocus _ _ _ _ _ _ (.let boxSite pushCode)
+      arrayKind active handler fits
+  change ConcreteStructuredRegionCodeCore _ _ _ _ _ _ _ _ _ _ _ _ (.let boxSite pushCode)
     _ _ _ _ _ _ at focus
   have valueKind : letValueKind boxSite = .ok .tagged := by
     change (do let kind ← checkedAbiKind (.const `tobj [])
@@ -597,12 +601,9 @@ theorem literals_mkEmpty_box
       joins', frames', targetFrames'⟩ := focus.advance_boxUInt8 spec rfl valueKind
     (by simp [getLocal, scalarKind]) literalAbiTypes.1
     (by simp [getLocal, boxKind]) scalarLookup (externals := externals)
-  have region : HeapRegionClosed runtime.nextLocation (afterMkEmpty runtime).heap := by
-    apply active.region.alloc (object := .array #[] 5) (persistent := false) rfl
-    simp [HeapObject.ownedValues]
   refine ⟨prefixLength, nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
     rest, execSteps_trans_exact prefixSteps (.step step (.refl _)), ?_,
-    active.afterBody_withoutReuseFacts transports externalsEq next residual (fun _ => region),
+    next,
     joins'.trans joins, frames'.trans frames, targetFrames'.trans targetFrames,
     externalsEq⟩
   simpa [Nat.add_assoc] using prefixPath.trans path
@@ -1008,6 +1009,90 @@ theorem validatedLet_publishes_and_resumesCaller
   exact ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
     sourceSteps, targetPath, next, joins, sourceFrames, targetFrames⟩
 
+/-- The real initializer consumes the saved-frame relation from staging through
+entry, construction and publication. The pending destination bind is already
+in the existing rooted global relation; no separate publication metadata or
+post-body caller invariant is supplied by this theorem's client. -/
+theorem rootedLet_publishesAtBind
+    {context : Context} {functionCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction RetainedRC2.program context functionCode
+      sourceModule sourceFunction targetModule hosts)
+    {externals : ExternalImpl} (contract : FreshArrayExternalContract externals)
+    {entryRuntime runtime : RuntimeState} {entryStore store : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
+    {env : Env} {locals : Wasm.Locals} {labels : LabelContext}
+    {code : Wasm.Program} {source : MachineState} {target : StructuredWasmState Host}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {functionResult rootResult : AbiKind} {callerExpectedResult : Option AbiKind}
+    (related : ConcreteStructuredValidatedCodeOutcome RetainedRC2.program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels entryRuntime
+      entryStore entryWitness functionResult callerExpectedResult facts bytes runtime env
+      (.let decl continuation) store locals code witness source target)
+    (activeResult : spec.sourceResultKind = functionResult)
+    (rooted : ConcreteStructuredValidationAgreesAtRoot rootResult
+      related.agrees related.frames.validation)
+    (valueEq : decl.value = .fap RetainedRC2.initializer.name #[])
+    (empty : findGlobal? runtime.globals RetainedRC2.initializer.name = none)
+    (emptyHandler : ∀ request,
+      ConcreteExternalRequestRel witness request
+        (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
+      EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
+    (pushHandler : ∀ before nextWitness request address word,
+      ConcreteRuntimeRel before nextWitness (afterMkEmpty runtime) →
+      nextWitness.locations.lookup? runtime.nextLocation = some address →
+      ValueRel nextWitness .tobject (.word32 word) (.object (.tagged 0)) →
+      request.name = `Array.push →
+      request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
+      ArrayPushInPlaceHandlerAt store.host.externals request before address word)
+    (fits : residentArrayAllocationBytes 5 ≤ bytes) :
+    ∃ targetSteps nextWitness sourceAfter targetAfter,
+      ExecSteps externals 13 source sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetSteps target targetAfter ∧
+      ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt RetainedRC2.program sourceModule
+        targetModule hosts externals rootResult nextWitness sourceAfter targetAfter ∧
+      HeapRegionClosed runtime.nextLocation sourceAfter.runtime.heap := by
+  have classified : abiKind? RetainedRC2.initializer.type = .ok (some .object) :=
+    mkEmptyAbiTypes.2.2
+  have selected : effectiveDeclarationResultKind? RetainedRC2.initializer = some .object := by
+    simp [effectiveDeclarationResultKind?, classified]
+  have call := related.core.validation.lazyCall_of_selected spec.contextProgram valueEq
+    RetainedRC2.initializer.findDecl selected
+  have generated := spec.lazyCacheGeneratedEnvironment related.contextCaches
+  obtain ⟨staged, cacheIndex, declarationId, cacheSetId, resultIndex, rest,
+      stagedStep, ready, frame⟩ :=
+    related.stageFreshLazyAtRoot activeResult rooted call generated
+  have caches := generated.cacheNames.trans
+    (LazyCacheGeneratedEnvironment.initializers_of_lower
+      (LazyCacheGeneratedEnvironment.lower_of_lowerSupported spec.lowered))
+  have bodyEq : RetainedRC2.initializer.value = .code initializerBody := rfl
+  obtain ⟨calleeContext, calleeFunction, _, ⟨row⟩⟩ :=
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
+      spec.contextProgram caches spec.programNamesUnique spec.lowered spec.adapted
+      RetainedRC2.initializer.findDecl bodyEq classified
+  obtain ⟨scalarKind, capacityKind, arrayKind, boxKind, resultKind⟩ :=
+    initializer_bindingKinds row spec.programNamesUnique spec.lowered
+  obtain ⟨sourceEntry, targetEntry, entryStep, entryPath, active⟩ :=
+    frame.enter ready row empty
+  obtain ⟨bodySteps, bodyStore, nextWitness, bodyLocals, physical, sourceReturned,
+      targetReturned, sourceBody, targetBody, returned, _, sourceFrames, targetFrames⟩ :=
+    body_returns row.contextProgram (row.fromSupportedFunction spec) contract
+      scalarKind capacityKind arrayKind boxKind resultKind active.active
+      emptyHandler pushHandler fits
+  have returnedFrame : ConcreteStructuredFreshLazyReturned frame calleeContext calleeFunction
+      (afterPush runtime) bodyStore nextWitness [] (bytes - residentArrayAllocationBytes 5)
+      (bodyResultEnv [] runtime) bodyLocals runtime.nextLocation physical sourceReturned targetReturned :=
+    ⟨returned, active.programEq, sourceFrames.trans active.sourceStack,
+      targetFrames.trans active.targetStack⟩
+  obtain ⟨published, targetPublished, publicationStep, publicationPath, global, region⟩ :=
+    returnedFrame.publish
+  exact ⟨_, nextWitness, published, targetPublished,
+    .step stagedStep (.step entryStep
+      (execSteps_trans_exact sourceBody (.step publicationStep (.refl _)))),
+    entryPath.trans (targetBody.trans publicationPath), global, region⟩
+
 /-- The completed heap-result lazy call rejoins the existing rooted simulation
 with the original export ABI, not the initializer's object result ABI. This is
 a bounded block theorem: it does not assume current-step admission for its
@@ -1109,6 +1194,7 @@ run_cmd do
       `RetainedInitializer.lazyMiss_publishes_and_resumesCaller,
       `RetainedInitializer.let_publishes_and_resumesCaller,
       `RetainedInitializer.validatedLet_publishes_and_resumesCaller,
+      `RetainedInitializer.rootedLet_publishesAtBind,
       `RetainedInitializer.rootedLet_publishes_and_resumesCaller] do
     FirTalos.TrustAudit.check endpoint
       (FirTalos.TrustAudit.standardAxioms ++ #[

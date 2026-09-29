@@ -1,4 +1,4 @@
-import FirTalos.ConcreteStructuredSimulation
+import FirTalos.ConcreteRegionCode
 
 namespace FirTalos.Concrete
 
@@ -7,7 +7,7 @@ open Lean Fir.Wasm Fir.Wasm.Concrete Fir.LeanIR.Impure FirTalos.Correctness
 /-- UInt8 boxing is a heap-neutral local transition. The represented operand
 and both local indices come from the current compiler/frame relation; no
 allocation-success or target-execution premise is required. -/
-theorem ConcreteStructuredCodeFocus.advance_boxUInt8
+theorem ConcreteStructuredRegionCodeCore.advance_boxUInt8
     {program : Fir.LeanIR.ImpureProgram} {context : Context}
     {rootCode : Compiler.LCNF.Code .impure} {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function} {targetModule : AdaptedModule}
@@ -20,23 +20,28 @@ theorem ConcreteStructuredCodeFocus.advance_boxUInt8
     {locals : Wasm.Locals} {code : Wasm.Program} {witness : RefinementWitness}
     {source : MachineState} {target : StructuredWasmState Host}
     {scalarId : FVarId} {value : UInt8}
+    {entryRuntime : RuntimeState} {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
     (valueEq : decl.value = .box Compiler.LCNF.ImpureType.uint8 scalarId)
     (valueKind : letValueKind decl = .ok .tagged)
     (scalarCompiled : getLocal context scalarId = .ok (.localGet scalarId, .uint8))
     (annotationKind : checkedAbiKind Compiler.LCNF.ImpureType.uint8 = .ok .uint8)
     (resultCompiled : getLocal context decl.fvarId = .ok (.localGet decl.fvarId, .tagged))
     (sourceLookup : lookup env scalarId = some (.scalar (.uint8 value)))
-    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
-      labels runtime env (.let decl continuation) store locals code witness source target) :
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels entryRuntime entryStore entryWitness facts bytes runtime env
+      (.let decl continuation) store locals code witness source target) :
     ∃ sourceAfter targetAfter resumedLocals rest,
       executeStep externals source = .next sourceAfter ∧
       FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3
         target targetAfter ∧
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals labels
+        entryRuntime entryStore entryWitness (eraseReuseCapacityFact facts decl.fvarId) bytes
         runtime (bind env decl.fvarId (.object (.tagged (UInt64.ofNat value.toNat))))
         continuation store resumedLocals rest witness sourceAfter targetAfter ∧
       sourceAfter.joins = source.joins ∧ sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
+  have related := active.focus
   let scalar : BoxedScalar := .uint8 value
   have payloadEq : scalar.payload.toNat = value.toNat := by
     simp [scalar, BoxedScalar.payload]
@@ -134,6 +139,6 @@ theorem ConcreteStructuredCodeFocus.advance_boxUInt8
         targetFrames⟩ := related.advance_flatLet codeEq continuationAdapted flat step nextAligned
     refine ⟨sourceAfter, targetAfter, { updated with values := locals.values }, rest,
       sourceStep, path, ?_, joins, frames, targetFrames⟩
-    simpa [scalar, BoxedScalar.payload] using focus
+    simpa [scalar, BoxedScalar.payload] using active.afterLocalBind focus resultFound set
 
 end FirTalos.Concrete

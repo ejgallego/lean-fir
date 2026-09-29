@@ -9,17 +9,17 @@ owner: fir/wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: active
-base: bf1f22fe07f45ebf830acbc51e7ed3f950362693
-functional-head: bf1f22fe0
+base: 3653117e008a7208ed5ae798bedf09b16886fe82
+functional-head: 81bb0e2abfac0270f76844bb5d193dec945844e4
 contract-base: 2504f9f74817c38279e0ed3b7b0b8c12196a7c35
 clean-at-update: false
-slice: Preserve the original construction entry through external staging, host execution and binding; consume the rules in retained Array.push.
-files: ConcreteRegionExternal.lean; ConcreteArrayPushCall.lean; RetainedArrayCalls.lean; TrustInventory.lean; W6 plans/README and this snapshot.
-contracts: Staged call and pre-bind relations retain fixed-entry resource scope and region closure. Push derives region preservation from its actual response; caller no longer reconstructs the post-push relation. Public thirteen-/fourteen-step APIs, central admission, shared ABI/semantics and emitter unchanged.
-checks: Beam, clean local FirTalos rebuild of focused cone/audit, forced direct changed generic modules/audit, make check and Talos setup/check pass. Exact-source retained reconstruction/readback and forced direct consumers pass, including cutoff regression and 25 retained audits. Generic inventory now has 317 endpoints. Exact clean head in mailbox; RC2 native-compiler caveat unchanged.
-trust: No new native evaluation or axiom. Three new generic rules use only standard Lean axioms; retained endpoint inventory unchanged.
-bug-cards: FIR-BUG-wasm-none-retained-projection-codegen; independently reproduced upstream unknown-join-point/native-compilation failure. Proof-only projections are noncomputable and kernel-check.
-blockers: Installed handler conformance/resident linking and central heap-result lazy-miss closure remain explicit separate obligations.
-handoff: Active construction checkpoint bf1f22fe0 is accepted main. External-state closure is a separate successor; exact gates go in mailbox.
-next: Apply region call/bind rules to empty Array allocation and expose literal/boxing states, then package the saved validated caller for general lazy frames. Do not drop object/tobject exclusions by fiat. Installed handlers and whole compressStored/encoded-byte correctness remain separate.
+slice: Stepwise empty allocation/literals/boxing, saved validated lazy caller, and resident observation boundary.
+files: ConcreteRegionCode.lean; ConcreteArrayExternalCall.lean; ConcreteLiteralPrefix.lean; ConcreteBoxPrefix.lean; ConcreteFreshLazyFrame.lean; ConcreteResidentBoundaryTests.lean; RetainedArrayCalls.lean; trust inventory/umbrella; W6 plans/README; bug card; this snapshot.
+contracts: Original construction entry survives every retained initializer operation without whole-body reconstruction. Saved frame supplies exact caller/root/publication metadata; new retained thirteen-step consumer rejoins rooted global bind. Shared semantics/ABI, central admission and emitter unchanged.
+checks: Beam and focused batch proof checks; exact-source retained rebuild, fresh 21-declaration readback and forced direct consumers pass on 4.34.1. Generic inventory has 324 endpoints; retained inventory has 26. Final ordinary checkpoint gates and exact clean candidate belong to the canonical handoff, not this active snapshot.
+trust: No new native evaluation or axiom. Frame staging/entry/return use standard axioms; publication inherits the existing byte-assembly native dependency. Both negative resident-boundary theorems use only propext and Quot.sound.
+bug-cards: FIR-BUG-wasm-none-retained-projection-codegen remains a native-code-generation diagnostic caveat despite passing kernel/direct checks. New FIR-BUG-wasm-none-resident-host-observation-boundary has two checked negative regressions.
+blockers: Central heap-miss closure still needs general intermediate/nested frame composition and existing-persistent-result provenance. Resident linking needs a memory/observation bridge: a host-preserving helper cannot match an added source external event under the unchanged host-trace relation.
+handoff: Previous external-state checkpoint 81bb0e2ab is accepted main. This successor is proof-only; root consumes only its separately published exact clean gated checkpoint.
+next: Compose saved frames through the remaining intermediate dispatcher; preserve fresh versus existing-persistent result distinction. Resolve the resident observation bridge through root before claiming handler substitution/linking; helper bodies and encoded-byte correctness remain separate obligations.
 ```

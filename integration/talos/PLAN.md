@@ -38,7 +38,7 @@ This layering separates three claims:
 The concrete layout and many runtime refinements already exist. The original
 implementation sequence below is history, not an instruction to restart it.
 
-## Current verification frontier — 2026-09-28
+## Current verification frontier — 2026-09-29
 
 This section, ending at **Implementation history**, is the live W6 priority.
 Later chronological uses of "next", "remaining", "queue", or "immediate" are
@@ -68,14 +68,40 @@ bytes, or the complete lean-zip application.
 | Publication separation | Derived for the actual singleton-Array initializer, including historical caller facts | Production external refinement; broader producers |
 | First actual lean-zip initializer | `rootedLet_publishes_and_resumesCaller`: fourteen source steps and matching target path to validated continuation and rooted global relation at the original export ABI; admission/cache/callee/local facts derived | Installed Array handlers, intermediate heap-result lazy-frame closure, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
-| Fresh heap cache publication | `ConcreteStructuredFreshYieldCore` is produced by the actual retained body and consumed by `publishAtRoot` to rejoin the rooted global relation | Carry this dynamic evidence through general intermediate lazy states and wire central admission |
-| Active construction states | `ConcreteStructuredRegionCodeCore` carries the original cutoff/scope from `enterRegion` through construction and return; `Array.push` now preserves it through staging, host execution and binding separately | Empty-allocation/literal intermediate states and a general saved validated lazy-frame companion |
+| Fresh heap cache publication | `ConcreteStructuredFreshYieldCore` is produced by the actual retained body; `ConcreteFreshLazyFrame` retains the validated caller/root and generated continuation through entry and publication | Carry the saved frame through the general intermediate-state dispatcher and wire central admission |
+| Active construction states | `ConcreteStructuredRegionCodeCore` carries the original cutoff/scope from `enterRegion` through literals, empty allocation, boxing, push and return; both external operations preserve it through staging, host execution and binding separately | A general saved validated lazy-frame companion and central admission composition |
 | Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 
 In particular, `ConcreteStructuredLazyMissBackendCoverageAt` still explicitly
 excludes `.object` and `.tobject` initializer results. The local publication
 lemmas do not remove that central simulator/admission restriction yet.
+
+`ConcreteFreshLazyFrame` is a fresh-result path, not a claim that every heap
+initializer allocates its returned root. General admission must also classify
+initializers returning an existing persistent value, and keep external result
+provenance explicit. It must preserve construction evidence across nested
+calls, rather than attaching a future-result assertion to a saved frame.
+
+### Resident linking: representation and observation are separate obligations
+
+The current successful-return/simulation theorem relates source state to
+`store.host.runtime`; resident helper proofs use `ResidentMemoryRel` to relate
+the concrete heap model to `store.mem`. A helper body proof does not by itself
+replace the former relation with the latter. In particular, the source
+interpreter records external Array calls in its trace, whereas a host-preserving
+resident helper cannot append to the host trace. `ConcreteResidentBoundaryTests`
+records this obstruction independently of heap and result representation;
+see `FIR-BUG-wasm-none-resident-host-observation-boundary`.
+
+Before claiming point 3 (resident linking/encoding) closed, define and prove the
+bridge between these execution/observation models. Possible designs are erased
+ghost instrumentation with an execution projection, or an explicit projected
+product observation. This is a shared semantic decision, not a reason to weaken
+`ConcreteTraceRel` inside a helper proof. The actual empty-Array allocator and
+non-full unique push body remain worthwhile independent implementation proofs,
+but their correctness cannot discharge the current host post-state premise
+unchanged. Encoding and final artifact identity remain later, separate arrows.
 
 ### Current invariant migration boundary
 

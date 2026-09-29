@@ -42,6 +42,39 @@ theorem ConcreteStructuredRegionCodeCore.atEntry
       source target :=
   ⟨focus, .root frame, HeapRegionClosed.of_liveHeapRel focus.stateRelated.1.heap⟩
 
+/-- A heap-neutral binding preserves the construction cutoff and entry-indexed
+resources. Only the overwritten local's reuse fact is removed. -/
+theorem ConcreteStructuredRegionCodeCore.afterLocalBind
+    {context : Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {externals : ExternalImpl}
+    {labels : LabelContext} {entryRuntime runtime : RuntimeState}
+    {entryStore store : Wasm.Store Host} {entryWitness witness : RefinementWitness}
+    {facts : ReuseCapacityFacts} {bytes : Nat} {env : Env} {value : Value}
+    {result : FVarId} {resultIndex : Nat} {physical : Wasm.Value}
+    {locals updated : Wasm.Locals} {remainder : List Wasm.Value}
+    {code continuation : Compiler.LCNF.Code .impure} {targetCode rest : Wasm.Program}
+    {source sourceAfter : MachineState} {target targetAfter : StructuredWasmState Host}
+    (active : ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals
+      labels entryRuntime entryStore entryWitness facts bytes runtime env code store locals
+      targetCode witness source target)
+    (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      runtime (bind env result value) continuation store { updated with values := remainder }
+      rest witness sourceAfter targetAfter)
+    (found : findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (set : locals.set? resultIndex physical = some updated) :
+    ConcreteStructuredRegionCodeCore context sourceModule sourceFunction externals labels
+      entryRuntime entryStore entryWitness (eraseReuseCapacityFact facts result) bytes
+      runtime (bind env result value) continuation store { updated with values := remainder }
+      rest witness sourceAfter targetAfter := by
+  have update : LocalUpdate locals { updated with values := remainder } resultIndex physical := by
+    have base := localUpdate_of_set? set
+    refine ⟨?_, ?_⟩
+    · simpa [Wasm.Locals.get] using base.1
+    · intro other different
+      simpa [Wasm.Locals.get] using base.2 different
+  exact ⟨focus, active.scope.afterExternalBind focus.stateRelated focus.frameAligned
+    found update, active.region⟩
+
 /-- Transport an active construction scope through an executed body fragment.
 Region preservation is a producer obligation separate from ordinaryness and
 representation transport; the entry anchor is not reset to the new runtime. -/

@@ -1,6 +1,7 @@
 import FirTalos.TrustInventory
 import FirTalos.ConcreteRegionTransport
 import FirTalos.ConcreteRegionEntry
+import FirTalos.ConcreteFreshLazyFrame
 import FirTalos.TrustAuditTests
 import FirTalos.ConcreteObservationSensitivity
 import FirTalos.ConcreteExportContractTests
@@ -34,6 +35,7 @@ import FirTalos.ConcretePassComposition
 import FirTalos.ConcreteCompilerCorrectness
 import FirTalos.ConcreteFaultCorrectness
 import FirTalos.ConcreteResidentReplacement
+import FirTalos.ConcreteResidentBoundaryTests
 import FirTalos.ConcreteResidentScalarBox
 import FirTalos.Correctness.FunctionExamples
 

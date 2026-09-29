@@ -149,15 +149,30 @@ The push handler law is restricted to states related to this fresh empty Array,
 represented operands and the exact named request; it does not assume that all
 Array pushes use the in-place branch.
 
-The push block now uses `ConcreteRegionExternal` throughout: active code stages
+Both Array blocks now use `ConcreteRegionExternal` throughout: active code stages
 to a region-indexed call, the actual host response produces a region-indexed
 pre-bind state, and binding returns active code at the **original initializer
 entry**. The generic host rule separates response refinement from preservation
 of owned edges; the push producer derives the latter from its semantic response
 and `HeapRegionClosed.pushFreshTagged`. Its budget comes from the input scope.
-`body_returns` no longer reconstructs a scope/region after this block. The
-empty-allocation block still uses blockwise transport; general nested lazy-frame
-closure and production handler conformance remain open.
+Empty allocation derives closure from its new leaf cell and charges exactly
+`residentArrayAllocationBytes capacity`. Literals and UInt8 boxing use the shared
+`ConcreteStructuredRegionCodeCore.afterLocalBind` rule: the original entry and
+budget survive, and only the overwritten local's reuse fact is erased. These
+generic rules support arbitrary reuse facts and original entry anchors.
+`body_returns` no longer reconstructs a scope/region after either Array block or
+the six-step literal/allocation/boxing prefix. General nested lazy-frame closure
+and production handler conformance remain open.
+
+`ConcreteFreshLazyFrame` packages the saved validated caller, its original
+export ABI and the actual generated publication continuation. Staging produces
+this frame; cold entry derives the construction state and installed stacks;
+fresh return and publication consume that same frame. The retained theorem
+`rootedLet_publishesAtBind` exercises this interface over thirteen source steps
+and returns to the existing rooted global relation at the pending destination
+bind. It is not yet the general one-step lazy dispatcher or removal of the
+central object/tobject exclusion. Precise result kind and fresh-region closure
+remain distinct facts.
 
 `RetainedInitializer.body_publishes_and_resumesCaller` now composes this body
 with cache publication and the caller's destination bind. It derives twelve
