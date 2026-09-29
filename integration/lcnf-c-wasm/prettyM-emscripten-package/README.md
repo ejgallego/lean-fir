@@ -37,11 +37,15 @@ From the FIR repository root, build and run the exact differential test:
 integration/lcnf-c-wasm/package-prettyM-emscripten.sh
 ```
 
-The default package directory is
-`integration/lcnf-c-wasm/_build/prettyM-emscripten-current/`. A client only
-needs these files from that directory:
+The default pointer is
+`integration/lcnf-c-wasm/_build/prettyM-emscripten-package-current`, an atomic
+symlink to a content-addressed directory under the adjacent
+`prettyM-emscripten-package-releases/`. The older mutable
+`prettyM-emscripten-current/` directory is not this accepted package. A client
+only needs these files from the selected immutable release:
 
 ```text
+BUILD.json
 prettyM.manifest.json
 prettyM.mjs
 prettyM.wasm
@@ -49,6 +53,7 @@ emscripten-loader.mjs
 prettyM-emscripten-adapter.mjs
 SHA256SUMS
 README.md
+smoke.mjs
 ```
 
 Keep their filenames and relative locations unchanged. The manifest names the
@@ -56,19 +61,28 @@ ES module and Wasm file relative to itself, and the loader verifies both files'
 lengths and SHA-256 digests before initializing the Lean runtime. The client
 does not need Lean, Lake, LLVM, Emscripten, or the FIR repository.
 
-The producer can choose a different package directory:
+The producer can choose a different current-link path ending in `-current`:
 
 ```sh
 integration/lcnf-c-wasm/package-prettyM-emscripten.sh \
-  "$PWD/.deps/prettyM-emscripten-hand-off"
+  "$PWD/.deps/prettyM-emscripten-hand-off-current"
 ```
 
 Verify the handoff before publishing it:
 
 ```sh
-cd .deps/prettyM-emscripten-hand-off
+cd .deps/prettyM-emscripten-hand-off-current
 sha256sum -c SHA256SUMS
+node smoke.mjs
 ```
+
+`BUILD.json` records the clean FIR commit, selected Lean/Emscripten identities,
+source entry and ABI, the real Wasm import/export inventory, loader-owned memory
+and reclamation policy, artifact hashes, and the exact FIR-native comparator
+used by the differential gate. Those generated facts, timing samples, machine
+paths, and local test receipts are not committed recipe inputs. Repeating a
+build with identical bytes reuses its release; a same-identity byte mismatch
+fails without replacing the accepted release.
 
 ## Node client
 

@@ -257,10 +257,14 @@ integration/lcnf-c-wasm/package-prettyM-emscripten.sh
 ```
 
 Unchanged package builds reuse the same verified stage records. Pass
-`--rebuild` before an optional output directory to force Lean-to-C, every
+`--rebuild` before an optional package-current link to force Lean-to-C, every
 object, and the full-LTO link. Every package run also rebuilds or verifies the
 FIR-native comparator from this same worktree before comparing exact traces;
-an old `prettyM-current` pointer is never accepted on presence alone.
+an old `prettyM-current` pointer is never accepted on presence alone. Successful
+clean-tree builds publish an immutable content-addressed release under
+`_build/prettyM-emscripten-package-releases/` and atomically update
+`_build/prettyM-emscripten-package-current`. The old mutable
+`_build/prettyM-emscripten-current` directory is not the accepted package.
 
 This does not merge the two Wasm packages. The C package keeps its verified
 Emscripten ES module, threaded full Lean runtime, manifest, and loader. The
@@ -272,11 +276,11 @@ runtime. Their JavaScript adapters intentionally accept the same compact
 import {
   loadEmscriptenPrettyMAdapter,
   PrettyFormat as F,
-} from "./integration/lcnf-c-wasm/_build/prettyM-emscripten-current/prettyM-emscripten-adapter.mjs";
+} from "./integration/lcnf-c-wasm/_build/prettyM-emscripten-package-current/prettyM-emscripten-adapter.mjs";
 
 const prettyM = await loadEmscriptenPrettyMAdapter(
   new URL(
-    "./integration/lcnf-c-wasm/_build/prettyM-emscripten-current/prettyM.manifest.json",
+    "./integration/lcnf-c-wasm/_build/prettyM-emscripten-package-current/prettyM.manifest.json",
     import.meta.url,
   ),
 );

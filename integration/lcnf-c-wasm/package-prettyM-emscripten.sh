@@ -8,24 +8,25 @@ if [[ "${1:-}" == "--rebuild" ]]; then
   build_options+=(--rebuild)
   shift
 fi
-out_dir="${1:-$lane_dir/_build/prettyM-emscripten-current}"
+package_current="${1:-$lane_dir/_build/prettyM-emscripten-package-current}"
 if (($# > 1)); then
-  echo "usage: package-prettyM-emscripten.sh [--rebuild] [output-directory]" >&2
+  echo "usage: package-prettyM-emscripten.sh [--rebuild] [package-current-link]" >&2
   exit 1
 fi
 fir_package="$repo_root/integration/talos/artifact/_build/prettyM-current"
+build_dir="$repo_root/.deps/lcnf-c-wasm/prettyM-package-build"
 
 if [[ -n "${FIR_PRETTY_M_NATIVE_PACKAGE:-}" ]]; then
   echo "FIR_PRETTY_M_NATIVE_PACKAGE is no longer supported: the differential gate builds its comparator from this FIR tree" >&2
   exit 1
 fi
 
-mkdir -p "$out_dir"
+mkdir -p "$build_dir"
 
 "$lane_dir/build-emscripten.sh" \
   "${build_options[@]}" \
   --root "$lane_dir" \
-  --out-dir "$out_dir" \
+  --out-dir "$build_dir" \
   --name prettyM \
   --extra-c-source "$lane_dir/runtime/prettyM-bridge.c" \
   --heap-view \
@@ -37,11 +38,13 @@ mkdir -p "$out_dir"
   "$lane_dir/PrettyM.lean"
 
 install -m 0644 "$lane_dir/emscripten-loader.mjs" \
-  "$out_dir/emscripten-loader.mjs"
+  "$build_dir/emscripten-loader.mjs"
 install -m 0644 "$lane_dir/prettyM-emscripten-adapter.mjs" \
-  "$out_dir/prettyM-emscripten-adapter.mjs"
+  "$build_dir/prettyM-emscripten-adapter.mjs"
 install -m 0644 "$lane_dir/prettyM-emscripten-package/README.md" \
-  "$out_dir/README.md"
+  "$build_dir/README.md"
+install -m 0644 "$lane_dir/prettyM-emscripten-package/smoke.mjs" \
+  "$build_dir/smoke.mjs"
 
 "$repo_root/integration/talos/artifact/package-pretty-format.sh" "$fir_package"
 (
@@ -52,19 +55,13 @@ node "$lane_dir/check-current-prettyM-comparator.mjs" \
   "$fir_package/BUILD.json" "$repo_root"
 
 node "$lane_dir/check-prettyM-differential.mjs" \
-  "$out_dir/prettyM.manifest.json" \
+  "$build_dir/prettyM.manifest.json" \
   "$fir_package"
 
-(
-  cd "$out_dir"
-  LC_ALL=C sha256sum \
-    README.md \
-    emscripten-loader.mjs \
-    prettyM-emscripten-adapter.mjs \
-    prettyM.manifest.json \
-    prettyM.mjs \
-    prettyM.wasm > SHA256SUMS
-  sha256sum -c SHA256SUMS
-)
+node "$lane_dir/publish-prettyM-emscripten.mjs" \
+  "$build_dir" "$package_current" "$repo_root" "$fir_package/BUILD.json"
+node "$lane_dir/test-immutable-prettyM-package.mjs" \
+  "$build_dir" "$repo_root"
 
-printf 'prepared tested C/Emscripten prettyM package: %s\n' "$out_dir"
+printf 'prepared tested immutable C/Emscripten prettyM package: %s\n' \
+  "$package_current"
