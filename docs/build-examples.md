@@ -6,34 +6,25 @@ their acceptance checks reject drift.
 
 For the wider source/build/adapter/client relationship across FIR, VIR and
 consumer repositories, see the [configuration map and analysis](package-build-client-map.md).
-The index below distinguishes accepted outputs, recipe-level integrations and
-branch-only work. A build directory or a generated pointer alone is not an
-acceptance claim.
-For evidence-first retirement decisions, see the
-[consumer cleanup audit](consumer-cleanup-audit.md).
+For a recipe to appear as current main navigation, its producer must build from
+the current FIR tree and toolchain, with exact external source inputs, and its
+named acceptance gate must pass. Historical package acceptance does not make
+an old recipe current. Frozen client pins belong to their client campaigns and
+do not qualify FIR main recipes. Unverified or incompatible recipes are omitted
+until their owners repair them or retire the exact obsolete inputs after
+checking actual consumers. Git history preserves old versions and fixtures.
 
-The package table separates two facts. **Artifact status** describes an
-immutable output and its original acceptance. **Recipe freshness** says
-whether that producer recipe has been rerun against the named current FIR main
-and toolchain. An accepted historical artifact stays accepted when a recipe
-becomes stale; it must not be described as current until its recipe gate passes
-again. `Provisional` means there is no consumer acceptance; if no active recipe
-owner is recorded, mark the work `unowned` as well.
+## Current main package recipes
 
-## Consumer packages
-
-| Package | Artifact status | Recipe freshness | Lean entry | Build and acceptance gate | Canonical pointer |
-| --- | --- | --- | --- | --- | --- |
-| [FIR-native styled `prettyM`](../integration/talos/artifact/prettyM-package/README.md) | Historically accepted immutable W7 package | Verified on main `340f4612` (Lean 4.34.1; full artifact gate) | `Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw` | `bash integration/talos/artifact/check.sh` | `integration/talos/artifact/_build/prettyM-current` |
-| [Illuminate full-action player](../integration/illuminate-player/README.md) | Historically accepted; retained as the full-action oracle | Client-owned; not reverified against main `340f4612` | `Illuminate.AnimationPlayer.initialLive`, `transitionLive` | `ILLUMINATE_ROOT=/clean/pinned/illuminate bash integration/illuminate-player/check.sh` | `integration/illuminate-player/_build/illuminate-player-current` |
-| [Illuminate selection player](../integration/illuminate-player/README.md#selection-only-v4-package) | Historically accepted; preferred compact player | Client-owned; not reverified against main `340f4612` | `Illuminate.AnimationPlayer.initialSelectionLive`, `transitionSelectionLive`, and the bit-exact tick facade | same Illuminate gate | `integration/illuminate-player/_build/illuminate-selection-player-current` |
-| [Illuminate prepared HitScene](../integration/illuminate-hit-scene/README.md) | Historically accepted W7 query package | Client-owned; not reverified against main `340f4612` | `Illuminate.HitScene.query` and its bit-exact coordinate facade | `ILLUMINATE_ROOT=/clean/pinned/illuminate ILLUMINATE_HIT_SCENE_FIXTURE=/fixture.json FIR_HIT_SCENE_REQUIRE_REPEAT=1 node integration/illuminate-hit-scene/package.mjs` | `integration/illuminate-hit-scene/_build/illuminate-hit-scene-current` |
-| [C/Emscripten styled `prettyM`](../integration/lcnf-c-wasm/prettyM-emscripten-package/README.md) | Historically accepted alternative backend | Generic C runtime verified at `431ec5fe`; package recipe still needs post-migration qualification | `Fir.LCNFC.PrettyM.renderWire` | `bash integration/lcnf-c-wasm/package-prettyM-emscripten.sh` | `integration/lcnf-c-wasm/_build/prettyM-emscripten-current` |
+| Package | Lean entry | Current source and toolchain | Acceptance gate |
+| --- | --- | --- | --- |
+| [FIR-native styled `prettyM`](../integration/talos/artifact/prettyM-package/README.md) | `Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw` | FIR main `a460d804`; Lean 4.34.1; current FIR source, no external source snapshot | `bash integration/talos/artifact/check.sh` |
 
 An accepted package has a real source entry, immutable publication,
 `BUILD.json`, complete checksums, a packaged smoke test, an explicit ABI and
-ownership contract, and a deterministic acceptance gate. Generated `_build`
-pointers are conveniences; their package metadata is authoritative.
+ownership contract, and a deterministic gate that passes on the current tree.
+Generated `_build` pointers are conveniences; their package metadata is
+authoritative.
 
 FIR CI keeps `make check` and Talos mandatory. Separate path-triggered jobs run
 the W7 artifact gate for FIR/Wasm/artifact inputs and the C/Wasm gate for FIR
@@ -42,42 +33,17 @@ repository: its pinned recipe is requalified after producer-pin or recipe
 changes, and its scheduled moving-client canary follows that repository's
 source/CI policy. FIR does not fetch a floating client checkout from core CI;
 no FIR-side moving-client canary is currently configured.
-Until a consumer gate supplies fresh evidence, record its recipe as not
-verified against current main; do not create a second package registry.
+Only recipes with current-tree evidence are listed above; do not create a
+second package registry to track stale or pending recipes.
 
-## Additional package recipes
+## Other integration sources
 
-These integrations have their own source pins, policies and gates. Consult
-the linked policy and the selected package's `BUILD.json` for acceptance;
-do not infer it from this navigation table.
-
-| Integration | Boundary and status | Recipe / policy |
-| --- | --- | --- |
-| lean-zip | Stored control, Level-1 and production raw levels 1–10; distinct ByteArray oracles | [README](../integration/lean-zip/README.md), [raw generator and assertions](../integration/lean-zip/package-raw.mjs) |
-| Verso Flat formatting | Real `formatRenderedForRuntime`; Flat text/events, separate from PrettyTrace; unpublished-source builds remain provisional | [README and source gate](../integration/verso-flat/README.md), [source pin](../integration/verso-flat/verso-source.json) |
-| Verso complete HTML | Real formatting entry; escaped HTML and tag events, a distinct output oracle | [README](../integration/verso-html/README.md) |
-| Illuminate SpatialHitScene | Prepared spatial query, separate from linear HitScene | [README and gate](../integration/illuminate-spatial-hit-scene/README.md) |
-| VBP manifest resolver | Local retained-session manifest/path boundary | [README](../integration/vbp-manifest-resolver/README.md) |
-| VBP older Verso viewer | Historical mount/unmount and retained-callback regression boundary; not current-code parity or the options factory | [README](../integration/vbp-verso-viewer/README.md) |
-
-## Branch-only packages and experiments
-
-These are not interchangeable with a main-based package recipe:
-
-- VBP current Document renderer and options component live on the official
-  4.34 W7 child. The none-factory prototype `5fefee0c` and portable package
-  `c560f6a4` have matched frozen SSR/Chromium consumer qualification, not live
-  adoption or full 4.34 migration. Read the local object with
-  `git show c560f6a4:integration/vbp-native-session-probe/COMPONENT_PACKAGE_20260916.md`;
-  the same directory at that commit contains
-  `OPTIONS_PATH_CAPTURE_20260916.md`. Neither recipe is on main or claimed
-  remotely published by this index.
-- Verso search remains branch-only. The client experiment uses scalar priority
-  factors from FIR branch `perf/verso-search-qsort` at
-  `~/lean/verso/.worktrees/fir-verso-search-qsort`. Earlier full-ranker, bulk
-  and packed branches are distinct historical experiments, not interchangeable
-  APIs. Resolve the consumer's package and source policy before use; none is a
-  main recipe or a new main canonical pointer.
+Other integration directories are not current recipes merely because a
+README, frozen source pin, historical artifact or package pointer exists. Add
+one above only after the exact current-tree recipe and its consumer gate pass.
+Otherwise, its owner should repair it or remove the obsolete recipe and
+fixtures after confirming no live consumer depends on them. Do not keep a
+second copy of old client inputs in place of Git history.
 
 ## Compiler and runtime fixture catalogs
 
@@ -99,15 +65,9 @@ inventories into this page.
 
 ## Lifecycle
 
-Add a package here only after its immutable acceptance artifact passes. Keep
-an older package when it remains a distinct semantic oracle, deployment path,
-or regression boundary. Remove it when no consumer or unique gate remains;
-dated plans and bug cards remain historical evidence rather than active build
-entries.
-
-The old PrettyTrace/full-action/linear-HitScene and older VBP outputs have
-distinct gates or consumers; do not remove them simply because a newer
-representation exists. Superseded pending-publication text has been removed
-from this index. No package or staging directory is designated disposable
-here: resolve actual consumer staging scripts and pins first, then send any
-uncertain removal proposal to the integration owner.
+Keep a main recipe only while its producer and consumer gates remain
+reproducible from the current tree and toolchain. Preserve historical
+acceptance in Git history, not in fixtures that no longer build against
+current FIR. Retire a recipe only after checking its actual consumer and
+naming the exact obsolete files; preserve distinct current semantic oracles
+and deployment paths when their gates still pass.
