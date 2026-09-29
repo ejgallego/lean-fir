@@ -81,6 +81,35 @@ export async function checkResidentNatArithmetic({ bytes, manifest }) {
   const applyUnary = (operation, value) => naturalValue(host,
     operation(naturalInput(host, value)));
 
+  // A retained result plus one released reference tests both successful
+  // immediate refinement and the zero/overwritten-divisor negative controls.
+  for (const [literal, overwrite] of [[0n, false], [2n, false],
+    [0x7fffffffn, false], [2n, true]]) {
+    const operation = exported(instance,
+      `fir_example_Nat_modLiteral_${literal}_${overwrite}`);
+    for (const n of [0n, 1n, 2n, 0x7fffffffn, 0x80000000n,
+      (1n << 64n) + 3n, (1n << 130n) + 17n]) {
+      for (const dynamic of overwrite ? [0n, 2n, 1n << 64n] : [0n]) {
+        const input = naturalInput(host, n);
+        const result = operation(input, naturalInput(host, dynamic));
+        const divisor = overwrite ? dynamic : literal;
+        const expected = divisor === 0n ? n : n % divisor;
+        assert.equal(naturalValue(host, result), expected,
+          `literal remainder ${n} % ${divisor}`);
+        assert.equal(host.classify(result),
+          expected <= 0x7fffffffn ? "immediate" : "heap");
+        if (host.classify(result) === "heap") {
+          const header = host.readHeader(result);
+          assert.equal(header.rc,
+            header.persistent ? 0 : divisor === 0n ? 2 : 1,
+            "unknown/zero divisor release must preserve exact ownership");
+        }
+      }
+    }
+    expectTrap(() => operation(0, 1), "literal remainder erased input");
+    expectTrap(() => operation(1025 + 1, 1), "literal remainder misaligned input");
+  }
+
   const immediateCallerFrontier = frontier() >>> 0;
   for (const [left, right] of [
     [0n, 0n],

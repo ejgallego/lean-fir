@@ -1,4 +1,5 @@
 import Fir.Wasm.Validate
+import Fir.Wasm.Concrete.Layout
 
 namespace Fir.Wasm.Emit.ResidentCallSite
 
@@ -19,6 +20,9 @@ operation without pretending that the scalar has a narrower ABI kind. -/
 inductive ValueFact where
   /-- The operation's natural-number value fits Lean's tagged-Nat payload. -/
   | fitsTaggedNat
+  /-- A canonical immediate natural with strictly positive payload. In
+  particular this excludes tagged zero, not merely the erased zero word. -/
+  | positiveTaggedNat
   deriving Inhabited, BEq, Repr
 
 /-- A compiler result-local refinement justified by the kinds and reviewed
@@ -128,6 +132,42 @@ private def factConditionAt (conditions : Array (Option ValueFact))
     (index : Nat) : Option ValueFact :=
   if conditions.isEmpty then none else conditions[index]?.join
 
+private partial def writesLocal (localId : FVarId) : Instruction → Bool
+  | .localSet actual => actual == localId
+  | .block _ body | .loop _ body => body.any (writesLocal localId)
+  | .ifElse yes no => yes.any (writesLocal localId) || no.any (writesLocal localId)
+  | _ => false
+
+private def positiveNaturalLiteral : Instruction → Bool
+  | .call (.runtime (.literal (.nat value) kind)) =>
+      (kind == .tagged || kind == .tobject) &&
+        decide (0 < value ∧ value ≤ Concrete.maxImmediatePayload)
+  | .i32Const kind word =>
+      (kind == .tagged || kind == .tobject) &&
+        word.toNat % 2 == 1 && decide (1 < word.toNat)
+  | _ => false
+
+/-- A use-local fact, not a function-wide guess from one assignment. Walk
+backwards only in the current straight-line instruction list. A nested write
+kills the fact; entering a block/loop/branch starts a separate search. Thus a
+literal must dominate this particular read, including on loop re-entry. No
+fact is inferred from a parameter, default local value, or a local copy. -/
+private def literalFactAt (instructions : Array Instruction) (readIndex : Nat)
+    (localId : FVarId) (fact : ValueFact) : Bool :=
+  if fact != .positiveTaggedNat then false else
+  let rec search : Nat → Bool
+    | 0 => false
+    | index + 1 =>
+        match instructions[index]? with
+        | some (.localSet actual) =>
+            if actual == localId then
+              index > 0 && (instructions[index - 1]?).any positiveNaturalLiteral
+            else search index
+        | some instruction =>
+            if writesLocal localId instruction then false else search index
+        | none => false
+  search readIndex
+
 private def callArgumentsMatch (locals : LocalKinds) (facts : LocalFacts)
     (refinement : ConditionalResultRefinement)
     (instructions : Array Instruction)
@@ -147,7 +187,9 @@ private def callArgumentsMatch (locals : LocalKinds) (facts : LocalFacts)
               | none => false
             let factMatches := match
                 factConditionAt refinement.argumentFacts pair.2 with
-              | some expected => hasFact facts localId expected
+              | some expected => hasFact facts localId expected ||
+                  literalFactAt instructions
+                    (callIndex - refinement.argumentKinds.size + pair.2) localId expected
               | none => true
             kindMatches && factMatches
         | _ => false
@@ -306,6 +348,52 @@ private def exampleResult : FVarId := ⟨`exampleResult⟩
 private def exampleResult2 : FVarId := ⟨`exampleResult2⟩
 private def exampleScratch : FVarId := ⟨`exampleScratch⟩
 private def exampleTarget : CallTarget := .declaration `Example.inline
+
+private def positiveLiteralRefinement : Rewrite := {
+  target := exampleTarget
+  signature := { params := #[.tobject], results := #[.tobject] }
+  body := [.call exampleTarget]
+  conditionalResultRefinement? := some {
+    argumentKinds := #[none]
+    argumentFacts := #[some .positiveTaggedNat]
+    kind := .tagged } }
+
+private def positiveLiteralUse : List Instruction := [
+  .localGet exampleValue, .call exampleTarget, .localSet exampleResult]
+
+private def literalFactRefines (body : List Instruction) : Bool :=
+  let function : Function := {
+    name := `Example.literalFact
+    params := #[]
+    results := #[]
+    locals := #[(exampleValue, .tobject), (exampleResult, .tobject)]
+    body }
+  (refineFunctionLocals #[positiveLiteralRefinement] function).locals[1]!.2 == .tagged
+
+private def positiveLiteralSet (value : Nat) : List Instruction := [
+  .call (.runtime (.literal (.nat value) .tobject)), .localSet exampleValue]
+
+#guard literalFactRefines (positiveLiteralSet 2 ++ positiveLiteralUse)
+#guard literalFactRefines (positiveLiteralSet Concrete.maxImmediatePayload ++ positiveLiteralUse)
+#guard !literalFactRefines (positiveLiteralSet 0 ++ positiveLiteralUse)
+#guard !literalFactRefines (positiveLiteralSet (Concrete.maxImmediatePayload + 1) ++ positiveLiteralUse)
+#guard !literalFactRefines positiveLiteralUse
+#guard !literalFactRefines (positiveLiteralUse ++ positiveLiteralSet 2)
+#guard !literalFactRefines (positiveLiteralSet 2 ++ positiveLiteralSet 0 ++ positiveLiteralUse)
+#guard literalFactRefines ([.i32Const .tobject 5, .localSet exampleValue] ++ positiveLiteralUse)
+#guard !literalFactRefines ([.i32Const .tobject 1, .localSet exampleValue] ++ positiveLiteralUse)
+#guard !literalFactRefines ([.i32Const .tobject 0, .localSet exampleValue] ++ positiveLiteralUse)
+#guard !literalFactRefines ([.i32Const .tobject 1024, .localSet exampleValue] ++ positiveLiteralUse)
+#guard !literalFactRefines ([.i32Const .uint32 5, .localSet exampleValue] ++ positiveLiteralUse)
+#guard !literalFactRefines (positiveLiteralSet 2 ++
+  [.ifElse (positiveLiteralSet 0) []] ++ positiveLiteralUse)
+#guard !literalFactRefines (positiveLiteralSet 2 ++
+  [.block ⟨`b⟩ (positiveLiteralSet 0)] ++ positiveLiteralUse)
+#guard !literalFactRefines (positiveLiteralSet 2 ++
+  [.loop ⟨`l⟩ (positiveLiteralUse ++ positiveLiteralSet 0)])
+#guard literalFactRefines [.loop ⟨`l⟩ (positiveLiteralSet 2 ++ positiveLiteralUse)]
+#guard !literalFactRefines (positiveLiteralSet 2 ++ positiveLiteralUse ++
+  [.i32Const .tobject 0, .localSet exampleResult])
 
 private def exampleRewrite : Rewrite := {
   target := exampleTarget

@@ -941,6 +941,13 @@ private def modCallSiteRewrite : ResidentCallSite.Rewrite := {
   locals := #[(inlineLeftLocal, .tobject), (inlineRightLocal, .tobject),
     (inlineLeftPayloadLocal, .uint32), (inlineRightPayloadLocal, .uint32),
     (inlineResultLocal, .tobject)]
+  /- For a positive immediate divisor, n % d < d for every canonical Nat n,
+  including arbitrary-limb n. The unchanged helper constructs the remainder
+  canonically. Positivity is essential: n % 0 = n need not be immediate. -/
+  conditionalResultRefinement? := some {
+    argumentKinds := #[none, none]
+    argumentFacts := #[none, some .positiveTaggedNat]
+    kind := .tagged }
   body := binaryPrefix ++ binaryImmediateTest ++ [
     .ifElse
       (ResidentBigNumeric.immediateNaturalPayload inlineRightLocal ++ [
@@ -1181,19 +1188,58 @@ private def modCallerFunction : Function :=
 private def mulCallerFunction : Function :=
   binaryCallerFunction mulCallerName `Nat.mul
 
+private def modLiteralCallerName (divisor : Nat) (overwrite : Bool := false) : Name :=
+  Name.mkSimple s!"fir_example_Nat_modLiteral_{divisor}_{overwrite}"
+
+private def modDivisorLocal : FVarId := ⟨`modLiteralDivisor⟩
+
+/-- Exercise fact consumption at the ownership boundary. Keep one output
+reference while releasing the extra one; for heap-valued zero-divisor results
+the decrement must survive. The overwrite case is a negative control. -/
+private def modLiteralCallerFunction (divisor : Nat) (overwrite : Bool := false) : Function := {
+  name := modLiteralCallerName divisor overwrite
+  params := #[(leftParam, .tobject), (rightParam, .tobject)]
+  results := #[.tobject]
+  locals := #[(modDivisorLocal, .tobject), (resultParam, .tobject)]
+  body := [
+    .i32Const .tobject (UInt32.ofNat (divisor * 2 + 1)),
+    .localSet modDivisorLocal] ++
+    (if overwrite then [.localGet rightParam, .localSet modDivisorLocal] else []) ++ [
+    .localGet leftParam, .localGet modDivisorLocal,
+    .call (.declaration `Nat.mod), .localSet resultParam,
+    .localGet resultParam, .call (.runtime (.inc 1 true)),
+    .localGet resultParam, .call (.runtime (.dec 1 true none)),
+    .localGet resultParam, .ret] }
+
+private def modLiteralCallers : Array Function := #[
+  modLiteralCallerFunction 0, modLiteralCallerFunction 2,
+  modLiteralCallerFunction maxImmediatePayload, modLiteralCallerFunction 2 true]
+
+#guard (ResidentRelease.specializeCheckedDecrements {
+    imports := #[], exports := #[], initializers := #[], runtimeOperations := #[]
+    functions := modLiteralCallers.map (ResidentCallSite.refineFunctionLocals #[modCallSiteRewrite])
+  }).functions.map (fun f => f.body.any (callSiteContains (.call (.runtime (.dec 1 true none))))) ==
+    #[true, false, false, true]
+
 def residentExampleModule : Except String Module := do
   let module ← ResidentBigNumeric.residentExampleModule
+  let module := { module with
+    imports := module.imports ++ externalDeclarations.map exampleImport ++
+      #[exampleImport ResidentNatShift.declaration, log2ExampleImport]
+    functions := module.functions ++ #[shiftRightCallerFunction,
+      landCallerFunction, modCallerFunction, mulCallerFunction] ++ modLiteralCallers
+    exports := (#[shiftRightCallerName, landCallerName, modCallerName,
+      mulCallerName]).foldl Fir.Wasm.addUnique module.exports }
+  let module := { module with
+    functions := module.functions.map (ResidentCallSite.refineFunctionLocals #[modCallSiteRewrite])
+    exports := modLiteralCallers.foldl (fun exports f => Fir.Wasm.addUnique exports f.name) module.exports }
+  let module := ResidentRelease.specializeCheckedDecrements module
   let module ← ResidentReferenceCount.internalizeIncrements module
     |>.mapError fun error => s!"increments: {repr error}"
   let module ← ResidentRelease.internalizeReleases module
     |>.mapError fun error => s!"releases: {repr error}"
   let module := { module with
-    imports := module.imports ++ externalDeclarations.map exampleImport ++
-      #[exampleImport ResidentNatShift.declaration, log2ExampleImport]
-    functions := module.functions ++ #[shiftRightCallerFunction,
-      landCallerFunction, modCallerFunction, mulCallerFunction]
-    exports := (#[shiftRightCallerName, landCallerName, modCallerName,
-      mulCallerName, ResidentRelease.decrementOnceName,
+    exports := (#[ResidentRelease.decrementOnceName,
       ResidentReferenceCount.incrementOnceName]).foldl Fir.Wasm.addUnique module.exports }
   let module ← internalizeAvailable module
     |>.mapError fun error => s!"Nat arithmetic: {repr error}"
