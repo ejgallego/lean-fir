@@ -13,7 +13,12 @@ if (($# > 1)); then
   echo "usage: package-prettyM-emscripten.sh [--rebuild] [output-directory]" >&2
   exit 1
 fi
-fir_package="${FIR_PRETTY_M_NATIVE_PACKAGE:-$repo_root/integration/talos/artifact/_build/prettyM-current}"
+fir_package="$repo_root/integration/talos/artifact/_build/prettyM-current"
+
+if [[ -n "${FIR_PRETTY_M_NATIVE_PACKAGE:-}" ]]; then
+  echo "FIR_PRETTY_M_NATIVE_PACKAGE is no longer supported: the differential gate builds its comparator from this FIR tree" >&2
+  exit 1
+fi
 
 mkdir -p "$out_dir"
 
@@ -38,9 +43,13 @@ install -m 0644 "$lane_dir/prettyM-emscripten-adapter.mjs" \
 install -m 0644 "$lane_dir/prettyM-emscripten-package/README.md" \
   "$out_dir/README.md"
 
-if [[ ! -s "$fir_package/prettyM.wasm" ]]; then
-  "$repo_root/integration/talos/artifact/package-pretty-format.sh" "$fir_package"
-fi
+"$repo_root/integration/talos/artifact/package-pretty-format.sh" "$fir_package"
+(
+  cd "$fir_package"
+  sha256sum -c SHA256SUMS
+)
+node "$lane_dir/check-current-prettyM-comparator.mjs" \
+  "$fir_package/BUILD.json" "$repo_root"
 
 node "$lane_dir/check-prettyM-differential.mjs" \
   "$out_dir/prettyM.manifest.json" \

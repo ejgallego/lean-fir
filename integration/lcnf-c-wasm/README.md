@@ -258,7 +258,9 @@ integration/lcnf-c-wasm/package-prettyM-emscripten.sh
 
 Unchanged package builds reuse the same verified stage records. Pass
 `--rebuild` before an optional output directory to force Lean-to-C, every
-object, and the full-LTO link.
+object, and the full-LTO link. Every package run also rebuilds or verifies the
+FIR-native comparator from this same worktree before comparing exact traces;
+an old `prettyM-current` pointer is never accepted on presence alone.
 
 This does not merge the two Wasm packages. The C package keeps its verified
 Emscripten ES module, threaded full Lean runtime, manifest, and loader. The

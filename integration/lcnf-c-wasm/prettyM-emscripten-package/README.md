@@ -25,6 +25,10 @@ render({ format, width, indent?, column? })
   -> { trace: { text, events }, timings, memory }
 ```
 
+The `lean-4.33-.../v1` identifier names the established compact JavaScript
+input shape; it is not the compiler version used for a new build. The generated
+manifest records the selected Lean and Emscripten versions and commits.
+
 ## Build and hand off the package
 
 From the FIR repository root, build and run the exact differential test:
@@ -55,13 +59,14 @@ does not need Lean, Lake, LLVM, Emscripten, or the FIR repository.
 The producer can choose a different package directory:
 
 ```sh
-integration/lcnf-c-wasm/package-prettyM-emscripten.sh /tmp/fir-prettyM
+integration/lcnf-c-wasm/package-prettyM-emscripten.sh \
+  "$PWD/.deps/prettyM-emscripten-hand-off"
 ```
 
 Verify the handoff before publishing it:
 
 ```sh
-cd /tmp/fir-prettyM
+cd .deps/prettyM-emscripten-hand-off
 sha256sum -c SHA256SUMS
 ```
 
@@ -182,15 +187,20 @@ The adapter validates the compact format tree, encodes one
 copies one response back. The C bridge owns its buffers. The wire is private
 to this package: clients should use `render`, not the five raw bridge exports.
 
-The Lean entry point reconstructs the ordinary Lean 4.33 `Std.Format`, calls
+The Lean entry point reconstructs the pinned Lean `Std.Format`, calls
 the real monomorphic `Std.Format.prettyM`, and records the full output,
 newline, start-tag, and end-tags protocol. Natural and integer inputs use
 canonical arbitrary-precision 32-bit limbs.
 
-Packaging loads this artifact and the independent FIR-native package, sends
-identical compact requests to both, and compares exact traces. Producers can
-set `FIR_PRETTY_M_NATIVE_PACKAGE` to compare against another FIR-native
-package.
+Packaging generates and verifies the independent FIR-native package from the
+same FIR worktree, sends identical compact requests to both, and compares exact
+traces. `FIR_PRETTY_M_NATIVE_PACKAGE` is intentionally unsupported: an
+independently selected or stale comparator would not qualify this recipe.
+
+The committed recipe contains source selection, toolchain policy, ABI, and
+checks. Generated Wasm/JS bytes, hashes, local paths, measured timings, and
+test receipts belong to the package manifest or disposable validation output,
+not to the source recipe.
 
 The generated Lean C, bridge C, and final Wasm are compiled with `-O3`,
 `-DNDEBUG`, LTO, hidden visibility, section garbage collection, frame-pointer
