@@ -10,7 +10,8 @@ const rootToolchain = readFileSync(new URL("../../lean-toolchain", import.meta.u
   "utf8").trim();
 assert.equal(toolchain, rootToolchain,
   "Array probe must compile with FIR's current Lean toolchain");
-assert.ok(["leanprover/lean4:v4.33.0", "leanprover/lean4:v4.34.0-rc2"]
+assert.ok(["leanprover/lean4:v4.33.0", "leanprover/lean4:v4.34.0-rc2",
+  "leanprover/lean4:v4.34.1"]
   .includes(toolchain), `unsupported Array-probe toolchain ${toolchain}`);
 const values = Array.from({ length: 32 }, (_, index) => 3 * index + 1);
 let tick = 0;

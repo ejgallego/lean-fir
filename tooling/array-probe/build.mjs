@@ -20,6 +20,7 @@ assert.equal(toolchain, rootToolchain,
 const inputLayouts = {
   "leanprover/lean4:v4.33.0": "lean-4.33-Array-UInt32/v1",
   "leanprover/lean4:v4.34.0-rc2": "lean-4.34-Array-UInt32/v1",
+  "leanprover/lean4:v4.34.1": "lean-4.34-Array-UInt32/v1",
 };
 const inputLayout = inputLayouts[toolchain];
 assert(inputLayout, `unsupported Array-probe toolchain ${toolchain}`);
