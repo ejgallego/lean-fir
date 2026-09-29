@@ -106,8 +106,13 @@ when sending or deciding a handoff, not before every edit.
 
 - Draft under local `.deps/`, then `scripts/mailbox deliver <draft>`; never
   write canonical events directly. Delivery normally sends the `codex queue`
-  doorbell. `scripts/mailbox route` maps stable roles to current sessions;
-  session UUIDs are local state. Notification failure does not undo delivery.
+  doorbell. In a restricted Codex shell, use `--no-notify` and run `codex queue`
+  as a separate direct command: the child process may not inherit access to the
+  Codex state database. If direct queueing also fails, leave the event intact
+  and request state access; never edit the database by hand. The
+  `scripts/mailbox route` command maps stable roles to current sessions;
+  session UUIDs are local state.
+  Notification failure does not undo delivery.
 - A claim records owner, worktree, branch, base, write scope and publication
   boundary. Cross-project requests live with the project owning the code.
 - A clean exact `integrationCheckpoint` pins what root reviews/lands. Preserve
