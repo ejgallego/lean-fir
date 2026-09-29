@@ -2,6 +2,7 @@ import FirTalos.TrustInventory
 import FirTalos.ConcreteRegionTransport
 import FirTalos.ConcreteRegionEntry
 import FirTalos.ConcreteFreshLazyFrame
+import FirTalos.ConcreteFreshLazyExternal
 import FirTalos.TrustAuditTests
 import FirTalos.ConcreteObservationSensitivity
 import FirTalos.ConcreteExportContractTests

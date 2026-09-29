@@ -12,6 +12,7 @@ import FirTalos.ConcreteRegionTransport
 import FirTalos.ConcreteFreshYield
 import FirTalos.ConcreteRegionEntry
 import FirTalos.ConcreteFreshLazyFrame
+import FirTalos.ConcreteFreshLazyExternal
 import FirTalos.TrustAuditCore
 
 open Lean Lean.Compiler Fir.Wasm Fir.LeanIR.Impure Fir.Wasm.Concrete
@@ -1009,6 +1010,151 @@ theorem validatedLet_publishes_and_resumesCaller
   exact ⟨steps, nextStore, nextWitness, resumedLocals, rest, sourceAfter, targetAfter,
     sourceSteps, targetPath, next, joins, sourceFrames, targetFrames⟩
 
+section FramedBody
+
+variable {context : Context} {functionCode : LCNF.Code .impure}
+  {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+  {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+  {spec : ConcreteSupportedFunction RetainedRC2.program context functionCode
+    sourceModule sourceFunction targetModule hosts}
+  {externals : ExternalImpl}
+  {entryRuntime runtime : RuntimeState} {entryStore store : Wasm.Store Host}
+  {entryWitness witness : RefinementWitness} {facts : ReuseCapacityFacts} {bytes : Nat}
+  {env : Env} {locals : Wasm.Locals} {labels : LabelContext}
+  {code : Wasm.Program} {source : MachineState} {target : StructuredWasmState Host}
+  {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+  {functionResult rootResult : AbiKind} {callerExpectedResult : Option AbiKind}
+  {saved : ConcreteStructuredValidatedCodeOutcome RetainedRC2.program context functionCode
+    sourceModule sourceFunction targetModule hosts spec externals labels entryRuntime
+    entryStore entryWitness functionResult callerExpectedResult facts bytes runtime env
+    (.let decl continuation) store locals code witness source target}
+  {declaration : Name} {cacheIndex cacheSetId resultIndex : Nat} {rest : Wasm.Program}
+  {frame : ConcreteStructuredFreshLazyFrame saved rootResult declaration .object
+    cacheIndex cacheSetId resultIndex rest}
+
+/-- The retained body now carries its caller through construction, including
+the separate external-ready and destination-bind states of allocation. The
+returned frame is obtained from the framed return rule, not reconstructed
+after a whole-body proof. -/
+theorem framed_body_returns
+    {calleeContext : Context} (programEq : calleeContext.program = RetainedRC2.program)
+    {rootCode : LCNF.Code .impure} {calleeFunction : Fir.Wasm.Function}
+    (calleeSpec : ConcreteSupportedFunction RetainedRC2.program calleeContext rootCode
+      sourceModule calleeFunction targetModule hosts)
+    (contract : FreshArrayExternalContract externals)
+    {calleeEnv : Env} {calleeLabels : LabelContext} {calleeLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {sourceEntry : MachineState}
+    {targetEntry : StructuredWasmState Host}
+    (scalarKind : findLocalKind? calleeContext.localKinds scalarSite.fvarId = some .uint8)
+    (capacityKind : findLocalKind? calleeContext.localKinds capacityId = some .tagged)
+    (arrayKind : findLocalKind? calleeContext.localKinds mkEmptySite.fvarId = some .object)
+    (boxKind : findLocalKind? calleeContext.localKinds boxSite.fvarId = some .tagged)
+    (resultKind : findLocalKind? calleeContext.localKinds pushSite.fvarId = some .object)
+    (active : ConcreteStructuredFreshLazyCode frame calleeContext calleeFunction calleeLabels
+      runtime store witness [] bytes calleeEnv calleeLocals initializerBody targetCode
+      sourceEntry targetEntry)
+    (emptyHandler : ∀ request,
+      ConcreteExternalRequestRel witness request
+        (declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)]) →
+      EmptyArrayHandlerAt store.host.externals request store.host.runtime 5)
+    (pushHandler : ∀ before nextWitness request address word,
+      ConcreteRuntimeRel before nextWitness (afterMkEmpty runtime) →
+      nextWitness.locations.lookup? runtime.nextLocation = some address →
+      ValueRel nextWitness .tobject (.word32 word) (.object (.tagged 0)) →
+      request.name = `Array.push →
+      request.args = #[.word32 Word32.zero, .word32 address, .word32 word] →
+      ArrayPushInPlaceHandlerAt store.host.externals request before address word)
+    (fits : residentArrayAllocationBytes 5 ≤ bytes) :
+    ∃ targetSteps nextStore nextWitness resultLocals physical sourceAfter targetAfter,
+      ExecSteps externals 10 sourceEntry sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetSteps targetEntry targetAfter ∧
+      ConcreteStructuredFreshLazyReturned frame calleeContext calleeFunction
+        (afterPush runtime) nextStore nextWitness [] (bytes - residentArrayAllocationBytes 5)
+        (bodyResultEnv calleeEnv runtime) resultLocals runtime.nextLocation physical
+        sourceAfter targetAfter := by
+  change ConcreteStructuredFreshLazyCode _ _ _ _ _ _ _ _ _ _ _
+    (.let scalarSite (.let capacitySite (.let mkEmptySite mkEmptyContinuation))) _ _ _ at active
+  have capacityIdEq : capacitySite.fvarId = capacityId := rfl
+  have scalarValueKind : letValueKind scalarSite = .ok .uint8 := literalAbiTypes.1
+  have capacityValueKind : letValueKind capacitySite = .ok .tagged := literalAbiTypes.2
+  obtain ⟨s1, t1, l1, c1, step1, path1, a1, _, fs1, ft1⟩ :=
+    active.active.advance_immediateLiteral (.uint8 0) rfl scalarValueKind
+      (by simp [getLocal, scalarKind]) calleeSpec.localsAligned
+      (module := targetModule.wasmModule) (hosts := hosts.env)
+  have framed1 := active.suspension.resume a1 fs1 ft1
+  obtain ⟨s2, t2, l2, c2, step2, path2, a2, _, fs2, ft2⟩ :=
+    framed1.active.advance_smallTaggedNatural calleeSpec (value := 5) (by decide)
+      rfl capacityValueKind (by simp [getLocal, capacityIdEq, capacityKind])
+  have framed2 := framed1.suspension.resume a2 fs2 ft2
+  let site := mkEmptyCallShape calleeContext programEq externals contract runtime
+    (literalEnv calleeEnv) capacityKind arrayKind (by simp [lookupValue, literalEnv])
+  obtain ⟨args, operation, resolvedKind, imp, callIndex, destination, argumentCode,
+      c3, s3, t3, step3, path3, ready⟩ := framed2.stageExternal calleeSpec site
+  have control := ready.active.control
+  have resolved : resolvedKind = .object := by
+    have h := congrArg (fun results : Array AbiKind => results[0]?) control.resultSignature
+    simpa [control.parameterSignature, site, mkEmptyCallShape] using h.symm
+  obtain ⟨concreteArgs, decoded, requestRelated⟩ := control.decodeRequest
+  have requestEq : operation.request site.semanticArgs =
+      declarationExternalRequest mkEmptyDecl #[.erased, .object (.tagged 5)] := by
+    simp [ExternalOperation.request, declarationExternalRequest, control.operationName,
+      control.operationMatches.paramTypes, control.operationMatches.resultType,
+      site, mkEmptyCallShape, mkEmptyDecl]
+  obtain ⟨allocatedStore, nextWitness, physicalArray, evidence, budget, region⟩ :=
+    ready.active.emptyArrayEvidence (capacity := 5) rfl rfl
+      (fun actual decode => by
+        have same : actual = concreteArgs := Except.ok.inj (decode.symm.trans decoded)
+        subst actual
+        exact emptyHandler _ (by simpa [resolved, requestEq] using requestRelated)) fits
+  obtain ⟨s4, t4, step4, path4, bound⟩ := ready.advance_call evidence budget region
+  obtain ⟨s5, t5, updated, l5, step5, path5, _, _, framed5, _⟩ := bound.advance
+  -- At this point the allocation destination bind has been consumed, whereas
+  -- the original caller frame (including its older entry witness) is retained.
+  have valueKind : letValueKind boxSite = .ok .tagged := by
+    change (do let kind ← checkedAbiKind (.const `tobj [])
+               pure (boxResultKind (.const `UInt8 []) kind)) = .ok .tagged
+    simp only [checkedAbiKind, abiKind, mkEmptyAbiTypes.2.1,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+    exact congrArg Except.ok boxResultKind_uint8_tobject
+  have scalarLookup : lookup
+      (bind (literalEnv calleeEnv) mkEmptySite.fvarId (.object (.heap runtime.nextLocation)))
+      scalarSite.fvarId = some (.scalar (.uint8 0)) := by
+    simp [literalEnv, Fir.LeanIR.Impure.bind, lookup, scalarSite, capacityId, mkEmptySite,
+      initializerBody, RetainedRC2.initializer]
+  obtain ⟨s6, t6, l6, c6, step6, path6, a6, _, fs6, ft6⟩ :=
+    framed5.active.advance_boxUInt8 calleeSpec rfl valueKind
+      (by simp [getLocal, scalarKind]) literalAbiTypes.1
+      (by simp [getLocal, boxKind]) scalarLookup
+  have framed6 := framed5.suspension.resume a6 fs6 ft6
+  have arrayValue : lookup
+      (bind (bind (literalEnv calleeEnv) mkEmptySite.fvarId
+        (.object (.heap runtime.nextLocation))) boxSite.fvarId (.object (.tagged 0)))
+      mkEmptySite.fvarId = some (.object (.heap runtime.nextLocation)) := by
+    simp [Fir.LeanIR.Impure.bind, lookup, boxSite, mkEmptyContinuation, mkEmptySite,
+      RetainedRC2.initializer]
+  obtain ⟨pushLength, nextStore, s9, t9, resultLocals, returnCode,
+      pushSteps, pushPath, returnActive, _, fs9, ft9, _, _⟩ :=
+    push_stage_call_bind programEq calleeSpec contract arrayKind boxKind resultKind arrayValue
+      (lookup_bind_self _ _ _) framed6.active
+      (fun request address word mapped tagged named args => by
+        rw [evidence.externalsPreserved]
+        exact pushHandler _ nextWitness request address word framed6.active.focus.stateRelated.1
+          mapped tagged named args)
+  have framed9 := framed6.suspension.resume returnActive fs9 ft9
+  have compiled : getLocal calleeContext pushSite.fvarId =
+      .ok (.localGet pushSite.fvarId, .object) := by simp [getLocal, resultKind]
+  obtain ⟨physical, sourceAfter, targetAfter, returnStep, returnPath, returned⟩ :=
+    framed9.advance_return calleeSpec.localsAligned compiled
+      (lookup_bind_self _ _ _) (Nat.le_refl _)
+  exact ⟨_, nextStore, nextWitness, resultLocals, physical, sourceAfter, targetAfter,
+    .step step1 (.step step2 (.step step3 (.step step4 (.step step5 (.step step6
+      (execSteps_trans_exact pushSteps (.step returnStep (.refl _)))))))),
+    path1.trans (path2.trans (path3.trans (path4.trans (path5.trans (path6.trans
+      (pushPath.trans returnPath)))))), returned⟩
+
+end FramedBody
+
 /-- The real initializer consumes the saved-frame relation from staging through
 entry, construction and publication. The pending destination bind is already
 in the existing rooted global relation; no separate publication metadata or
@@ -1077,17 +1223,12 @@ theorem rootedLet_publishesAtBind
   obtain ⟨sourceEntry, targetEntry, entryStep, entryPath, active⟩ :=
     frame.enter ready row empty
   obtain ⟨bodySteps, bodyStore, nextWitness, bodyLocals, physical, sourceReturned,
-      targetReturned, sourceBody, targetBody, returned, _, sourceFrames, targetFrames⟩ :=
-    body_returns row.contextProgram (row.fromSupportedFunction spec) contract
-      scalarKind capacityKind arrayKind boxKind resultKind active.active
+      targetReturned, sourceBody, targetBody, returned⟩ :=
+    framed_body_returns row.contextProgram (row.fromSupportedFunction spec) contract
+      scalarKind capacityKind arrayKind boxKind resultKind active
       emptyHandler pushHandler fits
-  have returnedFrame : ConcreteStructuredFreshLazyReturned frame calleeContext calleeFunction
-      (afterPush runtime) bodyStore nextWitness [] (bytes - residentArrayAllocationBytes 5)
-      (bodyResultEnv [] runtime) bodyLocals runtime.nextLocation physical sourceReturned targetReturned :=
-    ⟨returned, active.programEq, sourceFrames.trans active.sourceStack,
-      targetFrames.trans active.targetStack⟩
   obtain ⟨published, targetPublished, publicationStep, publicationPath, global, region⟩ :=
-    returnedFrame.publish
+    returned.publish
   exact ⟨_, nextWitness, published, targetPublished,
     .step stagedStep (.step entryStep
       (execSteps_trans_exact sourceBody (.step publicationStep (.refl _)))),
@@ -1190,6 +1331,7 @@ run_cmd do
       "RetainedInitializer.mkEmptyAbiTypes._native.native_decide.ax_1_1",
       "_private.Fir.Wasm.Concrete.Memory.0.Fir.Wasm.Concrete.LinearMemory.assembleByte32._native.bv_decide.ax_1_6"])
   for endpoint in #[`RetainedInitializer.literals_mkEmpty_box, `RetainedInitializer.body_returns,
+      `RetainedInitializer.framed_body_returns,
       `RetainedInitializer.body_publishes_and_resumesCaller,
       `RetainedInitializer.lazyMiss_publishes_and_resumesCaller,
       `RetainedInitializer.let_publishes_and_resumesCaller,

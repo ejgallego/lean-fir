@@ -174,6 +174,20 @@ bind. It is not yet the general one-step lazy dispatcher or removal of the
 central object/tobject exclusion. Precise result kind and fresh-region closure
 remain distinct facts.
 
+`ConcreteFreshLazyExternal` carries that saved caller through external-ready
+and destination-bind states. Its suspension indexes the stack *below* the
+temporary external bind; the bind transition restores the exact original lazy
+stack. A negative theorem excludes treating this intermediate yielded value as
+the initializer's return, regardless of its physical/result kind.
+`framed_body_returns` uses the relation throughout the retained body. Empty
+allocation goes through its three individual source transitions, using the
+same `emptyArrayEvidence` producer as the ordinary unframed path. Heap-neutral
+literal/boxing steps and the existing three-step push block retain the caller
+through `suspension.resume`; the framed return rule produces the publication
+input. `rootedLet_publishesAtBind` consumes that result directly, without
+post-body stack reconstruction or any new public premise. General nested
+initializer frames and central admission are still separate obligations.
+
 `RetainedInitializer.body_publishes_and_resumesCaller` now composes this body
 with cache publication and the caller's destination bind. It derives twelve
 source transitions and a matching target path, ending in ordinary caller code
@@ -280,8 +294,10 @@ relation in one source/two target steps. No scope is reconstructed from scratch
 at return. A negative check rejects re-anchoring the returned relation at the
 current allocation frontier. The thirteen-/fourteen-step public signatures
 are unchanged; internal body helpers now consume the active relation.
-This does not yet relate each external staging/bind state inside those blocks
-or supply a general nested heap-lazy suspended-frame constructor.
+The saved-caller successor described above relates the individual external
+staging/bind states for allocation. Push still uses its three-step block in
+the framed consumer; a general nested heap-lazy suspended-frame constructor
+remains open.
 
 Remaining premises are the supported caller and its current validated relation,
 the initializer call's identity, empty cache, source primitive contracts,
@@ -329,8 +345,8 @@ The body-prefix endpoint additionally records one closed native check for the
 UInt8/tagged literal ABI classifications. The full body additionally inherits
 the existing seven scalar-box policy comparison axioms and UInt8 result-kind
 comparison axiom; this slice adds no native evaluation. The maintained gate
-audits all eleven retained target/static endpoints independently (twenty-five consumer
-endpoints including the fourteen source/publication endpoints).
+audits the retained target/static endpoints independently, including the framed
+body and publication consumer, alongside the source/publication endpoints.
 The captured program/body equations remain free of generated axioms. Generic
 external-model and finite-prefix helper proofs use standard axioms and are
 also in the ordinary Talos trust inventory.
