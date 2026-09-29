@@ -13,6 +13,39 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Generator integration batch and next leases (2026-09-29)
+
+Status: active. The ordered package stack is integrated at
+`3c795f1ddce8c7ee293c143f27d62b1788b7312b`; at that checkpoint local `main`
+was five commits ahead of `origin/main`. Nothing was pushed. A board-only
+successor records the active leases. The ordered batch is landed:
+
+- Tooling's current-toolchain Array probe repair: `f6b446175`.
+- Gen-astra's strict multi-input Wasm identity/name transport: landed as
+  `d832dd3b5` and `632954024`, cherry-picked with `-x` from the exact clean
+  lane checkpoint `4658725c`. The original lane branch remains preserved.
+- Gen-sol's trusted exclusive `Array.set!` path: landed as `3c795f1dd`,
+  cherry-picked with `-x` from exact clean checkpoint `23c1bdd1`. The original
+  lane branch remains preserved.
+
+The Tooling suite and full `make check` pass at the Tooling integration.
+At the gen-astra checkpoint, `make check`, `make -C tooling check`, and the
+full artifact gate pass. At the gen-sol checkpoint, `make check`,
+`make talos-setup`, `make talos-check`, and the full artifact gate pass. A stale
+RC2 Talos scratch tree was preserved at
+`.deps/talos-434-preserved-20260929`; the fresh stable 4.34.1 overlay passes
+its identity gate. No performance improvement is claimed for the Array path.
+
+Root assigned two non-overlapping W7 emitter leases from this exact main:
+`ROOT-W7-20260929-008` to gen-astra for representation-proved Collatz release
+checks in `ResidentRelease.lean`, and `ROOT-W7-20260929-009` to gen-sol for a
+checked `UInt8` box/unbox candidate in `ResidentScalarBox.lean`. Both use their
+existing generator worktrees on new branches; the old branches/checkpoints are
+preserved. No shared ABI/runtime, W6, host, package-publication, or client timing
+scope is included. The separate full-renderer name request remains in progress
+pending an immutable VBP/VIR/Verso source/setup closure; no recapture is
+authorized.
+
 ## Mailbox retention cleanup (2026-09-28)
 
 Status: released. Maintainer assigned W7 temporary root ownership only for
