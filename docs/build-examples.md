@@ -18,7 +18,8 @@ checking actual consumers. Git history preserves old versions and fixtures.
 
 | Package | Lean entry | Current source and toolchain | Acceptance gate |
 | --- | --- | --- | --- |
-| [FIR-native styled `prettyM`](../integration/talos/artifact/prettyM-package/README.md) | `Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw` | FIR main `a460d804`; Lean 4.34.1; current FIR source, no external source snapshot | `bash integration/talos/artifact/check.sh` |
+| [FIR-native styled `prettyM`](../integration/talos/artifact/prettyM-package/README.md) | `Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw` | FIR main; Lean 4.34.1; current FIR source, no external source snapshot | `bash integration/talos/artifact/check.sh` |
+| [C/Emscripten styled `prettyM`](../integration/lcnf-c-wasm/prettyM-emscripten-package/README.md) | `Fir.LCNFC.PrettyM.renderWire` | FIR main; Lean 4.34.1; exact Lean runtime and Emscripten inputs recorded by the package | `bash integration/lcnf-c-wasm/package-prettyM-emscripten.sh` (current FIR-native comparator, differential, immutable package and smoke) |
 
 An accepted package has a real source entry, immutable publication,
 `BUILD.json`, complete checksums, a packaged smoke test, an explicit ABI and
@@ -36,14 +37,15 @@ no FIR-side moving-client canary is currently configured.
 Only recipes with current-tree evidence are listed above; do not create a
 second package registry to track stale or pending recipes.
 
-## Other integration sources
+## Recipes being migrated
 
-Other integration directories are not current recipes merely because a
-README, frozen source pin, historical artifact or package pointer exists. Add
-one above only after the exact current-tree recipe and its consumer gate pass.
-Otherwise, its owner should repair it or remove the obsolete recipe and
-fixtures after confirming no live consumer depends on them. Do not keep a
-second copy of old client inputs in place of Git history.
+An integration directory is not a current recipe merely because a README,
+source pin, old artifact or package pointer exists. Keep its recipe and migrate
+it to current FIR, current Lean, and an exact owner-nominated source revision;
+then add it above when its current-tree gate passes. Do not leave it in a
+permanent historical or provisional category. Remove only inputs confirmed to
+have no current owner-supported replacement, after checking consumers and
+reviewing the exact removal with root. Git history retains prior versions.
 
 ## Compiler and runtime fixture catalogs
 
