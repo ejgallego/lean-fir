@@ -263,8 +263,7 @@ FIR-native comparator from this same worktree before comparing exact traces;
 an old `prettyM-current` pointer is never accepted on presence alone. Successful
 clean-tree builds publish an immutable content-addressed release under
 `_build/prettyM-emscripten-package-releases/` and atomically update
-`_build/prettyM-emscripten-package-current`. The old mutable
-`_build/prettyM-emscripten-current` directory is not the accepted package.
+`_build/prettyM-emscripten-package-current`.
 
 This does not merge the two Wasm packages. The C package keeps its verified
 Emscripten ES module, threaded full Lean runtime, manifest, and loader. The

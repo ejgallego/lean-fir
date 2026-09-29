@@ -40,13 +40,13 @@ try {
   assert.equal(realpathSync(current), first,
     "failed collision must not move the current pointer");
 
-  const legacy = join(scratch, "legacy-current");
-  mkdirSync(legacy);
-  assert.throws(() => publishPreparedPrettyM({ builtDirectory, currentLink: legacy }),
-    /refusing to replace a legacy package directory/);
-  assert.equal(lstatSync(legacy).isDirectory(), true);
+  const occupied = join(scratch, "occupied-current");
+  mkdirSync(occupied);
+  assert.throws(() => publishPreparedPrettyM({ builtDirectory, currentLink: occupied }),
+    /refusing to replace an existing package directory/);
+  assert.equal(lstatSync(occupied).isDirectory(), true);
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
 
-console.log("PASS immutable C prettyM repeat, collision, and legacy preservation");
+console.log("PASS immutable C prettyM repeat, collision, and directory preservation");

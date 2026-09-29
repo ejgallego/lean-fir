@@ -152,7 +152,7 @@ export function publishPreparedPrettyM({ builtDirectory, currentLink }) {
   assert.ok(currentName.endsWith("-current"),
     "package current link must end with -current");
   if (existsSync(current) && !lstatSync(current).isSymbolicLink()) {
-    throw new Error(`refusing to replace a legacy package directory: ${current}`);
+    throw new Error(`refusing to replace an existing package directory: ${current}`);
   }
   const packagesDirectory = join(dirname(current),
     currentName.slice(0, -"-current".length) + "-releases");

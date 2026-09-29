@@ -40,9 +40,8 @@ integration/lcnf-c-wasm/package-prettyM-emscripten.sh
 The default pointer is
 `integration/lcnf-c-wasm/_build/prettyM-emscripten-package-current`, an atomic
 symlink to a content-addressed directory under the adjacent
-`prettyM-emscripten-package-releases/`. The older mutable
-`prettyM-emscripten-current/` directory is not this accepted package. A client
-only needs these files from the selected immutable release:
+`prettyM-emscripten-package-releases/`. A client only needs these files from
+the selected immutable release:
 
 ```text
 BUILD.json
