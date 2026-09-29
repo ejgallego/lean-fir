@@ -24163,6 +24163,65 @@ theorem match_deletedCtorLetStep_binderReady_ledger_withAllocatedSourceOnly
       rw [transition] at actual
       contradiction
 
+/-- A deleted let that leaves the target unchanged transports an existing
+source-only allocation through the semantic step.  In particular this keeps
+the historical source address available after a deleted reset or reuse,
+without asking the current target residual to name its old heap prefix. -/
+theorem match_deletedLetStep_binderReady_ledger_withAllocatedSourceOnly
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (provenance : AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots) location)
+    (evaluated : evalLetValue sourceState declaration =
+      .ok (nextRuntime, .value value))
+    (runtime : ShadowRuntimeRel rho nextRuntime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (sourceFrontier :
+      sourceState.runtime.nextLocation ≤ nextRuntime.nextLocation)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let declaration sourceContinuation) }
+      sourceAfter) :
+    let sourceExpected := {
+      sourceState with
+      runtime := nextRuntime
+      env := bind sourceState.env declaration.fvarId value
+      control := .code sourceContinuation }
+    let targetAfter := {
+      targetState with control := .code targetContinuation }
+    sourceAfter = sourceExpected ∧
+      NonLockstep.Reaches externals targetAfter targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+        fuel sourceAfter targetAfter location := by
+  dsimp only
+  rcases coreStep_deletedLet_binderReadyReachableRelated_withAllocatedSourceOnly
+      sourceState targetState programs frames continuation joins env absent
+      provenance evaluated runtime sourceFrontier with
+    ⟨transition, afterRelated, afterProvenance⟩
+  cases step with
+  | internal actual =>
+      rw [transition] at actual
+      cases actual
+      exact ⟨rfl, NonLockstep.reaches_refl _, afterRelated,
+        afterProvenance⟩
+  | external actual externalProof =>
+      rw [transition] at actual
+      contradiction
+
 /-- Ledger-carrying hereditary deleted-constructor matcher. The target
 stutters, so its allocation frontier and incoming owner ledger are unchanged
 even when the source allocates a dead constructor object. -/
@@ -33020,6 +33079,72 @@ theorem match_retainedResetLetStep_binderReady_ledger
                 match_internalCoreSteps_binderReady_ledger
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
+
+/-- A deleted reset preserves a previously allocated source-only location
+through its ownership-changing, fixed-frontier update.  The runtime-neutral
+branch also keeps the capability, so this is the full reset dispatch rather
+than a premise about a separately supplied post-state runtime relation. -/
+theorem match_deletedResetLetStep_binderReady_ledger_withAllocatedSourceOnly
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (provenance : AllocatedSourceOnlyLedgerShadowRuntimeRelAt rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots) location)
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .reset count object })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ nextRuntime token,
+      let targetAfter := {
+        targetState with control := .code targetContinuation }
+      sourceAfter = {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId token
+        control := .code sourceContinuation } ∧
+      NonLockstep.Reaches externals targetAfter targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      AllocatedSourceOnlyLedgerBinderReadyReachableMachineRelatedAt
+        fuel sourceAfter targetAfter location := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      exact ⟨sourceState.runtime, value,
+        match_deletedLetStep_binderReady_ledger_withAllocatedSourceOnly
+          sourceState targetState programs frames continuation joins env
+          absent provenance evaluated provenance.runtime.runtime
+          (Nat.le_refl _) step⟩
+  | reset fvarId binderName type count object ready =>
+      rcases ready with
+        ⟨objectValue, token, nextRuntime, objectRead, effect, frame⟩
+      have evaluated : evalLetValue sourceState {
+          fvarId, binderName, type, value := .reset count object
+        } = .ok (nextRuntime, .value token) := by
+        simp only [evalLetValue, objectRead, Bind.bind, Except.bind]
+        rw [effect]
+        rfl
+      exact ⟨nextRuntime, token,
+        match_deletedLetStep_binderReady_ledger_withAllocatedSourceOnly
+          sourceState targetState programs frames continuation joins env
+          absent provenance evaluated
+          (provenance.runtime.runtime.frameLeft frame)
+          (Nat.le_of_eq frame.nextLocation_eq.symm) step⟩
 
 /-- Ledger-carrying hereditary deleted-reset matcher. Runtime-neutral tokens
 use the common deleted-let rule; ownership-changing resets execute only on the
