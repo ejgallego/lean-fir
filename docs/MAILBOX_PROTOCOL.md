@@ -132,6 +132,28 @@ A missing, malformed, duplicate, or renamed route produces a visible warning
 after delivery; so does a queue failure. Neither notification problem removes,
 rewrites, or invalidates the immutable event.
 
+### Restricted-shell notification workflow
+
+In a restricted Codex shell, the `codex queue` child spawned by
+`scripts/mailbox deliver` may not inherit the access granted to a direct
+`codex queue` invocation. The observed symptom is a notification failure even
+though the state database is writable and a direct invocation succeeds. The
+mailbox event has already been published in that case: do not redeliver it.
+Use this split flow by default in that environment, avoiding the nested write
+and duplicate-warning cycle:
+
+```bash
+# Substitute the draft, message ID, and session UUID for the placeholders.
+scripts/mailbox deliver .deps/mailbox-drafts/<MESSAGE-ID>.md --no-notify
+scripts/mailbox route list
+codex queue --thread <SESSION-UUID> --message 'Read <MESSAGE-ID>.md in the canonical mailbox.'
+```
+
+Run `codex queue` as its own direct command, not as a child of the delivery
+script. If the direct command also fails, leave the mailbox event intact and
+request the needed Codex-state access; do not bypass approvals or write the
+state database by hand.
+
 Use `--no-notify` when circumstances require delivery without route lookup or
 queueing. `--notify-session <UUID or exact name>` directly overrides route
 lookup for one delivery. Notification attempts are bounded to five seconds.
