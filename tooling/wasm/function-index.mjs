@@ -3,7 +3,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { makeToolingTemporaryDirectory } from "../worktree-temp.mjs";
 
@@ -12,23 +13,29 @@ import {
   injectFunctionIdentities,
   inspectFunction,
   makeCapture,
+  makeLinkCapture,
+  makeNamedCompanion,
   makeSidecar,
   moduleShape,
   parseFunctionMap,
   restampCapture,
   sha256,
   validateSidecar,
+  verifyNamedCompanion,
 } from "./function-index-lib.mjs";
 import { makeFunctionView } from "./function-view-lib.mjs";
 
 function usage() {
   return `usage:
   function-index.mjs prepare --wasm FILE --inventory FILE --named-wasm FILE --capture FILE
+  function-index.mjs prepare-link --inputs FILE --capture FILE
   function-index.mjs direct --binaryen-dir DIR --wasm FILE --inventory FILE --output FILE
   function-index.mjs restamp --binaryen-dir DIR --wasm FILE --capture FILE --wasm-opt-args FILE --named-wasm FILE --output FILE
   function-index.mjs optimize --binaryen-dir DIR --input FILE --wasm FILE --capture FILE --wasm-opt-args FILE --output FILE
   function-index.mjs finalize --wasm FILE --capture FILE --function-map FILE --call-graph FILE --output FILE
   function-index.mjs verify --wasm FILE --sidecar FILE
+  function-index.mjs companion --wasm FILE --sidecar FILE --named-wasm FILE
+  function-index.mjs verify-companion --wasm FILE --sidecar FILE --named-wasm FILE --output FILE
   function-index.mjs inspect --wasm FILE --sidecar FILE --function INDEX_OR_NAME [--json]
   function-index.mjs view --binaryen-dir DIR --wasm FILE --sidecar FILE --function INDEX_OR_NAME [--max-lines N] [--json]`;
 }
@@ -136,7 +143,29 @@ const [command, ...rest] = process.argv.slice(2);
 assert(command !== undefined, usage());
 const args = arguments_(rest);
 
-if (command === "prepare") {
+if (command === "prepare-link") {
+  const inputsPath = required(args, "--inputs");
+  const capturePath = required(args, "--capture");
+  const rows = readJson(inputsPath);
+  assert(Array.isArray(rows) && rows.length > 0, "--inputs must be a nonempty array");
+  const inputs = rows.map(row => {
+    for (const key of ["wasm", "inventory", "namedWasm"]) {
+      assert.equal(typeof row[key], "string", `link input needs ${key}`);
+      assert(row[key].length > 0, `link input needs nonempty ${key}`);
+    }
+    return Object.fromEntries(["wasm", "inventory", "namedWasm"].map(key =>
+      [key, resolve(dirname(inputsPath), row[key])]));
+  });
+  const sources = new Set([inputsPath, ...inputs.flatMap(i => [i.wasm, i.inventory])]);
+  const outputs = [...inputs.map(i => i.namedWasm), capturePath];
+  assert.equal(new Set(outputs).size, outputs.length, "link output paths must be distinct");
+  assert(outputs.every(p => !sources.has(p)), "link outputs must not overwrite inputs");
+  const { capture, namedInputs } = makeLinkCapture(inputs.map(i => ({
+    bytes: readFileSync(i.wasm), inventory: readJson(i.inventory), file: basename(i.wasm),
+  })));
+  inputs.forEach((input, index) => writeFileSync(input.namedWasm, namedInputs[index]));
+  writeJson(capturePath, capture);
+} else if (command === "prepare") {
   const wasmPath = required(args, "--wasm");
   const inventoryPath = required(args, "--inventory");
   const namedPath = required(args, "--named-wasm");
@@ -274,6 +303,25 @@ if (command === "prepare") {
       producer: { tool: "tooling/wasm/function-index.mjs" },
     });
   writeJson(required(args, "--output"), sidecar);
+} else if (command === "companion" || command === "verify-companion") {
+  const wasmPath = required(args, "--wasm");
+  const sidecarPath = required(args, "--sidecar");
+  const namedPath = required(args, "--named-wasm");
+  assert(namedPath !== wasmPath && namedPath !== sidecarPath,
+    "named companion must not overwrite its release or sidecar");
+  const wasm = readFileSync(wasmPath), sidecar = readJson(sidecarPath);
+  if (command === "companion") {
+    writeFileSync(namedPath, makeNamedCompanion(wasm, sidecar));
+  } else {
+    const output = required(args, "--output");
+    assert(![wasmPath, sidecarPath, namedPath].includes(output),
+      "verification report must not overwrite its inputs");
+    const result = verifyNamedCompanion(wasm, readFileSync(namedPath), sidecar);
+    writeJson(output, { ...result, sidecarSha256: sha256(readFileSync(sidecarPath)),
+      verifier: [fileURLToPath(import.meta.url),
+        fileURLToPath(new URL('./function-index-lib.mjs', import.meta.url))]
+        .map(path => ({ file: basename(path), sha256: sha256(readFileSync(path)) })) });
+  }
 } else if (command === "verify") {
   validateSidecar(readFileSync(required(args, "--wasm")),
     readJson(required(args, "--sidecar")));

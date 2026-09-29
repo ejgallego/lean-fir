@@ -7,16 +7,20 @@ import test from "node:test";
 import { makeToolingTemporaryDirectory } from "../worktree-temp.mjs";
 
 import {
+  assertSameNonCustomSections,
   binaryenOptimizerName,
   definedFunctionOrdinal,
   injectFunctionIdentities,
   inspectFunction,
   makeCapture,
+  makeLinkCapture,
+  makeNamedCompanion,
   makeSidecar,
   moduleShape,
   parseFunctionMap,
   restampCapture,
   validateSidecar,
+  verifyNamedCompanion,
 } from "./function-index-lib.mjs";
 import {
   boundedDisassembly,
@@ -33,6 +37,130 @@ const importedFixture = resolve(import.meta.dirname,
   "test/imported-fixture.wat");
 const functionTool = resolve(import.meta.dirname, "function-index.mjs");
 const features = ["--all-features"];
+
+test("tracks all inputs through imported merge/metadce/O3 without changing bytes", () => {
+  const directory = makeToolingTemporaryDirectory("fir-function-link-");
+  const p = name => join(directory, name);
+  const read = name => readFileSync(p(name));
+  const json = (name, value) => writeFileSync(p(name), JSON.stringify(value));
+  const command = args => execFileSync(process.execPath, [functionTool, ...args],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    const flags = ["--enable-nontrapping-float-to-int", "--enable-multivalue"];
+    const opt = [...flags, "-O3", "--closed-world", "--remove-unused-module-elements",
+      "--vacuum", "--strip-debug", "--strip-dwarf"];
+    for (const name of ["app", "provider"]) run("wasm-as", [...flags,
+      resolve(import.meta.dirname, `test/link-${name}.wat`), "-o", p(`${name}.wasm`)]);
+    json("app.json", { functions: ["Fixture.entry", "Fixture.dead"],
+      sourceFunctions: ["Fixture.entry", "Fixture.dead"] });
+    json("provider.json", { functions: ["Provider.adjust"], residentHelpers: ["Provider.adjust"] });
+    const inputs = ["app", "provider"].map(name => ({ wasm: `${name}.wasm`,
+      inventory: `${name}.json`, namedWasm: `${name}.named.wasm` }));
+    json("inputs.json", inputs);
+    json("opt.json", opt);
+    command(["prepare-link", "--inputs", p("inputs.json"), "--capture", p("capture.json")]);
+    const capture = JSON.parse(read("capture.json"));
+    for (const name of ["app", "provider"])
+      assertSameNonCustomSections(read(`${name}.wasm`), read(`${name}.named.wasm`));
+    assert.equal(new Set(capture.identities.map(i => i.token)).size, 6);
+    assert.equal(capture.inputArtifacts.length, 2);
+    // Duplicate local indices are safe only inside separately tokenized inputs.
+    const duplicated = makeLinkCapture([0, 1].map(() => ({ bytes: read("provider.wasm"),
+      inventory: JSON.parse(read("provider.json")), file: "provider.wasm" })));
+    assert.equal(new Set(duplicated.capture.identities.map(i => i.token)).size, 4);
+    json("bad-inputs.json", [{ ...inputs[0], namedWasm: "app.wasm" }]);
+    assert.throws(() => command(["prepare-link", "--inputs", p("bad-inputs.json"),
+      "--capture", p("bad.json")]), error => error.stderr.includes("overwrite inputs"));
+    for (const mode of ["plain", "named"]) run("wasm-merge", [...flags,
+      ...(mode === "named" ? ["--debuginfo"] : []),
+      p(mode === "named" ? "app.named.wasm" : "app.wasm"), "app",
+      p(mode === "named" ? "provider.named.wasm" : "provider.wasm"), "runtime",
+      "-o", p(`${mode}.merged.wasm`)]);
+    assertSameNonCustomSections(read("plain.merged.wasm"), read("named.merged.wasm"));
+    const exports = WebAssembly.Module.exports(new WebAssembly.Module(read("plain.merged.wasm")));
+    json("graph.json", exports.map((e, i) => ({ name: `export$${i}`, export: e.name,
+      ...(e.name === "fixture.entry" ? { root: true } : {}) })));
+    const restamp = (input, capture, named, output) => command(["restamp",
+      "--binaryen-dir", binaryen, "--wasm", p(input), "--capture", p(capture),
+      "--wasm-opt-args", p("opt.json"), "--named-wasm", p(named), "--output", p(output)]);
+    restamp("named.merged.wasm", "capture.json", "merged.restamped.wasm", "merged.capture.json");
+    assertSameNonCustomSections(read("named.merged.wasm"), read("merged.restamped.wasm"));
+    const mergedCapture = JSON.parse(read("merged.capture.json"));
+    assert(mergedCapture.identities.some(i => i.name === "Provider.adjust"));
+    assert(mergedCapture.identities.some(i => i.name === "host.scale"));
+    for (const mode of ["plain", "named"]) run("wasm-metadce", [...flags,
+      ...(mode === "named" ? ["--debuginfo"] : []),
+      p(mode === "named" ? "merged.restamped.wasm" : "plain.merged.wasm"),
+      "--quiet", `--graph-file=${p("graph.json")}`, "-o", p(`${mode}.private.wasm`)]);
+    assertSameNonCustomSections(read("plain.private.wasm"), read("named.private.wasm"));
+    restamp("named.private.wasm", "merged.capture.json", "private.restamped.wasm", "private.capture.json");
+    assertSameNonCustomSections(read("named.private.wasm"), read("private.restamped.wasm"));
+    run("wasm-opt", [...opt, p("plain.private.wasm"), "-o", p("baseline.wasm")]);
+    command(["optimize", "--binaryen-dir", binaryen, "--input", p("private.restamped.wasm"),
+      "--capture", p("private.capture.json"), "--wasm-opt-args", p("opt.json"),
+      "--wasm", p("release.wasm"), "--output", p("release.functions.json")]);
+    assert.deepEqual(read("release.wasm"), read("baseline.wasm"),
+      "multi-input name transport must not change release bytes");
+    const sidecar = JSON.parse(read("release.functions.json"));
+    assert.equal(sidecar.capture.inputArtifacts.length, 2);
+    assert.equal(sidecar.functions[2].inputSource.module, 1);
+    assert.equal(sidecar.functions[2].inputSource.index, 1);
+    assert.equal(sidecar.functions[2].inputSource.sha256, capture.inputArtifacts[1].sha256);
+    assert.deepEqual(sidecar.functions.map(f => [f.index, f.name, f.imported]), [
+      [0, "host.scale", true], [1, "host.sink", true],
+      [2, "Provider.adjust", false], [3, "Fixture.entry", false],
+    ]);
+    assert.equal(sidecar.functions.some(f => f.name === "Fixture.dead"), false);
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(read("release.wasm")),
+      { host: { sink: n => n + 7, scale: n => n * 3 } });
+    for (let n = 0; n <= 12; n++) assert.equal(instance.exports["fixture.entry"](n), 10 + 3*n*(n+1)/2);
+    command(["companion", "--wasm", p("release.wasm"), "--sidecar", p("release.functions.json"),
+      "--named-wasm", p("release.named.wasm")]);
+    command(["verify-companion", "--wasm", p("release.wasm"), "--sidecar", p("release.functions.json"),
+      "--named-wasm", p("release.named.wasm"), "--output", p("verification.json")]);
+    const verification = JSON.parse(read("verification.json"));
+    assert.equal(verification.nonCustomSectionsEqual, true);
+    assert.equal(verification.functions.length, 4);
+    assert.equal(verification.verifier.length, 2);
+    const withoutCapture = makeSidecar(read("release.wasm"),
+      {...capture, identities: []}, sidecar.functions.map(f =>
+        `${f.index}:${f.optimizerName}`).join("\n"), "digraph call {}\n");
+    assert.deepEqual(withoutCapture.functions.slice(0, 2).map(f => [f.name, f.origin]),
+      [["host.scale", "function-import"], ["host.sink", "function-import"]]);
+    const differentExport = Buffer.from(read("release.named.wasm"));
+    const exportOffset = differentExport.indexOf(Buffer.from("fixture.entry"));
+    assert(exportOffset >= 0);
+    differentExport[exportOffset] = "z".charCodeAt(0);
+    assert(WebAssembly.validate(differentExport));
+    assert.throws(() => verifyNamedCompanion(read("release.wasm"), differentExport, sidecar),
+      /changed non-custom sections/);
+    // An unknown optimizer-created definition is named honestly, never as Lean.
+    const unknown = structuredClone(sidecar);
+    unknown.functions[2].name = null;
+    unknown.functions[2].origin = "optimizer-or-linked-runtime";
+    const unknownNamed = makeNamedCompanion(read("release.wasm"), unknown);
+    assert.match(verifyNamedCompanion(read("release.wasm"), unknownNamed, unknown)
+      .functions[2].token, /optimizer-or-linked-runtime/);
+    assert.throws(() => verifyNamedCompanion(read("release.wasm"), unknownNamed, sidecar),
+      /must name every exact final index/);
+    const wrong = injectFunctionIdentities(read("release.wasm"),
+      sidecar.functions.map(f => ({index:f.index, token:`wrong${f.index}`})));
+    assert.throws(() => verifyNamedCompanion(read("release.wasm"), wrong, sidecar),
+      /must name every exact final index/);
+    assert.throws(() => verifyNamedCompanion(read("release.wasm"), read("release.wasm"), sidecar),
+      /exactly one name section/);
+    const changed = structuredClone(sidecar); changed.artifact.sha256 = "0".repeat(64);
+    assert.throws(() => makeNamedCompanion(read("release.wasm"), changed), /SHA-256/);
+    const missing = structuredClone(sidecar); missing.functions.pop();
+    assert.throws(() => makeNamedCompanion(read("release.wasm"), missing), /every final Wasm function/);
+    const collision = structuredClone(capture); collision.identities[1].token = collision.identities[0].token;
+    assert.throws(() => restampCapture(read("named.merged.wasm"), collision,
+      mergedCapture.identities.map(i => `${i.index}:${i.upstreamOptimizerName}`).join("\n")),
+      /unique across all link inputs/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 function run(tool, args, options = {}) {
   return execFileSync(join(binaryen, tool), args, {

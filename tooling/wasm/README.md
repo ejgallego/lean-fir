@@ -27,6 +27,59 @@ The capture protocol is deliberately split around the existing linker:
 Functions introduced by the linker or optimizer, or functions whose temporary
 identity does not survive, remain explicitly classified as
 `optimizer-or-linked-runtime`. The sidecar never guesses a Lean name.
+Surviving imports without captured provenance are named from the exact final
+binary import section, not classified as unknown machine-code definitions.
+
+## Multiple inputs and a complete named companion
+
+For a new multi-module producer, prepare **all** link inputs together:
+
+```sh
+node tooling/wasm/function-index.mjs prepare-link \
+  --inputs link-inputs.json --capture link.capture.json
+```
+
+`link-inputs.json` is a nonempty array of `{ "wasm": "app.wasm",
+"inventory": "app.inventory.json", "namedWasm": "app.named.wasm" }` rows,
+with paths relative to that JSON file. Each inventory describes that exact
+input's emitter-final definition order. Inputs and output paths must be distinct.
+The capture records each input hash and uses module-scoped temporary tokens;
+never concatenate independently prepared numeric-token captures. The actual
+linker map supplies post-merge indices, including imports resolved to provider
+definitions. Restamp after merge and metadce as above, then optimize unchanged.
+The final sidecar retains original module/index/hash provenance when available.
+
+The single-input `prepare` route remains available. The multi-input route is
+opt-in and does not change any production optimizer flags. Producers must
+compare with their ordinary stripped release: temporary naming may influence
+optimizer ordering, so byte neutrality is a gate, not an assumption.
+
+To attach complete, unambiguous physical names without rewriting executable
+sections:
+
+```sh
+node tooling/wasm/function-index.mjs companion \
+  --wasm release.wasm --sidecar release.functions.json \
+  --named-wasm release.named.wasm
+node tooling/wasm/function-index.mjs verify-companion \
+  --wasm release.wasm --sidecar release.functions.json \
+  --named-wasm release.named.wasm --output names-verification.json
+```
+
+Every import and definition receives `wasm-function[INDEX]::NAME`. Unknown
+definitions use an explicit `[optimizer-or-linked-runtime]` label, never an
+invented source name. The index prefix disambiguates duplicate semantic names.
+The verifier checks the actual complete name subsection, every encoded
+non-custom section, and the sidecar's exact release hash. Its report includes
+release, companion, sidecar and verifier-source SHA-256 identities. It does not
+prove supplied source inventories correct or reconstruct lost source provenance.
+Keep the release untouched and include these outputs in a future package's
+normal checksum inventory; no package is rebuilt by these commands.
+
+The imported two-module regression checks recursive provider identity, linker
+import resolution, final reordering, dead-code removal, unchanged -O3 bytes,
+execution, duplicate-token rejection, incomplete/wrong names, altered executable
+sections and release-hash failures. No VBP source or consumer is needed.
 
 When import/export minification is enabled, Binaryen writes rename diagnostics
 beside `--print-function-map`. The parser deliberately consumes only numeric

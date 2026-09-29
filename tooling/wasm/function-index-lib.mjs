@@ -270,6 +270,33 @@ export function makeCapture(bytes, inventory, inputFile = null) {
   };
 }
 
+/** Prepare ALL link inputs together. Tokens are disjoint even for identical
+ * modules or duplicate semantic names. Indices remain local until the linker
+ * supplies its actual map; never concatenate pre-link index spaces. */
+export function makeLinkCapture(inputs) {
+  assert(Array.isArray(inputs) && inputs.length > 0, "link capture needs inputs");
+  const captures = inputs.map(({ bytes, inventory, file }, moduleIndex) => {
+    const capture = makeCapture(bytes, inventory, file);
+    return { ...capture, identities: capture.identities.map(identity => ({
+      ...identity,
+      token: `fir$link$${moduleIndex}$${identity.index}`,
+      inputModule: moduleIndex,
+      inputIndex: identity.index,
+      inputSha256: capture.inputArtifact.sha256,
+    })) };
+  });
+  return {
+    capture: {
+      schemaVersion: captureSchema,
+      identityProtocol: "fir.link-input-name/v1",
+      inputArtifacts: captures.map(capture => capture.inputArtifact),
+      identities: captures.flatMap(capture => capture.identities),
+    },
+    namedInputs: inputs.map(({ bytes }, index) =>
+      injectFunctionIdentities(bytes, captures[index].identities)),
+  };
+}
+
 export function restampCapture(bytes, capture, functionMapSource,
   inputFile = null) {
   assert.equal(capture.schemaVersion, captureSchema,
@@ -280,6 +307,8 @@ export function restampCapture(bytes, capture, functionMapSource,
     "stage function map and Wasm function count disagree");
   const previousIdentities = new Map(capture.identities.map((entry) =>
     [entry.token, entry]));
+  assert.equal(previousIdentities.size, capture.identities.length,
+    "upstream identity tokens must be unique across all link inputs");
   const identities = functionMap.map(({ index, optimizerName }) => {
     const previous = previousIdentities.get(optimizerName);
     if (previous === undefined) {
@@ -311,8 +340,10 @@ export function restampCapture(bytes, capture, functionMapSource,
       definedFunctionCount: shape.definedFunctionCount,
     },
     identityProtocol: "binaryen-default-index-name/v1",
+    ...(capture.inputArtifacts ? { inputArtifacts: capture.inputArtifacts } : {}),
     upstreamCapture: {
       inputArtifact: capture.inputArtifact,
+      ...(capture.inputArtifacts ? { inputArtifacts: capture.inputArtifacts } : {}),
       identityProtocol: capture.identityProtocol,
     },
     identities,
@@ -406,20 +437,31 @@ export function makeSidecar(bytes, capture, functionMapSource,
     names.push(name);
     exportsByIndex.set(index, names);
   }
+  const finalImports = WebAssembly.Module.imports(new WebAssembly.Module(bytes))
+    .filter(({ kind }) => kind === "function");
   const functions = identityFunctionMap.map(({ index,
     optimizerName: identityName }) => {
     const identity = identities.get(identityName);
     const optimizerName = finalFunctionMap[index].optimizerName;
     const imported = index < shape.functionImportCount;
+    // A newly linked import has an exact binary identity even when its input
+    // capture was unavailable. Do not classify it as synthesized machine code.
+    const fallbackImport = imported && identity?.name == null ? finalImports[index] : null;
     const bodyBytes = imported ? null :
       shape.functionBodyBytes[index - shape.functionImportCount];
     return {
       index,
-      name: identity?.name ?? null,
+      name: identity?.name ?? (fallbackImport ?
+        `${fallbackImport.module}.${fallbackImport.name}` : null),
       optimizerName,
-      origin: identity?.origin ?? "optimizer-or-linked-runtime",
+      origin: fallbackImport ? "function-import" :
+        identity?.origin ?? "optimizer-or-linked-runtime",
       compilerShape: identity?.compilerShape ?? "unknown",
       imported,
+      ...(identity?.inputModule !== undefined ? { inputSource: {
+        module: identity.inputModule, index: identity.inputIndex,
+        sha256: identity.inputSha256,
+      } } : {}),
       bodyBytes,
       exportedAs: exportsByIndex.get(index) ?? [],
       directCallees: graph.calls[index],
@@ -439,6 +481,7 @@ export function makeSidecar(bytes, capture, functionMapSource,
     capture: {
       schemaVersion: capture.schemaVersion,
       inputArtifact: capture.inputArtifact,
+      ...(capture.inputArtifacts ? { inputArtifacts: capture.inputArtifacts } : {}),
       identityProtocol: capture.identityProtocol,
       producer,
     },
@@ -502,6 +545,67 @@ export function validateSidecar(bytes, sidecar) {
   assert.deepEqual(actualExports, expectedExports,
     "sidecar function exports do not match Wasm exports");
   return sidecar;
+}
+
+function finalNameEntries(sidecar) {
+  // The index prefix makes duplicate semantic names unambiguous. An unknown
+  // definition gets an explicitly artifact-local label, not an invented origin.
+  return sidecar.functions.map(f => {
+    assert(f.name === null || (typeof f.name === "string" && f.name.length > 0),
+      "companion source names must be nonempty strings or explicit null");
+    return { index: f.index,
+      token: `wasm-function[${f.index}]::${f.name ?? "[optimizer-or-linked-runtime]"}` };
+  });
+}
+
+export function makeNamedCompanion(bytes, sidecar) {
+  validateSidecar(bytes, sidecar);
+  return injectFunctionIdentities(bytes, finalNameEntries(sidecar));
+}
+
+export function assertSameNonCustomSections(bytes, other) {
+  const executable = b => sections(b).filter(s => s.id !== 0)
+    .map(s => b.subarray(s.start, s.end));
+  assert.deepEqual(executable(other), executable(bytes),
+    "named companion changed non-custom sections");
+}
+
+/** Independent check of actual function names and exact encoded executable
+ * sections. Re-encoding through a Wasm tool is deliberately not used. */
+export function verifyNamedCompanion(bytes, companion, sidecar) {
+  validateSidecar(bytes, sidecar);
+  moduleShape(companion);
+  assertSameNonCustomSections(bytes, companion);
+  const names = sections(companion).filter(s => isNameSection(companion, s));
+  assert.equal(names.length, 1, "companion needs exactly one name section");
+  const section = names[0];
+  let offset = readName(companion, section.payloadStart).offset;
+  let entries = null;
+  while (offset < section.end) {
+    const id = companion[offset++];
+    const length = readU32(companion, offset);
+    const end = length.offset + length.value;
+    assert(end <= section.end, "truncated name subsection");
+    offset = length.offset;
+    if (id === 1) {
+      assert.equal(entries, null, "duplicate function-name subsection");
+      const count = readU32(companion, offset);
+      offset = count.offset;
+      entries = [];
+      for (let i = 0; i < count.value; i++) {
+        const index = readU32(companion, offset);
+        const name = readName(companion, index.offset);
+        entries.push({ index: index.value, token: name.value });
+        offset = name.offset;
+      }
+      assert.equal(offset, end, "invalid function-name subsection size");
+    }
+    offset = end;
+  }
+  assert.deepEqual(entries, finalNameEntries(sidecar),
+    "companion must name every exact final index from the bound sidecar");
+  return { releaseSha256: sha256(bytes), companionSha256: sha256(companion),
+    nonCustomSectionsEqual: true, functions: entries };
 }
 
 export function inspectFunction(sidecar, selector) {
