@@ -1,47 +1,52 @@
 # wasm-gen lane
 
-Tracked frozen UTF-8 adapter producer, ROOT-W7-20260922-010.
-Root remains integration owner; consumer browser qualification and live adoption
-remain outside this producer task.
+Generic Nat remainder range facts, authorized by the user after the bounded
+Collatz investigation. Root owns integration (W7-ROOT-20260929-006).
 
 ```text
 lane: wasm-gen
 owner: fir/wasm-gen
-branch: wasm/utf8-scratch-4341
-worktree: .worktrees/wasm-utf8-scratch-434
+branch: wasm/nat-mod-range-facts-4341
+worktree: .worktrees/wasm-generation
 state: ready
-base: dd688e3d9883731e81dd40f360a8241e9f290093
-functional-head: 65cee114a9aa670f7a02ec33497d126cb63b6330
-contract-base: dd688e3d9883731e81dd40f360a8241e9f290093
+base: 2e5c15ed6717f25a317910a7f3ba20a009173051
+functional-head: 911e2aec7b5f1a496fb3c20094c51e39c0ef5b2b
+contract-base: 2e5c15ed6717f25a317910a7f3ba20a009173051
 clean-at-update: true
-slice: Promote accepted UTF-8 depth-scratch host, focused controls and frozen-input immutable producer under integration/vbp-native-session-probe/adapter.
-files: integration/vbp-native-session-probe/adapter/; probe README; this snapshot
-contracts: none; no Lean capture, Wasm, ABI, layout, runtime, W6 or toolchain change
-checks: Functional head passes deterministic package replay, complete checksums, 22 equivalences/20 React SSR renders/1314 encodeInto calls, growth/reentry/failure/retention/disposal controls and five negative controls. git diff --check, make check, make talos-setup/check, and full deterministic artifact gate pass. No browser/performance campaign claimed.
+slice: Consume positive literal divisor facts to refine Nat.mod results and erase their checked releases.
+files: Fir/Wasm/Emit/ResidentCallSite.lean; Fir/Wasm/Emit/ResidentNatArithmetic.lean; integration/talos/artifact/resident-nat-arithmetic-client.mjs; this snapshot
+contracts: none; unchanged runtime bodies, helper signatures, layout, ABI and toolchain
+checks: Functional head passes Beam; clean focused Lake build; raw and production-O3 Node arithmetic/ownership controls; eight frozen-source Collatz differentials; git diff --check; make check; make talos-setup/check; full artifact/check.sh. This snapshot is a documentation-only successor, not a claim of fresh gates on the successor.
 bug-cards: none
 blockers: none
-handoff: Exact clean checkpoint and immutable package identity are recorded in the canonical completion. No VBP/live pin, publication, main change or push.
-next: Root review/integration; queued Nat remainder remains a separate task.
+handoff: Exact clean integrationCheckpoint recorded in canonical mailbox; no push, publication or live pointer changes.
+next: Root review; any balanced client timing or proof attachment is separate.
 ```
 
-The accepted host and smoke are byte-identical to package
-`b5b3a053e4135f913504a376`. The input package
-`1c3b87b3f270114a3a56eeb7` is authenticated by its complete checksum inventory,
-BUILD and Wasm hashes before output is created. Twenty-one unchanged support
-files are verified exactly. No mutable VBP/VIR source is consulted.
+The new fact is established at the particular argument read, from a preceding
+positive canonical Nat literal in the same straight-line list. Zero, erased or
+even words, out-of-range source literals, scalar words, unknown values,
+overwrites and nested writes do not justify it. Facts are not imported across
+blocks or loop entries. Existing result-assignment checks remain in force.
+The arithmetic provider uses `n % d < d` for positive bounded `d`; the existing
+release pass consumes the result kind. No runtime implementation is replaced.
 
-Wasm remains 1,981,006 bytes,
-`b70d5b37c7954883a7e456821b7f6d4d31e0ef5903f77ff25c240a9b9f077d87`,
-with 38 function imports, zero memory imports, 105 exports and module-owned
-memory. BUILD retains the original RC2 compilation provenance and separately
-records this 4.34.1 packaging checkout and exact producer-source hashes.
+Regression coverage adds 17 structural controls and four ownership callers
+(zero, two, largest immediate divisor, overwritten divisor). Their engine
+checks cover 42 value/ownership cases and eight malformed-input traps, including
+multi-limb dividends and heap-valued zero-divisor results. Raw and optimized
+execution both pass. This is generation evidence, not a new W6 refinement proof.
 
-The producer uses the existing immutable-package utility without moving a
-current pointer. Reproduction and source/ownership boundaries are documented in
-`integration/vbp-native-session-probe/adapter/README.md`; final local packages
-are under this worktree's `.deps/utf8-adapter/packages/`.
+The unchanged authenticated Collatz source captures identically and agrees
+with the frozen baseline at eight inputs up to 100000. `collatzSteps` has nine
+release calls instead of ten; `collatzBest` retains its six. Local generated
+Wasm is 11969 bytes, SHA-256
+`b9d38807dd9ed04201282cf78491bf2f8402502675e9c50120741455f7334653`,
+with zero imports and unchanged exports/ownership. No runtime speedup or
+historical size-delta attribution is claimed.
 
-The old RC2 branch/checkpoint `05671f39` is unchanged. Its local generated Talos
-state was preserved at `.deps/talos-rc2-preserved-05671f39/` after the stable
-setup correctly rejected its old toolchain identity; fresh 4.34.1 setup passes.
-No stale RC2 oleans or frozen renderer captures were used by the current gates.
+Evidence and commands: `.deps/nat-mod-range-facts/READOUT.md`, bound by the
+mailbox handoff digest. The preserved renderer-name and Collatz-investigation
+branches and all released renderer packages are unchanged. Dynamic range facts,
+cross-branch/interprocedural analysis and local-alias propagation remain out of
+scope for this bounded slice.
