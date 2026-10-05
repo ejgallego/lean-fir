@@ -297,11 +297,18 @@ full `lake.log` and propagates the child's nonzero exit status; `--verbose`
 prints full output after each command. Workspaces are disposable local state, not a run
 registry or immutable published package.
 
-Focused tests: `node --test tooling/source-prepare-unit.test.mjs`. An explicit
-installed-toolchain smoke, including a supplied Git dependency with an
-unreachable URL, is
-`node tooling/source-prepare-smoke.mjs TOOLCHAIN_DIRECTORY LEAN_COMMIT`.
-An optional third argument names the frozen W7 options workspace for a
-read-only setup-identity replay; it does not run Lake there or reuse its build
-state. Keep official 4.34 tests on its exact installed toolchain; this command
-does not move FIR's root pin or qualify the separate full-gate audit findings.
+Focused tests: `node --test tooling/source-prepare-unit.test.mjs`. The real
+installed-Lake smoke is part of `make tooling-check`; run it alone with:
+
+```sh
+make -C tooling source-prepare-check
+# Or, with no arguments:
+node tooling/source-prepare-smoke.mjs
+```
+
+It selects Lean through Elan from the FIR root and derives the exact compiler
+identity from that binary. The smoke includes a supplied Git dependency with
+an unreachable URL, and writes private inputs and outputs under ignored
+`.deps`. It checks source preparation only; it does not establish that a
+selected declaration compiles to or runs as a packaged Wasm entry.
+Frozen-workspace replay and positional toolchain overrides are not supported.
