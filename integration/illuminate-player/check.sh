@@ -12,9 +12,21 @@ if [[ -n "${LEAN_TOOLCHAIN:-}" && "$LEAN_TOOLCHAIN" != "$(<"$fir_root/lean-toolc
   echo "LEAN_TOOLCHAIN must not override the current FIR pin" >&2
   exit 1
 fi
+for path in _build _build/illuminate-player-packages \
+  _build/illuminate-selection-player-packages \
+  _build/illuminate-player-current _build/illuminate-selection-player-current; do
+  if [[ -e "$here/$path" || -L "$here/$path" ]]; then
+    resolved=$(realpath -m "$here/$path")
+    case "$resolved" in
+      "$here/_build"|"$here/_build/"*) ;;
+      *) echo "recipe output escapes its local _build: $path -> $resolved" >&2; exit 1 ;;
+    esac
+  fi
+done
 export TMPDIR="$fir_root/.deps/tmp/illuminate-player"
 mkdir -p "$TMPDIR"
-export LAKE_CACHE_DIR="$(bash "$fir_root/scripts/fir-lake-cache-path.sh")"
+LAKE_CACHE_DIR=$(bash "$fir_root/scripts/fir-lake-cache-path.sh")
+export LAKE_CACHE_DIR
 export LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true
 illuminate_root=${ILLUMINATE_ROOT:-$(realpath .illuminate)}
 illuminate_revision=$(node -e '

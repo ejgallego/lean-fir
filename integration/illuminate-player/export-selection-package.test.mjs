@@ -192,6 +192,30 @@ test("rejects an overriding toolchain before source lookup or compilation", () =
     "LEAN_TOOLCHAIN must not override the current FIR pin"));
 });
 
+test("gate rejects build directories and current links outside its local build", () =>
+  withDirectory((root) => {
+    for (const name of ["_build", "_build/illuminate-player-current",
+      "_build/illuminate-selection-player-packages"]) {
+      const fixture = join(root, name.replaceAll("/", "-"));
+      const recipe = join(fixture, "integration", "illuminate-player");
+      mkdirSync(recipe, { recursive: true });
+      writeFileSync(join(fixture, "lean-toolchain"), `${currentToolchain}\n`);
+      writeFileSync(join(recipe, "lean-toolchain"), `${currentToolchain}\n`);
+      const outside = join(fixture, "outside-build");
+      mkdirSync(outside);
+      const path = join(recipe, name);
+      mkdirSync(dirname(path), { recursive: true });
+      symlinkSync(outside, path);
+      const script = join(recipe, "check.sh");
+      writeFileSync(script, readFileSync(join(directory, "check.sh")));
+      assert.throws(() => execFileSync("bash", [script], {
+        env: { ...process.env, LEAN_TOOLCHAIN: currentToolchain },
+        stdio: ["ignore", "pipe", "pipe"],
+      }), (error) => error.status === 1 && error.stderr.includes(
+        "recipe output escapes its local _build"));
+    }
+  }));
+
 test("parses the generic catalog command and direct-use alias", () => {
   assert.deepEqual(parseExportArguments([
     "--output", "/tmp/out",
