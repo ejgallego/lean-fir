@@ -4,6 +4,7 @@
   "semanticEndpoint": "fixture.entry returns zero",
   "instancePolicy": "fresh-instance-per-profile",
   "parameters": {
+    "leafBatchSize": 1024,
     "warmupRounds": 1000,
     "steadyRounds": 50000000
   },

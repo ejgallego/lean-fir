@@ -139,6 +139,38 @@ test("attributes Wasm self samples to immediate recursive, Wasm, and host caller
     assert.equal(constructor.caller.name, "Example.run");
   });
 
+test("does not reconstruct an absent sampled caller from the static call graph", () => {
+  const sidecar = {
+    functions: [
+      { name: "Fixture.leaf", origin: "lean-source" },
+      { name: "Fixture.entry", origin: "lean-source", directCallees: [0] },
+    ],
+  };
+  const profile = {
+    startTime: 0,
+    endTime: 20,
+    nodes: [
+      { ...frame(1, "(root)", ""), children: [2, 4] },
+      { ...frame(2, "js-to-wasm:i:i", ""), children: [3] },
+      frame(3, "wasm-function[0]"),
+      frame(4, "wasm-function[1]"),
+    ],
+    samples: [3, 3],
+    timeDeltas: [10, 10],
+  };
+  const summary = summarizeCpuProfile(profile, sidecar, {
+    strictFunctionIndices: true,
+    requireTimeDeltas: true,
+  });
+  assert.equal(summary.callerAttribution.attributedWasmSelfSamples, 2);
+  assert.equal(summary.callerEdges.length, 1);
+  assert.equal(summary.callerEdges[0].targetName, "Fixture.leaf");
+  assert.equal(summary.callerEdges[0].caller.kind, "host-or-runtime");
+  assert.equal(summary.callerEdges[0].caller.name, "js-to-wasm:i:i");
+  assert.equal(summary.callerEdges[0].selfSamples, 2);
+  assert(!summary.callerEdges.some(({ caller }) => caller.name === "Fixture.entry"));
+});
+
 test("rejects malformed CPU profile parent graphs", () => {
   const sidecar = { functions: [] };
   const base = {

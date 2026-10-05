@@ -68,6 +68,12 @@ test("CLI profiles only checked steady work and binds immutable evidence",
       const receiptBefore = readFileSync(workloadReceipt);
       const inputBefore = readFileSync(workloadInput);
       const metadataBefore = readFileSync(metadataPath);
+      const control = new WebAssembly.Instance(new WebAssembly.Module(wasmBefore));
+      for (const rounds of [0, 1, 16, 1023, 1024, 1025, 2049]) {
+        assert.equal(control.exports["fixture.entry"](rounds), 0,
+          `fixture must finish exact and partial batches for ${rounds} rounds`);
+      }
+      assert.equal(JSON.parse(receiptBefore).parameters.leafBatchSize, 1024);
       const evidencePath = execFileSync(process.execPath, [
         profileTool,
         "--wasm", wasmPath,
@@ -114,6 +120,16 @@ test("CLI profiles only checked steady work and binds immutable evidence",
         sha256(metadataBefore));
       assert.equal(evidence.rawProfile.sha256, sha256(rawBytes));
       assert.equal(rawBytes.at(-1), 10);
+      const rawProfile = JSON.parse(rawBytes);
+      const sampledNodes = new Set(rawProfile.samples);
+      const sampledLeaves = new Set(rawProfile.nodes.filter((node) =>
+        sampledNodes.has(node.id) && /wasm-function\[0\]/.test(
+          `${node.callFrame.functionName} ${node.callFrame.url}`))
+        .map(({ id }) => id));
+      assert(rawProfile.nodes.some((node) => /wasm-function\[1\]/.test(
+        `${node.callFrame.functionName} ${node.callFrame.url}`) &&
+        (node.children ?? []).some((child) => sampledLeaves.has(child))),
+      "raw V8 profile must sample the entry-to-leaf caller edge");
       const contractClaims = validateProfileEvidenceContract(evidence);
       assert.deepEqual(contractClaims.workloadReceipt, {
         kind: "fir.profile-workload-receipt/v1",

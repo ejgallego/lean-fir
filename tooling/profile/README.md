@@ -114,9 +114,20 @@ make -C tooling profile-check \
 The live test verifies artifact/sidecar/workload immutability, raw evidence
 hashes, resolved Wasm samples, checked phase observations, and absence of
 partial output after an unchecked steady result. It also passes the captured
-profile through aggregate v2, checks complete per-function caller coverage,
+profile through aggregate v3, checks complete per-function caller coverage,
 and requires the real `Fixture.entry` to `Fixture.leaf` Wasm caller edge. The
 gate never downloads tools and never skips when its dependency is missing.
+
+The live fixture puts a bounded 1,024-decrement batch inside the leaf, so
+samples have a sustained callee stack to observe. A one-instruction leaf
+previously produced raw Node 22 profiles with no entry-to-leaf parent edge;
+the aggregate correctly retained the JS-to-Wasm parent instead. The test now
+requires a sampled edge in both the raw V8 tree and the derived aggregate,
+with zero/exact/partial-batch semantic controls. No profiler flags, retries,
+or inferred callers are used to force the result. A deterministic unit control
+checks that a missing sampled parent is never reconstructed from the static
+Wasm call graph. This fixture is an attribution check, not a speed benchmark;
+its timings are not application performance evidence.
 
 ## Cross-run final-function resolver
 
