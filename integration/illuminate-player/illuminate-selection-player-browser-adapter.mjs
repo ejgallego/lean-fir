@@ -3,7 +3,7 @@
 export const ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION =
   "fir.illuminate-player.browser/v5";
 export const ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION =
-  "lean-4.33-Illuminate.Animation.SelectionAnimation/v4";
+  "lean-4.34.1-Illuminate.Animation.SelectionAnimation/v5";
 export const ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION =
   "fir.illuminate-player.persistent-checkpoint/v3";
 export const ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION =
@@ -20,7 +20,7 @@ const MAX_UINT32 = 0xffffffff;
 const MAX_IMMEDIATE = 0x7fffffffn;
 const ARRAY_MARKER = 0x41525259;
 const STRING_MARKER = 1;
-const FLOAT_BOX_MARKER = 6;
+const FLOAT_BOX_MARKER = 7;
 const PERSISTENT_LIVE_FLAGS = 3;
 
 const KIND = Object.freeze({

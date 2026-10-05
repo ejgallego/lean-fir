@@ -27,9 +27,13 @@ import {
   selectionExpectedExports,
   selectionPackagePolicy,
 } from "./selection-package-policy.mjs";
+import { ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION } from
+  "./illuminate-selection-player-browser-adapter.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const exporter = join(directory, "export-selection-package.mjs");
+const currentToolchain = readFileSync(join(directory, "../../lean-toolchain"), "utf8").trim();
+const currentVersion = currentToolchain.replace("leanprover/lean4:v", "");
 
 function withDirectory(run) {
   const root = mkdtempSync(join(tmpdir(), "fir-selection-export-"));
@@ -105,14 +109,15 @@ function selectionWasm() {
   ]);
 }
 
-function packageFixture(path, smoke = "process.exit(0);\n") {
+function packageFixture(path, smoke = "process.exit(0);\n",
+  inputLayout = ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION) {
   mkdirSync(path);
   const wasm = selectionWasm();
   const build = {
     schemaVersion: selectionPackagePolicy.build.schemaVersion,
     toolchain: {
-      leanToolchain: "leanprover/lean4:v4.33.0",
-      leanVersion: "Lean (version 4.33.0, fixture-target, commit " +
+      leanToolchain: currentToolchain,
+      leanVersion: `Lean (version ${currentVersion}, fixture-target, commit ` +
         `${"4".repeat(40)}, Release)`,
     },
     sources: {
@@ -153,7 +158,7 @@ function packageFixture(path, smoke = "process.exit(0);\n") {
       },
       hotEvent: { version: "fir.illuminate-player.hot-event/v2" },
       inputLayout: {
-        version: "lean-4.33-Illuminate.Animation.SelectionAnimation/v4",
+        version: inputLayout,
       },
       ownership: {
         version: "fir.illuminate-player.persistent-checkpoint/v3",
@@ -173,6 +178,19 @@ function packageFixture(path, smoke = "process.exit(0);\n") {
     `${sha256(readFileSync(join(path, name)))}  ${name}`).join("\n") + "\n";
   writeFileSync(join(path, "SHA256SUMS"), sums);
 }
+
+test("recipe pin matches the current FIR toolchain", () => {
+  assert.equal(readFileSync(join(directory, "lean-toolchain"), "utf8").trim(),
+    currentToolchain);
+});
+
+test("rejects an overriding toolchain before source lookup or compilation", () => {
+  assert.throws(() => execFileSync(join(directory, "check.sh"), [], {
+    env: { ...process.env, LEAN_TOOLCHAIN: "leanprover/lean4:v0.0.0" },
+    stdio: ["ignore", "pipe", "pipe"],
+  }), (error) => error.status === 1 && error.stderr.includes(
+    "LEAN_TOOLCHAIN must not override the current FIR pin"));
+});
 
 test("parses the generic catalog command and direct-use alias", () => {
   assert.deepEqual(parseExportArguments([
@@ -281,6 +299,22 @@ test("publishes exactly six regular files into a fresh output", () =>
       sourceDirectory: source,
       outputDirectory: output,
     }), /output directory must be fresh/);
+  }));
+
+test("rejects stale input layouts even with valid package checksums", () =>
+  withDirectory((root) => {
+    for (const [index, version] of [
+      "lean-4.32-Illuminate.Animation.SelectionAnimation/v4",
+      "lean-4.33-Illuminate.Animation.SelectionAnimation/v4",
+    ].entries()) {
+      const source = join(root, `old-${index}`);
+      packageFixture(source, "process.exit(0);\n", version);
+      const output = join(root, `rejected-${index}`);
+      assert.throws(() => publishAcceptedPackage({
+        sourceDirectory: source, outputDirectory: output,
+      }), /inputLayout/);
+      assert.throws(() => lstatSync(output), /ENOENT/);
+    }
   }));
 
 test("rejects symbolic output, checksum mismatch, and smoke failure", () =>

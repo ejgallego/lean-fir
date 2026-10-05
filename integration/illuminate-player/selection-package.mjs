@@ -57,13 +57,13 @@ const expectedClosure = Object.freeze({
   retainedSourceFunctions: 177,
   retainedSourceFunctionSha256:
     "1610f2582ee49ef01f8c6d0783089a8df8093af8eb247cf0f370fa3676904b44",
-  residentHelpers: 320,
+  residentHelpers: 321,
   residentHelperSha256:
-    "869ff38ca50ad67a6cba34e0a49ff23c7e4b44bf03004bae9376a2e51bae3249",
-  baseWasmBytes: 35660,
-  completeWasmBytes: 40398,
+    "52328c4c7d0a8e95a8c00dbf96c012fae5c241c9b5eecd0779e52ccb97c5378a",
+  baseWasmBytes: 36035,
+  completeWasmBytes: 44963,
   completeWasmSha256:
-    "9a5364ac0e4f78559f29089e9005820c9a9246850d1d19d04ba35671e997eefd",
+    "3225f9bdb718a5df49d8145b8a900a4827808811bd6c9e4369fe4f001f715b55",
 });
 const outputNames = selectionPayloadFiles;
 
@@ -117,15 +117,19 @@ function sourceDeclarations(text) {
 }
 
 assertExpectedIlluminateSource();
+const fir = sourceState(firRoot);
+assert.equal(fir.dirty, false, "FIR checkout must be clean for immutable publication");
 mkdirSync(buildDirectory, { recursive: true });
 run("lake", [
   "--keep-toolchain",
+  "--reconfigure",
   `-KilluminateRoot=${illuminateRoot}`,
   "build",
   "IlluminateFirNative.SelectionCompile",
 ]);
 run("lake", [
   "--keep-toolchain",
+  "--reconfigure",
   `-KilluminateRoot=${illuminateRoot}`,
   "env",
   "lean",
@@ -180,7 +184,6 @@ const wasmHash = sha256(wasm);
 const adapterBytes = readFileSync(join(directory,
   "illuminate-selection-player-browser-adapter.mjs"));
 const smokeBytes = readFileSync(join(directory, "selection-package-smoke.mjs"));
-const fir = sourceState(firRoot);
 const illuminate = sourceState(illuminateRoot, illuminateSourceFiles);
 const leanToolchain = readFileSync(join(directory, "lean-toolchain"), "utf8")
   .trim();

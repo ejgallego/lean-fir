@@ -156,7 +156,7 @@ for (let index = 0; index < 10_000; ++index) {
 // Upstream Float construction uses its full model closure in scratch; the
 // arena must remain flat even though its per-call peak is larger than the old
 // bounded C-provider path.
-assert.equal(steadyPeak - steady.memory.persistentCheckpoint, 4232);
+assert.equal(steadyPeak - steady.memory.persistentCheckpoint, 4088);
 adapter.disposePlayer(steady.player);
 
 const decodeFailureAdapter = await createIlluminatePlayerAdapter({

@@ -114,7 +114,7 @@ for (let index = 0; index < 10_000; ++index) {
   peakFrontier = Math.max(peakFrontier, tick.memory.peakFrontier);
 }
 // Source-compiled Float construction is allocation-faithful and rewound.
-assert.equal(peakFrontier - steady.memory.persistentCheckpoint, 4232);
+assert.equal(peakFrontier - steady.memory.persistentCheckpoint, 4088);
 adapter.disposePlayer(steady.player);
 
 const first = adapter.createPlayer(animation);

@@ -1,6 +1,6 @@
 # FIR-native Illuminate player packages
 
-This integration publishes the accepted full-action v3 live player and a
+This recipe builds the full-action v3 live player and a
 separately versioned selection-only v4 player. The v3 API remains unchanged;
 v4 retains only timing and selection state in Wasm while JavaScript owns SVG,
 parameter bindings, and per-frame parameter strings. Both generic source
@@ -8,7 +8,8 @@ closures compile upstream `Float.ofNat` and `Float.ofScientific` directly, so
 neither artifact has a C/Emscripten provider. Both package fingerprints are
 tied to the source revision in `illuminate-source.json`.
 
-This integration compiles the real Lean 4.33 entries from
+This integration compiles the real entries with FIR's current Lean 4.34.1
+toolchain from
 `Illuminate.Animation.FirLive`:
 
 ```text
@@ -49,10 +50,25 @@ cd integration/illuminate-player
 ILLUMINATE_ROOT=/path/to/illuminate ./check.sh
 ```
 
-`check.sh`, `package.mjs`, and `selection-package.mjs` reject a dirty checkout
-or any revision other than the pinned contract before publishing a package.
+`check.sh`, `package.mjs`, and `selection-package.mjs` reject a dirty source
+checkout or any revision other than the pinned contract. The publishers also
+require a clean FIR tree. The gate rejects a nested toolchain that differs
+from FIR's root pin and any conflicting `LEAN_TOOLCHAIN` override, and sets
+worktree-local scratch and the toolchain-scoped Lake cache automatically.
+It needs the repository-pinned Binaryen `wasm-opt` at
+`.deps/lcnf-c-wasm/emsdk/upstream/bin/wasm-opt`; the existing
+`integration/lcnf-c-wasm/setup-emscripten.sh` provisions this tool, but also
+builds C-backend runtime archives that this provider-free recipe does not use.
+Already provisioned immutable Binaryen binaries can be copied into the local
+tool location; never share mutable `.lake`, `.beam` or `.deps` state.
 
-The gate builds both focused Lean dependency cones, publishes both packages
+The supplied Illuminate checkout contributes source only. Lake build products
+stay in this integration's `.lake`; its own toolchain/configuration and
+Illuminate's `.lake` are not compilation inputs. Both publishers reconfigure
+Lake with the exact source path before compilation/capture, so a cached path
+from another checkout cannot select the input.
+
+The gate builds both focused Lean dependency cones, generates both packages
 twice, checks deterministic bytes and checksums, runs the source-tree and
 packaged smokes, and compares 107 legacy-JavaScript/FIR-v3/FIR-v4 traces event
 by event. The
@@ -60,7 +76,8 @@ smoke includes every event and patch target, non-integral timestamps, two
 independent players, failure poisoning, repeated disposal, repeated
 create/dispose cycles, and 10,000 ticks at a flat post-dispatch frontier.
 
-`package.mjs` atomically publishes an immutable directory under
+`package.mjs` uses the existing shared immutable-package utility and checks its
+packaged smoke before installing an immutable directory under
 `_build/illuminate-player-packages/`; the canonical
 `_build/illuminate-player-current` symlink points to:
 
@@ -72,6 +89,20 @@ BUILD.json
 SHA256SUMS
 smoke.mjs
 ```
+
+The current layouts are
+`lean-4.34.1-Illuminate.Animation.PlayerAnimation-live/v4` and
+`lean-4.34.1-Illuminate.Animation.SelectionAnimation/v5`. Both consume the
+accepted runtime's Float box marker 7. Browser APIs and ownership versions are
+unchanged; packages advertising older layouts are not interchangeable with
+these adapters and are rejected by the capability checks. The exporter tests
+include correctly checksummed packages with obsolete layouts as negative
+controls.
+
+These commands qualify the producer recipe. Client staging/browser scripts
+must separately accept the new package's recorded identities and layouts;
+older consumer pins or successful historical campaigns do not establish
+current consumer acceptance. No shared client staging is changed by this recipe.
 
 ### External artifact producer
 
@@ -250,7 +281,7 @@ that the post-production frontier remains exactly flat.
 
 The exact linked-module ratchets include the accepted proof-indexed resident
 Array implementation and the upstream source closure for Float construction.
-The provider-free v3 and selection modules are respectively 37,287 and 40,398
+The provider-free v3 and selection modules are respectively 41,989 and 44,963
 bytes. Both start with zero imports, module-owned memory, and an allocator
 frontier of 1,024; neither reserves the legacy provider's first 64 KiB page.
 Their complete SHA-256 identities are pinned by the package generators in

@@ -2,19 +2,16 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
-  existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { publishImmutablePackage } from
+  "../package-tools/immutable-package.mjs";
 
 import {
   ILLUMINATE_PLAYER_ADAPTER_API_VERSION,
@@ -50,13 +47,13 @@ const expectedClosure = Object.freeze({
   retainedSourceFunctions: 168,
   retainedSourceFunctionSha256:
     "478fe708cf0d20544de518c183d3c6781eb2485e974ba951b44b33909077ed4a",
-  residentHelpers: 302,
+  residentHelpers: 303,
   residentHelperSha256:
-    "7fae93acebad76ecf682e223f512c2d6e81c8b6fd094a8c5f91816b02c88c864",
-  baseWasmBytes: 33639,
-  completeWasmBytes: 37287,
+    "2e0c11e4ed893bf974116928129d8feab088a3f7ae8874733135eea8359c2ed4",
+  baseWasmBytes: 34004,
+  completeWasmBytes: 41989,
   completeWasmSha256:
-    "25e3f3ec476b7bb9cc650d89b3664c1a55880b44fde54576078278f5e2e87643",
+    "90a7a2282b23b5c381e94b357f24ebb61d233e93922d642da59f807f04220e47",
 });
 const outputNames = [
   "BUILD.json",
@@ -115,27 +112,20 @@ function sourceDeclarations(text) {
     .map((line) => line.slice(4).split(/\s/, 1)[0]);
 }
 
-function replaceCurrentLink(targetDirectory) {
-  const current = join(buildDirectory, "illuminate-player-current");
-  const temporary = join(buildDirectory,
-    `.illuminate-player-current-${process.pid}`);
-  rmSync(temporary, { force: true });
-  symlinkSync(relative(buildDirectory, targetDirectory), temporary);
-  renameSync(temporary, current);
-  assert.equal(lstatSync(current).isSymbolicLink(), true);
-  assert.equal(realpathSync(current), realpathSync(targetDirectory));
-}
-
 assertExpectedIlluminateSource();
+const fir = sourceState(firRoot);
+assert.equal(fir.dirty, false, "FIR checkout must be clean for immutable publication");
 mkdirSync(buildDirectory, { recursive: true });
 run("lake", [
   "--keep-toolchain",
+  "--reconfigure",
   `-KilluminateRoot=${illuminateRoot}`,
   "build",
   "IlluminateFirNative.Compile",
 ]);
 run("lake", [
   "--keep-toolchain",
+  "--reconfigure",
   `-KilluminateRoot=${illuminateRoot}`,
   "env",
   "lean",
@@ -190,7 +180,6 @@ const wasmHash = sha256(wasm);
 const adapterBytes = readFileSync(join(directory,
   "illuminate-player-browser-adapter.mjs"));
 const smokeBytes = readFileSync(join(directory, "package-smoke.mjs"));
-const fir = sourceState(firRoot);
 const illuminate = sourceState(illuminateRoot, illuminateSourceFiles);
 const leanToolchain = readFileSync(join(directory, "lean-toolchain"), "utf8")
   .trim();
@@ -390,32 +379,22 @@ const packageFingerprint = sha256(Buffer.concat([
 const packageId = `${fir.commit.slice(0, 12)}-${illuminate.commit.slice(0, 12)}-` +
   packageFingerprint.slice(0, 20);
 const packages = join(buildDirectory, "illuminate-player-packages");
-const destination = join(packages, packageId);
-const staging = join(packages, `.staging-${packageId}-${process.pid}`);
-mkdirSync(packages, { recursive: true });
-rmSync(staging, { recursive: true, force: true });
-mkdirSync(staging);
-copyFileSync(completeStem, join(staging, "illuminate-player.wasm"));
-writeFileSync(join(staging, "illuminate-player.wasm.json"), descriptorBytes);
-writeFileSync(join(staging, "illuminate-player-browser-adapter.mjs"),
-  adapterBytes);
-writeFileSync(join(staging, "smoke.mjs"), smokeBytes);
-writeFileSync(join(staging, "BUILD.json"), buildBytes);
-const sums = outputNames.map((name) =>
-  `${sha256(readFileSync(join(staging, name)))}  ${name}`).join("\n") + "\n";
-writeFileSync(join(staging, "SHA256SUMS"), sums);
-
-if (existsSync(destination)) {
-  for (const name of [...outputNames, "SHA256SUMS"]) {
-    assert.deepEqual(readFileSync(join(staging, name)),
-      readFileSync(join(destination, name)),
-      `immutable package ${packageId} differs at ${name}`);
-  }
-  rmSync(staging, { recursive: true });
-} else {
-  renameSync(staging, destination);
-}
-replaceCurrentLink(destination);
+const { directory: destination } = publishImmutablePackage({
+  packagesDirectory: packages,
+  packageId,
+  outputNames,
+  currentLink: join(buildDirectory, "illuminate-player-current"),
+  populate(staging) {
+    copyFileSync(completeStem, join(staging, "illuminate-player.wasm"));
+    writeFileSync(join(staging, "illuminate-player.wasm.json"), descriptorBytes);
+    writeFileSync(join(staging, "illuminate-player-browser-adapter.mjs"), adapterBytes);
+    writeFileSync(join(staging, "smoke.mjs"), smokeBytes);
+    writeFileSync(join(staging, "BUILD.json"), buildBytes);
+  },
+  validate(staging) {
+    execFileSync(process.execPath, ["smoke.mjs"], { cwd: staging, stdio: "inherit" });
+  },
+});
 console.log(JSON.stringify({
   ok: true,
   packageId,

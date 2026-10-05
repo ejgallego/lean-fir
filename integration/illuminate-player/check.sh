@@ -3,6 +3,19 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here"
+fir_root=$(cd "$here/../.." && pwd)
+if ! cmp -s "$here/lean-toolchain" "$fir_root/lean-toolchain"; then
+  echo "Illuminate player recipe must use FIR's current Lean toolchain" >&2
+  exit 1
+fi
+if [[ -n "${LEAN_TOOLCHAIN:-}" && "$LEAN_TOOLCHAIN" != "$(<"$fir_root/lean-toolchain")" ]]; then
+  echo "LEAN_TOOLCHAIN must not override the current FIR pin" >&2
+  exit 1
+fi
+export TMPDIR="$fir_root/.deps/tmp/illuminate-player"
+mkdir -p "$TMPDIR"
+export LAKE_CACHE_DIR="$(bash "$fir_root/scripts/fir-lake-cache-path.sh")"
+export LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true
 illuminate_root=${ILLUMINATE_ROOT:-$(realpath .illuminate)}
 illuminate_revision=$(node -e '
   const fs = require("node:fs");
@@ -12,6 +25,10 @@ illuminate_revision=$(node -e '
 actual_illuminate_revision=$(git -C "$illuminate_root" rev-parse HEAD)
 if test "$actual_illuminate_revision" != "$illuminate_revision"; then
   echo "Illuminate revision mismatch: expected $illuminate_revision, found $actual_illuminate_revision" >&2
+  exit 1
+fi
+if ! test -x "$fir_root/.deps/lcnf-c-wasm/emsdk/upstream/bin/wasm-opt"; then
+  echo "missing recipe Binaryen; run integration/lcnf-c-wasm/setup-emscripten.sh from FIR root" >&2
   exit 1
 fi
 if test -n "$(git -C "$illuminate_root" status --porcelain)"; then
