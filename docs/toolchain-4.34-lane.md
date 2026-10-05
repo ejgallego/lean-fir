@@ -35,9 +35,9 @@ and mathlib `d13f23b723b8a846827a245b89c10fc7d3f11612`.
 It mirrors current `integration/talos/FirTalos` proof sources and applies
 the reviewed compatibility patches after authenticating their inputs.
 
-The standalone 4.33 metadata remaining in `integration/talos` is not used
-by these commands. Its removal is a W6/root ownership decision; do not run
-that project as an alternative current gate.
+The obsolete standalone 4.33 metadata in `integration/talos` has been
+removed with W6/root confirmation. That directory supplies maintained proof
+sources to the overlay; it is not a separate Lake project.
 
 The trusted-assumption validator authenticates the exact selected compiler
 identity and audited source hashes. Compiled W6 trust audits remain separate

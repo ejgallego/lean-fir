@@ -123,12 +123,12 @@ branch instructions have been replaced by current 4.34.1 commands in
 [the toolchain guide](../toolchain-4.34-lane.md).
 
 The obsolete `.github/workflows/lean-434-compat.yml`, which required RC2,
-has been removed under root's narrow lease. The remaining candidate is the
-three standalone 4.33 metadata files under `integration/talos`. Searches of
-tracked setup, trust and CI code find the active proof route using
-`tooling/talos-434` metadata instead. Their deletion still requires the
-existing W6 ownership confirmation. Proof sources and the active overlay are
-maintained inputs, not retirement candidates.
+has been removed under root's narrow lease. The three standalone 4.33
+metadata files under `integration/talos` have also been removed after W6
+confirmed the boundary and root released the hold. Tracked setup, trust and
+CI code use `tooling/talos-434` metadata for the active proof route. Proof
+sources, trust tests (including their synthetic old-project fixture), the
+current workflows and the active overlay are preserved.
 
 Recommended order after that bounded retirement:
 
