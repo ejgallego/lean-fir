@@ -1,6 +1,6 @@
 # FIR external tooling CI contract
 
-FIR has one provider-neutral external tooling job:
+FIR defines one provider-neutral external tooling command:
 
 ```sh
 make tooling-check
@@ -9,6 +9,12 @@ make tooling-check
 The command is intentionally separate from ordinary `make check`. It exercises
 the tooling against real external programs and a compiled ordinary-Lean probe;
 it is not a hosted-runner performance benchmark.
+
+The committed GitHub workflows currently run the tooling unit tier through
+`make check`, but none invokes this complete command. The runtime matrix below
+is the contract for wiring that external gate, not evidence that those hosted
+jobs already exist. See the [build/test/performance review](BUILD_TEST_PERF.md)
+for the coverage gap and current command map.
 
 ## Runtime matrix
 
