@@ -9,7 +9,7 @@ FIR_VERBOSE ?= 0
 FIR_TOOL_LOG_DIR ?= $(REPO_ROOT)/.deps/tool-logs
 export FIR_VERBOSE FIR_TOOL_LOG_DIR
 
-.PHONY: no-skips runtime-check unit-check binaryen-check wasm-check profile-check array-probe-check check
+.PHONY: no-skips runtime-check unit-check source-prepare-check binaryen-check wasm-check profile-check array-probe-check check
 
 no-skips:
 	@if rg -n 'test[.]skip|skip[[:space:]]*:' "$(TOOLING_DIR)" \
@@ -35,6 +35,11 @@ unit-check: no-skips
 			tooling/profile/profile-contract-unit.test.mjs \
 			tooling/profile/profile-aggregate-unit.test.mjs
 	bash "$(TOOLING_DIR)/talos-434/test-setup.sh"
+
+source-prepare-check:
+	@cd "$(REPO_ROOT)" && \
+		FIR_TOOLING_TMPDIR="$(FIR_TOOLING_TMPDIR)" \
+		bash scripts/quiet-run.sh tooling-source-prepare -- node tooling/source-prepare-smoke.mjs
 
 binaryen-check:
 	@for tool in wasm-as wasm-opt; do \
@@ -89,4 +94,4 @@ array-probe-check: binaryen-check
 			--wasm _build/package/array-probe.wasm \
 			--sidecar _build/package/array-probe.wasm.functions.json
 
-check: runtime-check unit-check wasm-check profile-check array-probe-check
+check: runtime-check unit-check source-prepare-check wasm-check profile-check array-probe-check

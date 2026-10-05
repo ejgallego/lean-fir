@@ -5,8 +5,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { makeToolingTemporaryDirectory } from "./worktree-temp.mjs";
 import { prepareSource, sourceIdentity, setupIdentities } from "./source-prepare.mjs";
+import { currentSmokeToolchain } from "./source-prepare-smoke.mjs";
 
-const commit = "6a10ac8c22beadecabdbb0919c2b50214762f91d";
+const commit = "a".repeat(40); // Mock compiler identity, not a production pin.
+const toolchain = readFileSync(new URL("../lean-toolchain", import.meta.url), "utf8").trim();
+const version = toolchain.replace("leanprover/lean4:v", "");
 function fixture() {
   const root = makeToolingTemporaryDirectory("source-prepare-test-");
   const source = join(root, "source");
@@ -16,7 +19,7 @@ function fixture() {
   for (const tool of ["lean", "lake"]) writeFileSync(join(toolchainDirectory, "bin", tool), "fixture");
   writeFileSync(join(source, "Main.lean"), "import Dep\ndef mainValue := Dep.value\n");
   writeFileSync(join(source, "lakefile.toml"), 'name = "fixture"\n');
-  writeFileSync(join(source, "lean-toolchain"), "leanprover/lean4:v4.34.0-rc2\n");
+  writeFileSync(join(source, "lean-toolchain"), `${toolchain}\n`);
   writeFileSync(join(source, "lake-manifest.json"), JSON.stringify({ version: "1.2.0", packages: [
     { name: "dep", type: "git", url: "https://unavailable.invalid/dep", rev: "a".repeat(40), configFile: "lakefile.toml" },
   ] }));
@@ -29,7 +32,7 @@ function fixture() {
 function fakeLake(action = () => {}) {
   return (command, args, context) => {
     assert(existsSync(context.env.TMPDIR), "TMPDIR must exist before even toolchain verification");
-    if (command.endsWith("/lean")) return { status: 0, stdout: `Lean 4.34.0-rc2, commit ${commit}`, stderr: "" };
+    if (command.endsWith("/lean")) return { status: 0, stdout: `Lean ${version}, commit ${commit}`, stderr: "" };
     assert(args.some((arg) => arg.startsWith("--packages=")));
     assert(args.includes("+Main:setup"));
     assert.equal(context.env.LAKE_ARTIFACT_CACHE, "false");
@@ -141,7 +144,7 @@ test("public command exits with the actual failing Lake status, quietly retainin
   const { options } = fixture();
   const lean = join(options.toolchainDirectory, "bin", "lean");
   const lake = join(options.toolchainDirectory, "bin", "lake");
-  writeFileSync(lean, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(`Lean 4.34.0-rc2 commit ${commit}`)});\n`);
+  writeFileSync(lean, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(`Lean ${version} commit ${commit}`)});\n`);
   writeFileSync(lake, '#!/usr/bin/env node\nconsole.log("retained stdout");console.error("retained stderr");process.exitCode=23;\n');
   chmodSync(lean, 0o700);
   chmodSync(lake, 0o700);
@@ -154,4 +157,38 @@ test("public command exits with the actual failing Lake status, quietly retainin
   assert(!child.stderr.includes("retained stdout"));
   const log = child.stderr.trim().split("full log: ")[1];
   assert.match(readFileSync(log, "utf8"), /retained stdout\nretained stderr/);
+});
+
+test("installed smoke selects current-tree Lean and derives its exact commit", () => {
+  const calls = [];
+  const selected = currentSmokeToolchain([], (command, args, options) => {
+    calls.push([command, args]);
+    assert.equal(options.cwd, new URL("../", import.meta.url).pathname);
+    if (command === "elan") return "/installed/lean/bin/lean\n";
+    if (args[0] === "--short-version") return `${version}\n`;
+    assert.deepEqual(args, ["--githash"]);
+    return `${commit}\n`;
+  });
+  assert.deepEqual(selected, { toolchainDirectory: "/installed/lean", leanCommit: commit });
+  assert.deepEqual(calls[0], ["elan", ["which", "lean"]]);
+});
+
+test("smoke rejects retired and extra arguments before invoking a compiler", () => {
+  for (const args of [["--help"], ["/old/toolchain", commit], ["/old/toolchain", commit, "/old/frozen-workspace"]]) {
+    assert.throws(() => currentSmokeToolchain(args, () => assert.fail("must not invoke a compiler")), /no arguments/);
+    const child = spawnSync(process.execPath, [new URL("./source-prepare-smoke.mjs", import.meta.url).pathname, ...args], { encoding: "utf8" });
+    assert.equal(child.status, 1);
+    assert.equal(child.stdout, "");
+    assert.match(child.stderr, /no arguments/);
+  }
+});
+
+test("smoke fails closed on a non-current compiler, invalid hash and failed selection", () => {
+  const run = (selectedVersion, hash) => (command, args) => {
+    if (command === "elan") return "/installed/lean/bin/lean\n";
+    return args[0] === "--short-version" ? selectedVersion : hash;
+  };
+  assert.throws(() => currentSmokeToolchain([], run("0.0.0", commit)), /current Lean toolchain/);
+  assert.throws(() => currentSmokeToolchain([], run(version, "short")), /exact commit/);
+  assert.throws(() => currentSmokeToolchain([], () => { throw new Error("no installed toolchain"); }), /no installed toolchain/);
 });

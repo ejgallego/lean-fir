@@ -50,7 +50,7 @@ needed. [build-examples.md](../build-examples.md) remains the navigation index.
 | `make check` | Library/examples, scalar Wasm, native/LCNF/V8 triangle, direct-LCNF machine cases, coverage, bugs, source trust and tooling units | Core CI |
 | `make talos-setup && make talos-check` | Authenticated overlay, full FirTalos cone and direct compiled trust inventories | Core Talos CI |
 | `make retained-initializer-check` | Real pinned consumer capture/readback and retained initializer proof contracts | Core Talos CI |
-| `make tooling-check` | Supported Node runtime, tooling units, real Binaryen indexing, live inspector profiles and compiled Array ownership probe | Sequential Node 22/24 passes in artifact CI |
+| `make tooling-check` | Supported Node runtime, tooling units, real Lake source preparation, Binaryen indexing, live inspector profiles and compiled Array ownership probe | Sequential Node 22/24 passes in artifact CI |
 | `bash integration/talos/artifact/check.sh` | Deterministic W7 production, resident helpers, package utilities/smoke and concrete engine checks | Path-triggered artifact CI |
 | `bash integration/lcnf-c-wasm/check-all.sh` | Freestanding, Emscripten and WASI backend fixtures | Path-triggered C/Wasm CI |
 
@@ -69,6 +69,16 @@ ownership rather than relying only on parser tests. Browser checks remain a
 separate boundary: the artifact script runs them only with `FIR_BROWSER` and
 exhaustive prettyM checkpoints, and committed workflows do not set that browser
 option. Consumer browser campaigns therefore remain separate evidence.
+
+`make -C tooling source-prepare-check` also runs the installed-Lake smoke
+independently. It selects Lean through Elan from the FIR root, checks the
+version against the current root pin, and derives the exact compiler commit
+from that binary. No compiler/workspace arguments, historical source replay,
+toolchain installation or pin override are supported by this smoke. It prepares
+a current generated fixture with a supplied Git dependency whose remote is
+unreachable, using the normal source-preservation and setup-identity checks.
+Private inputs, setup outputs and failure logs stay in worktree-local `.deps`.
+This tests preparation, not a consumer package or source-entry compilation.
 
 Specialized workflow filters select the actual root `lakefile.toml` and
 top-level Lean drivers. Artifact triggers also include tooling, the root
