@@ -5,16 +5,18 @@ on:
     branches: [main]
     paths:
       - 'Fir/**'
+      - 'Fir*.lean'
       - 'lean-toolchain'
-      - 'lakefile.lean'
+      - 'lakefile.toml'
       - 'lake-manifest.json'
       - 'integration/lcnf-c-wasm/**'
       - '.github/workflows/lcnf-c-wasm.yml'
   pull_request:
     paths:
       - 'Fir/**'
+      - 'Fir*.lean'
       - 'lean-toolchain'
-      - 'lakefile.lean'
+      - 'lakefile.toml'
       - 'lake-manifest.json'
       - 'integration/lcnf-c-wasm/**'
       - '.github/workflows/lcnf-c-wasm.yml'

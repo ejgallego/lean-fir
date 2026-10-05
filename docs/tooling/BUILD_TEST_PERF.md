@@ -1,8 +1,7 @@
-# FIR tooling: build, test and performance
+# FIR tooling: build, test and performance workflow
 
-Source review: 2026-10-05, main `8f4222cb2`, Lean 4.34.1. This page maps
-maintained commands and identifies gaps; it is not a benchmark result or a
-package acceptance ledger. Exact package inventories stay in BUILD.json,
+This page connects maintained commands, Lean 4.34.1 build inputs and the
+remaining consolidation work. Exact package inventories stay in BUILD.json,
 and case inventories stay in their existing registries.
 
 ## Build
@@ -51,7 +50,7 @@ needed. [build-examples.md](../build-examples.md) remains the navigation index.
 | `make check` | Library/examples, scalar Wasm, native/LCNF/V8 triangle, direct-LCNF machine cases, coverage, bugs, source trust and tooling units | Core CI |
 | `make talos-setup && make talos-check` | Authenticated overlay, full FirTalos cone and direct compiled trust inventories | Core Talos CI |
 | `make retained-initializer-check` | Real pinned consumer capture/readback and retained initializer proof contracts | Core Talos CI |
-| `make tooling-check` | Supported Node runtime, tooling units, real Binaryen indexing, live inspector profiles and compiled Array ownership probe | No workflow invokes the complete command |
+| `make tooling-check` | Supported Node runtime, tooling units, real Binaryen indexing, live inspector profiles and compiled Array ownership probe | Sequential Node 22/24 passes in artifact CI |
 | `bash integration/talos/artifact/check.sh` | Deterministic W7 production, resident helpers, package utilities/smoke and concrete engine checks | Path-triggered artifact CI |
 | `bash integration/lcnf-c-wasm/check-all.sh` | Freestanding, Emscripten and WASI backend fixtures | Path-triggered C/Wasm CI |
 
@@ -63,18 +62,17 @@ execution. Bounded native subprocess parallelism preserves case order and
 keeps shared Lake and publication state serial. Failed child statuses are
 propagated, and successful validation scratch is disposable.
 
-The immediate coverage gap is the external tooling gate: pure parser tests
-cannot establish that a live inspector capture, Binaryen transformation or
-compiled Array probe still works. The provider-neutral Node 22/24 contract
-exists, but its hosted matrix is not wired. Browser checks are another explicit
-boundary: the artifact script runs them only with `FIR_BROWSER` and exhaustive
-prettyM checkpoints, and committed workflows do not set that browser option.
-Consumer browser campaigns therefore remain separate acceptance evidence.
+The artifact workflow now runs the external tooling gate on both supported
+Node majors, using the same pinned tools before artifact acceptance. This
+exercises live inspector capture, Binaryen identity and compiled Array
+ownership rather than relying only on parser tests. Browser checks remain a
+separate boundary: the artifact script runs them only with `FIR_BROWSER` and
+exhaustive prettyM checkpoints, and committed workflows do not set that browser
+option. Consumer browser campaigns therefore remain separate evidence.
 
-Workflow path filters also still name `lakefile.lean`, whereas this checkout's
-root configuration is `lakefile.toml`. Both the C and artifact workflows need
-the actual file in their dependency triggers. Core CI still runs, but it does
-not replace the omitted specialized gates.
+Specialized workflow filters select the actual root `lakefile.toml` and
+top-level Lean drivers. Artifact triggers also include tooling, the root
+Makefile and its quiet/cache helpers. Core CI still runs independently.
 
 The validation harness and its primary test module each exceed 10,000 lines,
 and the validation guide exceeds 2,000. This is a maintenance cost, not evidence
@@ -130,13 +128,17 @@ CI code use `tooling/talos-434` metadata for the active proof route. Proof
 sources, trust tests (including their synthetic old-project fixture), the
 current workflows and the active overlay are preserved.
 
-Recommended order after that bounded retirement:
+The next consolidation work is:
 
-1. Wire the external tooling gate and correct specialized CI dependency paths.
-2. Qualify consumer recipes through their owners on current main; repair or
-   remove obsolete recipe inputs and keep the existing index accurate.
-3. Refresh build/check timing only when it answers a concrete priority question;
-   otherwise use representative client profiles to select runtime work.
+1. Qualify consumer recipes through their owners on current main, using the
+   [client build workflow](../build-examples.md#building-a-package) below the
+   existing index; repair or remove obsolete inputs.
+2. Use the [performance workflow](BENCHMARKING.md#measurement-workflow) for
+   comparable client measurements and exact-artifact attribution.
+3. Factor a repeated preparation or timing implementation only after locating
+   it in two maintained recipes and specifying the inputs, invalidation and
+   semantic endpoint that a shared helper must preserve. Refresh throughput
+   timing when it answers a concrete build priority.
 
 Keep current source recipes in Git, generated results under ignored build
 directories, and checksums/provenance in each package. Git history supplies

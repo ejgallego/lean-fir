@@ -75,28 +75,87 @@ complete pinned-Binaryen and compiled-probe gate with `make tooling-check`.
 The [external tooling CI contract](CI.md) fixes the supported Node LTS matrix,
 dependency boundary, and fail-closed provider-neutral job behavior.
 
-## Thin roadmap
+## Measurement workflow
 
-The checked steady Node collector, exact final-function sidecar, bounded
-function view, real `d8` instruction consumer, compiled Array probe,
-exact-release caller aggregation, and ordered one-pass
-[instruction-origin generation](WASM_PROVENANCE_COST.md) are established
-surfaces rather than open roadmap items.
+Start with a current accepted recipe from [build-examples.md](../build-examples.md)
+and its real client workload. The client supplies inputs and the checked
+semantic endpoint. A package producer supplies the executable, adapter and
+verified function sidecar. Use the same inputs, output/styling normalization,
+instance lifetime and measured interval for each compared backend.
 
-1. The trusted closed-ByteArray and prettyM constructor candidates are
-   evaluated. Fresh lean-zip evidence confirms that
-   `fir_byte_array_validate` is absent from both the final module and sampled
-   execution. The clean prettyM package is 4.02% smaller than its exact
-   experimental baseline and its constructor-helper bodies are 41.3% smaller,
-   while allocation remains the leading sampled family; this is a code-size win
-   without a runtime-speed claim. Route the next client-selected runtime
-   candidate, and any changed runtime contract, through W7 and W6 respectively.
-2. Let each client register its representative workload and report consumer in
-   the VIR catalog; FIR supplies artifact identities and profile/probe outputs.
-3. Replace retained legacy raw profiles with collector-produced bound evidence
-   when a client next refreshes that workload; raw profiles remain explicitly
-   unbound meanwhile.
+Keep these four boundaries explicit:
 
-FIR should not add a dashboard, duplicate client corpora, fixed millisecond
-gates, profiler-enabled release packages, or a general benchmark framework to
-complete this roadmap.
+| Question | Measure | Evidence |
+| --- | --- | --- |
+| How long does building the package take? | The public recipe command; distinguish provisioning, a no-change build and a source-invalidated build | Source/compiler identities, cache policy, affected Lake jobs, wall/user/system time and RSS |
+| How long does loading take? | Acquire bytes, WebAssembly compilation, instantiation and initialization | Package hash, engine/version, cache and module-sharing policy |
+| How long does an operation take? | Projection, encoding, raw execution, copied decoding and any rewind; independently time the complete call | Raw unprofiled samples, checked output, warmups/order and memory frontiers |
+| Why is execution expensive? | A separately captured checked steady profile | Exact executable/workload binding, raw CPU profile, sampled self/caller attribution and explicit unknowns |
+
+A timing field called `compile` needs its context: compiling Lean source and
+`WebAssembly.compile` are different operations. A recipe acceptance command
+may include native-oracle tests; its total is not pure compiler time. A direct
+binary invocation excludes Lake planning/build work. Likewise, a raw FIR export
+call is narrower than an adapter or VIR `runtime.call` interval.
+
+For build/check latency, use the existing
+[throughput procedure](CHECK_THROUGHPUT.md). Provision first for warm samples,
+record exactly what a source edit invalidates, and collect frontend/Lake evidence
+before choosing native runtime profiling. Do not optimize a fixture based only
+on another project's profile.
+
+For an operation comparison, run the client's existing timing harness with
+diagnostics off, matched endpoints, excluded warmups and balanced backend order.
+Keep each measured row, including phase values, complete-call wall time and
+frontier growth. Report median and dispersion; phase medians need not sum to
+the total median. Instance reuse and linear-memory reclamation belong in the
+comparison contract. A monotonic arena requires bounded fresh-instance batches
+or explicitly reported accumulated growth.
+
+For attribution, provide a driver and workload receipt using the existing
+[collector contract](../../tooling/profile/README.md). With caller-supplied
+release/sidecar and client files, the commands are:
+
+```sh
+node tooling/wasm/function-index.mjs verify \
+  --wasm package/app.wasm --sidecar package/app.wasm.functions.json
+node tooling/profile/node-profile.mjs \
+  --wasm package/app.wasm --sidecar package/app.wasm.functions.json \
+  --workload client/profile-workload.mjs \
+  --workload-receipt client/profile-workload-receipt.json \
+  --out-dir .deps/profiles/run-1
+```
+
+Collect a second capture to a fresh directory with the same semantic/runtime
+identity, then aggregate the bound evidence:
+
+```sh
+node tooling/profile/profile-aggregate.mjs \
+  --wasm package/app.wasm --sidecar package/app.wasm.functions.json \
+  --evidence .deps/profiles/run-1/evidence.json \
+  --evidence .deps/profiles/run-2/evidence.json \
+  --out .deps/profiles/aggregate.json
+```
+
+Resolve a hot function with `function-index.mjs inspect` or `view`; route
+runtime/lowering changes to W7 and changed proof contracts to W6. Source-level
+ownership conclusions need the real generated LCNF/C and caller path.
+Use instruction-origin/`d8` diagnostics only when function/caller attribution
+does not answer the question. Profiler shares remain attribution, not elapsed
+time or an application speedup.
+
+## Consolidation priorities
+
+Use one client-owned representative harness per workload. Keep preparation,
+timing and result normalization beside its recipe/adapter; share a helper
+only after two maintained callers demonstrate the same contract. FIR's
+existing profile receipt and package metadata already bind the necessary
+inputs and outputs, so they should supply discovery and report identities
+rather than another catalog.
+
+Generated packages, samples and profiles live in ignored output directories.
+Commit current recipes, source contracts and tests, and useful implementation
+findings. Older artifacts and experiments can be reconstructed from Git.
+Do not commit a new acceptance ledger, duplicate client corpus or fixed
+millisecond gate. The external tooling CI proves that the evidence machinery
+works; performance claims still require controlled representative runs.

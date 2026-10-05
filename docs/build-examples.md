@@ -47,6 +47,40 @@ permanent historical or provisional category. Remove only inputs confirmed to
 have no current owner-supported replacement, after checking consumers and
 reviewing the exact removal with root. Git history retains prior versions.
 
+## Building a package
+
+Start from the current recipe table and run its acceptance command from the
+FIR root. `make build` compiles the FIR library; it does not select a source
+entry, assemble a consumer adapter or publish a package. The recipe gate owns
+those operations and checks the resulting interface and semantic endpoint.
+
+For either current prettyM recipe:
+
+```sh
+bash integration/talos/artifact/check.sh
+# Or the independent C/Emscripten package and differential gate:
+bash integration/lcnf-c-wasm/package-prettyM-emscripten.sh
+```
+
+Use the package-local BUILD.json, policy and complete SHA256SUMS inventory
+to identify the immutable result. A `*-current` pointer is a convenient way
+to find it; pass the resolved package to a consumer's verifier/staging command.
+Record the source/adapter/ownership identities when comparing results. Do not
+substitute a different ABI simply because both files end in `.wasm`.
+
+An external-source recipe must state its source revision/hashes, module and
+entry names, original Lake setup and supplied dependencies. The existing
+`scripts/fir-source-prepare` command prepares private module setups; its
+[input contract](package-build-client-map.md#supported-private-source-preparation)
+explains exact compiler/dependency inputs. This preparation does not validate
+the selected declaration or emit/link a package: the recipe's compiler and
+acceptance gate must do that. Use the source project's real definitions.
+
+Compilation, source preparation, linking, publication and application calls
+have different timing boundaries. Use the [performance workflow](tooling/BENCHMARKING.md#measurement-workflow)
+when evaluating them. Keep precise gates in the recipe and package metadata;
+this index only provides navigation.
+
 ## Compiler and runtime fixture catalogs
 
 | Purpose | Registry | Gate |
