@@ -73,6 +73,10 @@ jobs:
           lake -d .deps/talos-434/project exe cache get
       - name: Check proofs and exact trust inventory
         run: make talos-check
+      - name: Check Blueprint source links and build documentation
+        run: |
+          python3 blueprint/test-source-links.py
+          make blueprint
       - name: Fetch immutable lean-zip proof input
         uses: actions/checkout@v6
         with:

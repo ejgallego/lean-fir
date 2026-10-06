@@ -6,7 +6,10 @@ require FirTalos from "../.deps/talos-434/project"
 
 package FirBlueprint where
   precompileModules := false
-  leanOptions := #[⟨`experimental.module, true⟩]
+  leanOptions := #[
+    ⟨`experimental.module, true⟩,
+    ⟨`weak.verso.blueprint.externalCode.sourceLinkTemplate,
+      "source/{module}.html#L{line}-L{endLine}"⟩]
 
 @[default_target]
 lean_lib FirBlueprint

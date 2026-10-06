@@ -15,7 +15,7 @@ Tracked lane files are milestone handoffs, not independent backlogs.
 The [W6 Blueprint pilot](../blueprint/README.md) gives a declaration-linked
 view of the argument and selected open obligations. It also evaluates how
 Blueprint distinguishes conditional proofs, premise elimination, and
-contributor readiness; see its [findings](../blueprint/EVALUATION.md). The
+contributor readiness; see its [findings](../blueprint/FirBlueprint/Chapters/Experiment.lean). The
 pilot is a selected overview, not an exhaustive replacement for the admission
 audit or W6 owner plan.
 
