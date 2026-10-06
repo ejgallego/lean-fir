@@ -28,7 +28,7 @@ impure LCNF pipeline. Private matcher specializations therefore remain source
 functions; no Illuminate transition is replaced by a handwritten resident
 implementation.
 
-## Build and verify
+## Build and test
 
 The required Illuminate source is pinned to repository
 `https://github.com/ejgallego/illuminate.git` at revision
@@ -39,20 +39,23 @@ checkout:
 cd integration/illuminate-player
 git clone https://github.com/ejgallego/illuminate.git .illuminate
 git -C .illuminate checkout --detach 6f16cdc3d4320c093b53a9d381b92bfbb689b2ce
+./build.sh
+# Run the complete test suite separately:
 ./check.sh
 ```
 
-Alternatively, point the gate at an existing clean checkout of that exact
+Alternatively, point either command at an existing clean checkout of that exact
 revision:
 
 ```sh
 cd integration/illuminate-player
+ILLUMINATE_ROOT=/path/to/illuminate ./build.sh
 ILLUMINATE_ROOT=/path/to/illuminate ./check.sh
 ```
 
-`check.sh`, `package.mjs`, and `selection-package.mjs` reject a dirty source
+`build.sh`, `package.mjs`, and `selection-package.mjs` reject a dirty source
 checkout or any revision other than the pinned contract. The publishers also
-require a clean FIR tree. The gate rejects a nested toolchain that differs
+require a clean FIR tree. The build rejects a nested toolchain that differs
 from FIR's root pin and any conflicting `LEAN_TOOLCHAIN` override, and sets
 worktree-local scratch and the toolchain-scoped Lake cache automatically.
 It needs the repository-pinned Binaryen `wasm-opt` at
@@ -68,10 +71,21 @@ Illuminate's `.lake` are not compilation inputs. Both publishers reconfigure
 Lake with the exact source path before compilation/capture, so a cached path
 from another checkout cannot select the input.
 
-The gate builds both focused Lean dependency cones, generates both packages
-twice, checks deterministic bytes and checksums, runs the source-tree and
-packaged smokes, and compares 107 legacy-JavaScript/FIR-v3/FIR-v4 traces event
-by event. The
+`build.sh` constructs both packages once. Each publisher builds its focused
+Lean dependency cone, reruns emission and optimization, and assembles the
+package from those outputs and the current adapter/metadata. An existing
+`*-current` pointer never skips construction. Integrity/capability assertions
+and the full-action publisher's existing package-local smoke remain part of
+packaging; the build does not run the trace campaign or native-oracle examples.
+This is not yet an incremental package-output target: Lean dependencies are
+handled by Lake, while emission and optimization run on every invocation.
+
+`check.sh` calls the build, runs the script regressions and native-oracle Lean
+examples, checks source-tree smokes, and compares 107
+legacy-JavaScript/FIR-v3/FIR-v4 traces event by event. It then builds again,
+requires the same immutable package identities, verifies complete checksums,
+and runs both packaged smokes. Repeat-build comparison is a reproducibility
+test, not a prerequisite for every build or export. The
 smoke includes every event and patch target, non-integral timestamps, two
 independent players, failure poisoning, repeated disposal, repeated
 create/dispose cycles, and 10,000 ticks at a flat post-dispatch frontier.
@@ -99,14 +113,16 @@ these adapters and are rejected by the capability checks. The exporter tests
 include correctly checksummed packages with obsolete layouts as negative
 controls.
 
-These commands qualify the producer recipe. Client staging/browser scripts
-must separately accept the new package's recorded identities and layouts;
-older consumer pins or successful historical campaigns do not establish
-current consumer acceptance. No shared client staging is changed by this recipe.
+These are ordinary build and test commands, not a separate approval lifecycle.
+Illuminate owns its additional application/browser and JS/VIR/FIR tests; those
+are useful cross-project coverage, not a client approval prerequisite for
+maintaining this FIR example. Client staging must still enforce the actual
+package interface/layout it consumes. No shared client staging is changed by
+this recipe.
 
 ### External artifact producer
 
-`export-v3-package.sh` exposes the accepted v3 package through the common
+`export-v3-package.sh` exposes the built v3 package through the common
 caller-owned output-directory contract. The caller must supply a fresh output
 path and the exact clean Illuminate checkout explicitly:
 
@@ -115,9 +131,8 @@ ILLUMINATE_ROOT=/path/to/illuminate \
   ./export-v3-package.sh /path/to/fresh-output
 ```
 
-The FIR checkout must also be clean. The producer runs the complete existing
-gate, including deterministic double publication, checksums, packaged smokes,
-and the 107-trace v3/v4 comparison. It then installs regular copies of the six
+The FIR checkout must also be clean. The exporter runs `build.sh` rather than
+the full `check.sh` test campaign. It then installs regular copies of the six
 v3 package files into the requested directory and independently checks that
 directory's `SHA256SUMS` and package-local smoke before returning success. It
 does not copy the `_build/illuminate-player-current` symlink, publish the
@@ -242,7 +257,7 @@ integration/illuminate-player/export-selection-package.mjs \
 
 The command accepts no dependency packages and rejects unknown checkout roles,
 dirty or mismatched checkouts, and existing or symbolic output paths. It runs
-the existing selection integration gate, then verifies and smokes the accepted
+`build.sh`, then verifies and smokes the built
 immutable package before and after atomically moving its six regular files into
 the fresh caller-owned output. For direct local use, the compatibility form
 `ILLUMINATE_ROOT=... export-selection-package.mjs OUTPUT` remains available.

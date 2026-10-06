@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 usage: export-v3-package.sh output-directory
 
-Build and validate the pinned Illuminate v3 player package, then copy its six
+Build the pinned Illuminate v3 player package, then copy and smoke its six
 regular package files into a fresh caller-owned output directory.
 
 ILLUMINATE_ROOT must name a clean checkout at the revision pinned by
@@ -54,7 +54,7 @@ if [[ -e "$output" || -L "$output" ]]; then
   exit 1
 fi
 
-ILLUMINATE_ROOT="$illuminate_root" "$here/check.sh"
+ILLUMINATE_ROOT="$illuminate_root" bash "$here/build.sh"
 
 package="$(realpath "$here/_build/illuminate-player-current")"
 files=(

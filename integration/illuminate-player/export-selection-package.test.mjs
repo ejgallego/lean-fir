@@ -57,7 +57,7 @@ function repository(path, label) {
   writeFileSync(join(path, `${label}.txt`), `${label}\n`);
   git(path, ["add", "."]);
   git(path, ["-c", "user.name=FIR Test", "-c",
-    "user.email=fir-test@example.invalid", "commit", "-q", "-m", label]);
+    "user.email=fir-test@example.invalid", "commit", "--no-gpg-sign", "-q", "-m", label]);
   return git(path, ["rev-parse", "HEAD"]);
 }
 
@@ -185,11 +185,13 @@ test("recipe pin matches the current FIR toolchain", () => {
 });
 
 test("rejects an overriding toolchain before source lookup or compilation", () => {
-  assert.throws(() => execFileSync(join(directory, "check.sh"), [], {
-    env: { ...process.env, LEAN_TOOLCHAIN: "leanprover/lean4:v0.0.0" },
-    stdio: ["ignore", "pipe", "pipe"],
-  }), (error) => error.status === 1 && error.stderr.includes(
-    "LEAN_TOOLCHAIN must not override the current FIR pin"));
+  for (const command of ["build.sh", "check.sh"]) {
+    assert.throws(() => execFileSync("bash", [join(directory, command)], {
+      env: { ...process.env, LEAN_TOOLCHAIN: "leanprover/lean4:v0.0.0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    }), (error) => error.status === 1 && error.stderr.includes(
+      "LEAN_TOOLCHAIN must not override the current FIR pin"));
+  }
 });
 
 test("gate rejects build directories and current links outside its local build", () =>
@@ -208,6 +210,8 @@ test("gate rejects build directories and current links outside its local build",
       symlinkSync(outside, path);
       const script = join(recipe, "check.sh");
       writeFileSync(script, readFileSync(join(directory, "check.sh")));
+      writeFileSync(join(recipe, "build.sh"),
+        readFileSync(join(directory, "build.sh")));
       assert.throws(() => execFileSync("bash", [script], {
         env: { ...process.env, LEAN_TOOLCHAIN: currentToolchain },
         stdio: ["ignore", "pipe", "pipe"],
