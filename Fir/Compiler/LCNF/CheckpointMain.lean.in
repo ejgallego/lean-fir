@@ -1,0 +1,4 @@
+import Fir.Compiler.LCNF.CheckpointReadback
+
+unsafe def main : IO UInt32 :=
+  Fir.Compiler.Lcnf.CheckpointReadback.run
