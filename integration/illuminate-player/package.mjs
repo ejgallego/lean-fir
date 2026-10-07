@@ -121,15 +121,11 @@ run("lake", [
   "--reconfigure",
   `-KilluminateRoot=${illuminateRoot}`,
   "build",
-  "IlluminateFirNative.Compile",
+  "illuminatePlayerArtifact",
+  "+IlluminateFirNative.CapturedFull:olean",
 ]);
-run("lake", [
-  "--keep-toolchain",
-  "--reconfigure",
-  `-KilluminateRoot=${illuminateRoot}`,
-  "env",
-  "lean",
-  "Emit.lean",
+run(join(directory, ".lake/build/bin/illuminatePlayerArtifact"), [
+  "full", "IlluminateFirNative.CapturedFull", "full",
 ]);
 run(process.execPath, [closedModuleOptimizer, generatedStem, completeStem]);
 

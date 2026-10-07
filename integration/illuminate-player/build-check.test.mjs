@@ -218,15 +218,16 @@ test("check retains native, semantic, repeat-build and packaged tests in order",
     const steps = commands().map(({ step }) => step);
     assert.deepEqual(steps.slice(0, 3), ["node package.mjs", "node selection-package.mjs",
       "node --test export-selection-package.test.mjs build-check.test.mjs"]);
-    assert.match(steps[3], /lake .* build IlluminateFirNative.Examples IlluminateFirNative.SelectionExamples$/);
-    assert.deepEqual(steps.slice(4), ["node smoke.mjs", "node selection-smoke.mjs",
+    assert.equal(steps[3], "node check-native-capture.mjs");
+    assert.match(steps[4], /lake .* build IlluminateFirNative.Examples IlluminateFirNative.SelectionExamples$/);
+    assert.deepEqual(steps.slice(5), ["node smoke.mjs", "node selection-smoke.mjs",
       "node check-player-traces.mjs", "node package.mjs", "node selection-package.mjs",
       "node smoke.mjs", "node smoke.mjs"]);
-    assert.notEqual(commands().at(-1).cwd, commands()[4].cwd);
+    assert.notEqual(commands().at(-1).cwd, commands()[5].cwd);
   }));
 
 test("check stops on unit, native-oracle, trace and repeat-build failures", () => {
-  for (const failure of ["--test", "--keep-toolchain", "check-player-traces.mjs",
+  for (const failure of ["--test", "check-native-capture.mjs", "--keep-toolchain", "check-player-traces.mjs",
     "package.mjs#2"]) {
     withFixture(({ commands, execute }) => {
       assert.throws(() => execute("check.sh", { FAIL_STEP: failure }),

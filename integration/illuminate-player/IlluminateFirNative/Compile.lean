@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentLinker
+import IlluminateFirNative.Entries
 import Illuminate.Animation.FirLive
 
 namespace IlluminateFirNative.Compile
@@ -6,9 +7,7 @@ namespace IlluminateFirNative.Compile
 open Lean
 open Lean.Compiler
 
-private def liveEntries : Array Name := #[
-  ``Illuminate.AnimationPlayer.initialLive,
-  ``Illuminate.AnimationPlayer.transitionLive]
+private def liveEntries : Array Name := Entries.full
 
 /--
 Capture both persistent-player entries through Lean's ordinary final-LCNF

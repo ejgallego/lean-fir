@@ -21,21 +21,14 @@ namespace IlluminateFirNative.SelectionCompile
 open Lean
 open Lean.Compiler
 
-def selectionEntries : Array Name := #[
-  ``Illuminate.AnimationPlayer.initialSelectionLive,
-  ``Illuminate.AnimationPlayer.transitionSelectionLive,
-  ``IlluminateFirNative.transitionSelectionTickLive]
+def selectionEntries : Array Name := Entries.selection
 
 /--
 The raw `Float` entry stays internal. JavaScript calls its automatically
 generated integer-lane facade so all binary64 payload bits cross the boundary
 without a host floating-point coercion.
 -/
-def selectionPublicExports : Array Name := #[
-  ``Illuminate.AnimationPlayer.initialSelectionLive,
-  ``Illuminate.AnimationPlayer.transitionSelectionLive,
-  Fir.Wasm.Emit.BitExactFloat.facadeName
-    ``IlluminateFirNative.transitionSelectionTickLive]
+def selectionPublicExports : Array Name := Entries.selectionPublic
 
 /-- Capture the real selection-only entries without application-specific ABI repair. -/
 def captureSource : CoreM (Except Fir.Wasm.Emit.Source.CompileError

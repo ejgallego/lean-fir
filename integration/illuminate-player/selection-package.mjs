@@ -125,15 +125,11 @@ run("lake", [
   "--reconfigure",
   `-KilluminateRoot=${illuminateRoot}`,
   "build",
-  "IlluminateFirNative.SelectionCompile",
+  "illuminatePlayerArtifact",
+  "+IlluminateFirNative.CapturedSelection:olean",
 ]);
-run("lake", [
-  "--keep-toolchain",
-  "--reconfigure",
-  `-KilluminateRoot=${illuminateRoot}`,
-  "env",
-  "lean",
-  "SelectionEmit.lean",
+run(join(directory, ".lake/build/bin/illuminatePlayerArtifact"), [
+  "selection", "IlluminateFirNative.CapturedSelection", "selection",
 ]);
 run(process.execPath, [closedModuleOptimizer, generatedStem, completeStem]);
 

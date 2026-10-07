@@ -31,3 +31,8 @@ lean_lib «IlluminatePlayerSource» where
 
 @[default_target]
 lean_lib «IlluminateFirNative»
+
+/-- No application/capture import or both-captures `needs`: build the selected
+checkpoint explicitly alongside this reusable native consumer. -/
+lean_exe «illuminatePlayerArtifact» where
+  root := `NativeArtifactMain

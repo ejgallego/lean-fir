@@ -17,6 +17,7 @@ export LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true
 illuminate_root=${ILLUMINATE_ROOT:-$(realpath .illuminate)}
 
 node --test export-selection-package.test.mjs build-check.test.mjs
+node check-native-capture.mjs
 lake --keep-toolchain --reconfigure -KilluminateRoot="$illuminate_root" \
   build IlluminateFirNative.Examples IlluminateFirNative.SelectionExamples
 node smoke.mjs

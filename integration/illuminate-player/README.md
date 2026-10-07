@@ -77,15 +77,47 @@ Lake with the exact source path before compilation/capture, so a cached path
 from another checkout cannot select the input.
 
 `build.sh` constructs the selected package(s) once. Each publisher builds its
-focused Lean dependency cone, reruns emission and optimization, and assembles the
+selected Lake-owned final-LCNF checkpoint and the reusable native consumer,
+reruns lowering, resident linking and optimization, and assembles the
 package from those outputs and the current adapter/metadata. An existing
 `*-current` pointer never skips construction. Integrity/capability assertions
 and the full-action publisher's existing package-local smoke remain part of
 packaging; the build does not run the trace campaign or native-oracle examples.
-This is not yet an incremental package-output target: Lean dependencies are
-handled by Lake, while emission and optimization run on every invocation.
+This caches capture only, not generated sidecars or package outputs. Lake
+handles source/toolchain/dependency invalidation; lowering, emission and
+optimization run on every invocation.
 
-`check.sh` calls the build, runs the script regressions and native-oracle Lean
+The call path is:
+
+```text
+build.sh full | selection
+  package.mjs | selection-package.mjs
+    lake build illuminatePlayerArtifact +IlluminateFirNative.Captured{Full,Selection}:olean
+      Compile/SelectionCompile -> real Illuminate source -> final LCNF -> Checkpoint.add
+    illuminatePlayerArtifact MODE CAPTURE_MODULE KEY
+      importModules(loadExts=false) -> Checkpoint.getModule?(exact module/key)
+      -> compileModuleArtifactWithExports -> prepareArenaArtifact -> resident linking
+      -> ArtifactIO.write (raw Wasm, descriptors, LCNF, inventory)
+    closed-module optimizer -> package assertions -> immutable local package
+```
+
+`NativeArtifactMain.lean` imports compiler/emitter support and entry names as
+data, not the application capture modules or a proof umbrella. The selected
+capture is an explicit build target, not a dependency that forces both packages
+into the executable. Missing oleans, checkpoint keys and mismatched entry sets
+fail before output writing; the consumer never runs Lake or recaptures source.
+
+`Emit.lean` and `SelectionEmit.lean` remain current-tree frontend comparison
+paths, sharing the same output writer. Moving capture to its own module changes
+ambient compiler free-variable names and can reorder join-point parameters,
+goto arguments and associated refcount operations. The audited differences
+are confined to the private `tickTowardTarget`, `tick` and `advance` definitions;
+descriptors and source/helper/export inventories must remain identical. This
+is not a theorem of semantic equivalence: the existing differential and
+lifetime tests remain required. No compiler name-generator counters are pinned
+to imitate a particular frontend context, and no old binary is committed.
+
+`check.sh` calls the build, runs the script regressions, capture controls and native-oracle Lean
 examples, checks source-tree smokes, and compares 107
 legacy-JavaScript/FIR-v3/FIR-v4 traces event by event. It then builds again,
 requires the same immutable package identities, verifies complete checksums,
@@ -94,6 +126,17 @@ test, not a prerequisite for every build or export. The
 smoke includes every event and patch target, non-integral timestamps, two
 independent players, failure poisoning, repeated disposal, repeated
 create/dispose cycles, and 10,000 ticks at a flat post-dispatch frontier.
+
+`check-native-capture.mjs` checks two independent cold captures, an unchanged
+warm capture, reversible capture-source invalidation, missing module/key/olean
+and wrong-entry-set rejection. Each cold/warm/restored replay and the
+interpreted/native consumers of the same checkpoint must agree byte-for-byte
+on base/resident/optimized Wasm, descriptors, LCNF and inventory. It also
+checks the bounded current-frontend delta and writes disposable comparison
+files under `_build/native-comparison/`. Run it serially, without Beam or other
+builds in this recipe: its invalidation test temporarily appends a comment to
+the owned capture module, restores its exact original bytes in `finally`, and
+rebuilds it. It never changes Illuminate source, package pointers or pins.
 
 `package.mjs` uses the existing shared immutable-package utility and checks its
 packaged smoke before installing an immutable directory under
@@ -197,7 +240,7 @@ decoding, or rewind failure poisons and drops the instance.
 The live lowering replaces private lazy-cache-global sequences with direct
 zero-argument calls. Those declarations are pure; this keeps their values in
 scratch and makes the allocator frontier the module's sole mutable heap root.
-`Emit.lean` fails unless the resident frontier has zero cache initializers,
+The shared `ArtifactIO.write` fails unless the resident frontier has zero cache initializers,
 exactly one resident global, zero unresolved operations, and only declarations
 covered by the shared runtime policy. The generic closed-module optimizer then
 removes unreachable internal code without adding a provider and requires zero
