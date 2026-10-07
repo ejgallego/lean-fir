@@ -61,9 +61,9 @@ const expectedClosure = Object.freeze({
   residentHelperSha256:
     "52328c4c7d0a8e95a8c00dbf96c012fae5c241c9b5eecd0779e52ccb97c5378a",
   baseWasmBytes: 36035,
-  completeWasmBytes: 44963,
+  completeWasmBytes: 44974,
   completeWasmSha256:
-    "3225f9bdb718a5df49d8145b8a900a4827808811bd6c9e4369fe4f001f715b55",
+    "d16c3f3ef48e26a21d72494848a0a778983e387259d6b0b83cdb762e9ecbfa30",
 });
 const outputNames = selectionPayloadFiles;
 
