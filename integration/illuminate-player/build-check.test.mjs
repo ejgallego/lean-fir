@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+  copyFileSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync,
+  symlinkSync, writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -112,9 +113,10 @@ if (tool === "node" && ["package.mjs", "selection-package.mjs"].includes(args[0]
         throw error;
       }
     };
-    const execute = (name, overrides = {}) => execFileSync("bash", [join(recipe, name)], {
-      env: { ...environment, ...overrides }, stdio: ["ignore", "pipe", "pipe"],
-    });
+    const execute = (name, overrides = {}, args = []) => execFileSync("bash",
+      [join(recipe, name), ...args], {
+        env: { ...environment, ...overrides }, stdio: ["ignore", "pipe", "pipe"],
+      });
     const stale = () => {
       for (const name of ["illuminate-player", "illuminate-selection-player"]) {
         const previous = join(recipe, "_build", name + "-packages", "stale");
@@ -139,6 +141,62 @@ test("build constructs both packages even when current pointers already exist", 
       assert.equal(command.source, environment.ILLUMINATE_ROOT);
     }
   }));
+
+test("explicit targets construct only their selected packages", () => {
+  for (const [target, expected, unrelatedFailure] of [
+    ["all", ["node package.mjs", "node selection-package.mjs"], ""],
+    ["full", ["node package.mjs"], "selection-package.mjs"],
+    ["selection", ["node selection-package.mjs"], "package.mjs"],
+  ]) {
+    withFixture(({ recipe, commands, execute, stale }) => {
+      stale();
+      execute("build.sh", { FAIL_STEP: unrelatedFailure }, [target]);
+      assert.deepEqual(commands().map(({ step }) => step), expected);
+      if (target !== "all") {
+        const unchanged = target === "full" ? "illuminate-selection-player" :
+          "illuminate-player";
+        assert.equal(readlinkSync(join(recipe, "_build", unchanged + "-current")),
+          join(recipe, "_build", unchanged + "-packages", "stale"));
+      }
+    });
+  }
+});
+
+test("invalid or extra build arguments fail before source or tool lookup", () => {
+  for (const args of [["unknown"], [""], ["--full"], ["full", "selection"],
+    ["--help", "extra"]]) {
+    withFixture(({ root, commands, execute }) => {
+      assert.throws(() => execute("build.sh", {
+        ILLUMINATE_ROOT: join(root, "missing-source"),
+        LEAN_TOOLCHAIN: "leanprover/lean4:v0.0.0",
+      }, args), (error) => error.status === 2 &&
+        error.stderr.includes("usage: build.sh [all|full|selection]"));
+      assert.deepEqual(commands(), []);
+    });
+  }
+});
+
+test("build help requires neither source nor toolchain setup", () =>
+  withFixture(({ root, commands, execute }) => {
+    const output = execute("build.sh", {
+      ILLUMINATE_ROOT: join(root, "missing-source"),
+      LEAN_TOOLCHAIN: "leanprover/lean4:v0.0.0",
+    }, ["--help"]);
+    assert.match(output.toString(), /usage: build.sh \[all\|full\|selection\]/);
+    assert.deepEqual(commands(), []);
+  }));
+
+test("selected builds propagate failures without consuming stale packages", () => {
+  for (const [target, failure] of [["full", "package.mjs"],
+    ["selection", "selection-package.mjs"]]) {
+    withFixture(({ commands, execute, stale }) => {
+      stale();
+      assert.throws(() => execute("build.sh", { FAIL_STEP: failure }, [target]),
+        (error) => error.status === 23);
+      assert.deepEqual(commands().map(({ step }) => step), [`node ${failure}`]);
+    });
+  }
+});
 
 test("build propagates publisher failures instead of using stale pointers", () => {
   for (const [failure, expected] of [
@@ -191,7 +249,7 @@ test("full exporter builds once, copies and smokes without running the test camp
       env: environment, stdio: ["ignore", "pipe", "pipe"],
     });
     assert.deepEqual(commands().map(({ step }) => step),
-      ["node package.mjs", "node selection-package.mjs", "node smoke.mjs"]);
+      ["node package.mjs", "node smoke.mjs"]);
     assert.equal(commands().at(-1).cwd, output);
     assert.equal(readFileSync(join(output, "illuminate-player.wasm"), "utf8"),
       "fresh illuminate-player.wasm\n");
@@ -207,11 +265,12 @@ test("both exporters refuse stale packages when the build fails", () => {
         : [process.execPath, [join(recipe, "export-selection-package.mjs"),
           "--output", output, "--checkout", `producer=${root}`,
           "--checkout", `illuminate=${environment.ILLUMINATE_ROOT}`]];
+      const failure = kind === "full" ? "package.mjs" : "selection-package.mjs";
       assert.throws(() => execFileSync(...invocation, {
-        env: { ...environment, FAIL_STEP: "package.mjs" },
+        env: { ...environment, FAIL_STEP: failure },
         stdio: ["ignore", "pipe", "pipe"],
       }), (error) => error.status === (kind === "full" ? 23 : 1));
-      assert.deepEqual(commands().map(({ step }) => step), ["node package.mjs"]);
+      assert.deepEqual(commands().map(({ step }) => step), [`node ${failure}`]);
       assert.throws(() => readFileSync(join(output, "BUILD.json")),
         { code: "ENOENT" });
     });

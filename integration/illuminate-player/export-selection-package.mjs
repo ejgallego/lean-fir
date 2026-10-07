@@ -204,7 +204,7 @@ function runMain() {
   });
   const output = resolveFreshOutputPath(options.output);
 
-  execFileSync("bash", [join(directory, "build.sh")], {
+  execFileSync("bash", [join(directory, "build.sh"), "selection"], {
     cwd: directory,
     env: { ...process.env, ILLUMINATE_ROOT: sources.illuminate.root },
     stdio: "inherit",

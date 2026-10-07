@@ -54,7 +54,7 @@ if [[ -e "$output" || -L "$output" ]]; then
   exit 1
 fi
 
-ILLUMINATE_ROOT="$illuminate_root" bash "$here/build.sh"
+ILLUMINATE_ROOT="$illuminate_root" bash "$here/build.sh" full
 
 package="$(realpath "$here/_build/illuminate-player-current")"
 files=(

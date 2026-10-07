@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  printf '%s\n' 'usage: build.sh [all|full|selection]' \
+    'With no argument, build both packages. Use check.sh for the complete test suite.'
+}
+if (($# > 1)); then
+  usage >&2
+  exit 2
+fi
+target=${1-all}
+case "$target" in
+  all|full|selection) ;;
+  --help) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
+esac
+
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here"
 fir_root=$(cd "$here/../.." && pwd)
@@ -51,5 +66,9 @@ fi
 # Each publisher builds its Lake dependency cone, emits and optimizes anew,
 # then installs a complete immutable package. Never reuse a current pointer
 # as a substitute for construction.
-ILLUMINATE_ROOT="$illuminate_root" node package.mjs
-ILLUMINATE_ROOT="$illuminate_root" node selection-package.mjs
+if [[ "$target" == all || "$target" == full ]]; then
+  ILLUMINATE_ROOT="$illuminate_root" node package.mjs
+fi
+if [[ "$target" == all || "$target" == selection ]]; then
+  ILLUMINATE_ROOT="$illuminate_root" node selection-package.mjs
+fi

@@ -53,6 +53,11 @@ ILLUMINATE_ROOT=/path/to/illuminate ./build.sh
 ILLUMINATE_ROOT=/path/to/illuminate ./check.sh
 ```
 
+Build just one package with `./build.sh full` or `./build.sh selection`.
+`./build.sh all` is equivalent to the no-argument default; `./check.sh`
+continues to build and test both packages. Unknown targets and extra arguments
+fail before source/tool lookup; `./build.sh --help` needs no source checkout.
+
 `build.sh`, `package.mjs`, and `selection-package.mjs` reject a dirty source
 checkout or any revision other than the pinned contract. The publishers also
 require a clean FIR tree. The build rejects a nested toolchain that differs
@@ -71,8 +76,8 @@ Illuminate's `.lake` are not compilation inputs. Both publishers reconfigure
 Lake with the exact source path before compilation/capture, so a cached path
 from another checkout cannot select the input.
 
-`build.sh` constructs both packages once. Each publisher builds its focused
-Lean dependency cone, reruns emission and optimization, and assembles the
+`build.sh` constructs the selected package(s) once. Each publisher builds its
+focused Lean dependency cone, reruns emission and optimization, and assembles the
 package from those outputs and the current adapter/metadata. An existing
 `*-current` pointer never skips construction. Integrity/capability assertions
 and the full-action publisher's existing package-local smoke remain part of
@@ -131,8 +136,8 @@ ILLUMINATE_ROOT=/path/to/illuminate \
   ./export-v3-package.sh /path/to/fresh-output
 ```
 
-The FIR checkout must also be clean. The exporter runs `build.sh` rather than
-the full `check.sh` test campaign. It then installs regular copies of the six
+The FIR checkout must also be clean. The exporter runs `build.sh full` rather
+than the full `check.sh` test campaign. It then installs regular copies of the six
 v3 package files into the requested directory and independently checks that
 directory's `SHA256SUMS` and package-local smoke before returning success. It
 does not copy the `_build/illuminate-player-current` symlink, publish the
@@ -257,7 +262,7 @@ integration/illuminate-player/export-selection-package.mjs \
 
 The command accepts no dependency packages and rejects unknown checkout roles,
 dirty or mismatched checkouts, and existing or symbolic output paths. It runs
-`build.sh`, then verifies and smokes the built
+`build.sh selection`, then verifies and smokes the built
 immutable package before and after atomically moving its six regular files into
 the fresh caller-owned output. For direct local use, the compatibility form
 `ILLUMINATE_ROOT=... export-selection-package.mjs OUTPUT` remains available.
