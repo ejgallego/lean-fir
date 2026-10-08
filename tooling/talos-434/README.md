@@ -1,6 +1,7 @@
-# Talos proof cone for Lean 4.34
+# Talos proof cone for Lean 4.34.1
 
-The standard proof targets on accepted main use this tracked Talos overlay:
+The standard proof targets use this tracked setup with a pinned upstream Talos
+revision that natively selects Lean and mathlib 4.34.1:
 
 ```sh
 make talos-setup
@@ -22,9 +23,10 @@ the trusted-assumption validator against the overlay project's explicit
 toolchain. It authenticates the exact compiler version and commit plus the
 W6-reviewed upstream and local checker source hashes. The ordinary no-argument
 validator uses the accepted Lean 4.34.1 profile. All mutable source and Lake state stays under
-`.deps/talos-434/` in this worktree. The historical `integration/talos` package
-manifest is historical; the standard Talos and proof-trust targets select the
-authenticated stable 4.34.1 overlay.
+`.deps/talos-434/` in this worktree. The former standalone
+`integration/talos` package metadata and Lean 4.33 wrapper are retired.
+Blueprint and retained-initializer consumers use the same prepared
+`.deps/talos-434/project` path.
 
 `setup.sh` mirrors the current complete `integration/talos/FirTalos` tree into
 the isolated project, deleting files removed upstream. It compares the source
@@ -36,16 +38,28 @@ file remains restricted to its exact reviewed original or normalized hash.
 source mutation during copying, and changed pinned identities.
 
 The immutable inputs are Talos
-`0e05edbcfbb105b33e90c60b4f50e2cf193d9254`, mathlib
+`80644390de3ad4db3055445259a034413ae41577`, mathlib
 `d13f23b723b8a846827a245b89c10fc7d3f11612`, and Lean
 `4.34.1` (`5045d0056413266e57c625dcd7c365b10e377c52`). The
-tracked manifests and patches have exact SHA-256 checks in `setup.sh`.
-`talos.patch` changes only the interpreter's toolchain and mathlib release;
-`setup.sh` applies it with `--unidiff-zero` only after authenticating the exact
-Talos commit and both source-file hashes, then checks both resulting hashes.
-The focused setup test applies the patch to a fixture pinned by the same
-before/after hashes. This is necessary because the revision hunk has no
-trailing context; the expected identity and output are still fail-closed.
+tracked manifests and remaining Float patch have exact SHA-256 checks in
+`setup.sh`. The upstream interpreter toolchain, lakefile and manifest are
+authenticated in place; no upstream source or dependency metadata is patched.
+Both staged and unstaged tracked upstream changes are rejected. The setup
+tests cover wrong revisions, changed sources and compiler pins as well as
+source mirroring. The obsolete `talos.patch` and its old-toolchain fixtures
+are removed. Upstream's native manifest exactly matches the former overlay's
+4.34.1 manifest, so downstream dependency revisions remain unchanged.
+
+An existing scratch checkout at the old Talos revision fails authentication.
+Preserve that whole worktree-local `.deps/talos-434` directory under an unused
+backup name before rerunning setup; do not reset a dirty checkout or reuse
+its mutable Lake state for the new revision. Setup clones the exact revision
+into fresh local state. It does not delete old checkouts or installed compilers.
+
+Talos has no published releases or tags at the migration date. This is an exact
+upstream commit pin, not an upstream stable-release designation. See
+[`docs/talos-4341-consolidation-evaluation.md`](../../docs/talos-4341-consolidation-evaluation.md)
+for the source/API changes and migration acceptance boundary.
 `float-normalization.patch` applies W6's independently reviewed one-line
 `dsimp only at h4 h5 h6 h7` when the source is still at the original reviewed
 hash. It accepts the exact normalized hash when that line has already landed.

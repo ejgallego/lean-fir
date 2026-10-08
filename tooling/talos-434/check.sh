@@ -16,7 +16,7 @@ lake -d "$root/.deps/talos-434/project" build FirTalos.ConcreteResidentFloat
 lake -d "$root/.deps/talos-434/project" build FirTalos
 python3 "$root/integration/talos/check-proof-trust.py"
 source "$root/tooling/talos-434/identity-checks.sh"
-check_revision 0e05edbcfbb105b33e90c60b4f50e2cf193d9254 \
+check_pristine_revision 80644390de3ad4db3055445259a034413ae41577 \
   "$root/.deps/talos-434/talos" Talos
 check_revision d13f23b723b8a846827a245b89c10fc7d3f11612 \
   "$root/.deps/talos-434/talos/.lake/packages/mathlib" Mathlib

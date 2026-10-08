@@ -19,6 +19,14 @@ check_revision() {
   fi
 }
 
+check_pristine_revision() {
+  check_revision "$@" || return 1
+  if ! git -C "$2" diff --quiet || ! git -C "$2" diff --cached --quiet; then
+    echo "$3 source differs from pinned revision" >&2
+    return 1
+  fi
+}
+
 check_toolchain() {
   local actual
   actual="$(tr -d '\r\n' < "$2")" || return 1
