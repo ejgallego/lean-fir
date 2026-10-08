@@ -147,9 +147,10 @@ The companion JavaScript checker derives the exact closure-projection helper
 export set from pre-link projection imports, rejecting missing and extra exports.
 The focused Lean fixture and complete resident-family JavaScript checker pass.
 
-## Separate host lifetime blocker
+## Separate host lifetime repair
 
-The exhaustive artifact gate now reaches the resident-release client and stops
+After the inventory repair, the exhaustive artifact gate reached the resident-release
+client and stopped
 at `ConcreteHost.constructorDescriptor`: the cached descriptor has two fields,
 while the reused live constructor header has one field and two scalar bytes.
 The full history and minimized public release/allocation helper reproduction
@@ -157,23 +158,51 @@ are recorded in `bugs/FIR-BUG-wasm-none-resident-release-host-descriptor-lifetim
 An accepted-main control with only the two validation repairs fails identically.
 Candidate and control release Wasm SHA-256 is
 `7b3cd8a2f678cd4dedc891d557995b771862aa9909bf31a51f1c7ada4d1ec34b`.
-The unchanged host source SHA-256 is
+The pre-repair host source SHA-256 is
 `934b6beb5ae5933a246389a2e55d4f95334ae6525fbbf5b7a6fd86065877ea82`.
 This is a pre-existing host metadata lifetime defect, independently of Talos.
 
 Root delegated a separate host repair with unchanged lifetime, ownership and
-corruption guards. The additional same-layout diagnostic establishes an exact
+corruption guards. The same-layout diagnostic at `6ddeaa00d` established an exact
 interface boundary: legitimate release/reuse from [erased,tobject] to
 [object,tobject] and an illicit live erased-slot mutation produce identical
 entire physical heaps, frontiers and host provenance maps. Both reject erased
 field decoding. Persistent traversal already includes erased slots and marks
 the child; no skipped ownership is established by this control. The raw
 module-client export contract provides no guest-call notification and the
-monotonic frontier does not observe exact-size reuse. A trustworthy lifetime
-signal or explicit JavaScript guest-execution metadata epoch contract is needed
-before generic reconciliation can also preserve the requested corruption
-controls. The provider/ABI decision was returned to root before implementation.
-No host guard or emitted code is weakened.
+monotonic frontier does not observe exact-size reuse. The raw interface needed
+an explicit lifetime validity boundary;
+root selected managed JavaScript guest-call hooks, preserving Wasm ABI/layout.
+
+The separate provider repair makes every callable export on the concrete
+module-client facade enter/leave a guest phase. Supported invocation runners,
+validation consumers and browser worker also use `manageModuleInstance`.
+Memory/global identity and function arity are preserved. Hooks balance nested
+guest -> import -> provider -> guest calls and ordinary throws. Hosts without
+hooks keep their prior raw instance contract. The concrete supported facade
+exposes no raw instance; standalone raw physical diagnostics remain outside
+its metadata guarantee.
+
+Constructor metadata is authoritative within a host phase. For resident
+modules it is discarded at every managed transition; subsequent observation
+re-derives current object-slot kinds from physical state using the existing
+resident fallback. This is deliberate validity expiration, not allocation
+generation inference. Separate recorded descriptor/layout snapshots reject
+same-phase corruption; exact typed decoding is retained when authoritative
+metadata is known. Field extent, heap bounds, liveness, ownership, persistence
+and disposal checks remain enforced. The previous fixture which simulated a
+resident allocation by deleting authoritative metadata now allocates a truly
+descriptor-free physical diagnostic object.
+
+Focused controls pass for same/different-layout reuse, same-phase erased and
+descriptor/layout corruption, invalid/released pointers, dead owned children,
+cache publication, persistent traversal, host/guest allocation, memory growth,
+all helper wrapping, nested provider reentry and error unwinding. The explicit
+managed histories distinguish the otherwise identical heaps from the diagnostic
+checkpoint. No host guard or emitted code is weakened. All 35 Wasm artifacts
+shared with accepted-main control are byte-identical; the detailed local hash
+inventory SHA-256 is
+`7c6551e82f693618bb79a3abba557a0b7f8ad71ae00079defe105c20442364d4`.
 
 Full artifact failure log SHA-256:
 `f94407bdd7eba452e6b03856b0be85c26defea343bcb842345d392abfddf6b36`.
@@ -192,14 +221,18 @@ Both captured LCNF inputs SHA-256:
   `4425bab1f9522307d77e8d485bc536149ba31c36`, with worktree-local archives/state.
 - Blueprint build and `vbp check` pass (114 manifest/cache entries, no errors).
   No unrelated package pin, path or proof narrative changes are necessary.
-- Combined-source `make check` and `git diff --check` pass, including source/engine
-  differentials, identity/trust negatives, bug cards and mailbox tests.
-- Exhaustive artifact checks pass the repaired inventory and resident-family
-  checker, then fail the host descriptor arity invariant. Browser checks are
-  not reached. The two tracked diagnostic reproductions preserve all guards.
+- Final `make check`, native `make talos-setup`/`make talos-check`, and
+  full-range `git diff --check` pass after the shared provider repair.
+  Executable/source checkpoint: `059eb9f887f5b994c1316cb6fe66dd47672e2c7e`.
+  This report is a documentation-only successor; earlier retained-initializer
+  and Blueprint checks cover the unchanged dependency/proof inputs.
+- Focused lifecycle controls and the complete exhaustive artifact/browser gate
+  pass, including browser Worker/Fetch and shared concrete browser validation.
+  The existing 63 ByteArray cases remain blocked; 658/721 concrete products run.
+  Chrome initially aborted because the old artifact scratch prefix exceeded its
+  Unix socket path limit; the gate uses the shorter worktree-local `.deps/tmp`.
 
-The local checkpoint is reviewable migration work and a precise shared-contract
-blocker; it does not approve the new dependency for main. Completing the host
-lifetime repair requires root's boundary decision followed by focused positive
-and negative controls and the complete artifact/browser gate. Main landing,
-remote publication and destructive cleanup remain separately authorized work.
+The migration checkpoint includes the separately reviewed JavaScript
+provider contract repair alongside native setup/proofs and validation repairs.
+Root owns green main dependency acceptance and integration. Remote publication
+and destructive cleanup remain separately authorized work.
