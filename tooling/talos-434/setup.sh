@@ -52,4 +52,4 @@ if [[ -d "$talos/.lake/packages/mathlib/.git" ]]; then
   check_revision "$mathlib_rev" "$talos/.lake/packages/mathlib" Mathlib
 fi
 check_toolchain leanprover/lean4:v4.34.1 "$project/lean-toolchain"
-echo "Talos 4.34.1 overlay ready: Talos $talos_rev, mathlib $mathlib_rev"
+echo "Native Talos 4.34.1 project ready: Talos $talos_rev, mathlib $mathlib_rev"

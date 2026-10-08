@@ -8,10 +8,15 @@ This package translates FIR's symbolic semantic-Wasm module into Talos's
 is a fast-moving AGPL-3.0 project, while FIR's semantic core should not force
 that dependency on every consumer.
 
-The bridge is provisionally pinned to the Lean-4.33 upgrade head
-`0e05edbcfbb105b33e90c60b4f50e2cf193d9254`, whose interpreter package uses
-Lean 4.33.0. Replace this pin with the merged upstream Talos commit once
-[Talos PR #172](https://github.com/cajal-technologies/talos/pull/172) lands.
+The bridge setup pins upstream Talos
+`80644390de3ad4db3055445259a034413ae41577`, whose interpreter package natively
+uses Lean and mathlib 4.34.1. `tooling/talos-434` authenticates the pristine
+upstream source and mirrors the current proof tree into worktree-local
+`.deps/talos-434/project`, shared by the standard proof, trust, Blueprint and
+retained-initializer targets. This is an immutable commit pin; upstream has
+no published stable-release designation. The former 4.33 toolchain patch and
+standalone package metadata are retired; historical proof evidence below
+retains its original environment.
 From the FIR repository root, set it up and validate it with:
 
 ```sh
