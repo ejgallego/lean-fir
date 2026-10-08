@@ -1,3 +1,4 @@
+import { manageModuleInstance } from "./module-client.mjs";
 import assert from "../../../scripts/wasm_assert.mjs";
 
 import {
@@ -241,8 +242,9 @@ async function runInvocation(id, bytes, manifest, expectation) {
       `${id} argument ${index} did not round-trip through the concrete ABI`);
     return physical;
   });
-  const { instance } = await WebAssembly.instantiate(
+  const { instance: rawInstance } = await WebAssembly.instantiate(
     bytes, host.imports(manifest.imports));
+  const instance = manageModuleInstance(rawInstance, host);
   const entryName = manifestEntryName(manifest);
   const entry = instance.exports[entryName];
   assert.equal(typeof entry, "function", `${id} is missing export ${entryName}`);

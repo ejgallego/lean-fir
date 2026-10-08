@@ -538,17 +538,10 @@ assert.equal(conversionArrayHost.readHeader(
 // a tagged value and still be decoded faithfully.
 const mutationHost = new ConcreteHost([]);
 const largeNatural = mutationHost.allocateNatural(1n << 64n);
-const mutable = mutationHost.allocCtor({
-  fields: ["object"],
-  size: 1,
-  usize: 0,
-  ssize: 0,
-  tag: "0",
-}, [largeNatural]);
-// Model an allocation performed by a resident Wasm helper: its concrete
-// header and slots are visible to the host, but no host-side allocation
-// descriptor was recorded.
-mutationHost.descriptors.delete(mutable >>> 0);
+// Physical diagnostic allocation with no host descriptor. Do not manufacture
+// this state by deleting authoritative metadata during the same host phase.
+const mutable = mutationHost.allocate(1, 8, { aux0: 0, aux1: 1 });
+mutationHost.writeWordSlot(mutable + 32, largeNatural);
 mutationHost.objectSet({ index: 0, field: "tobject" }, [
   mutable,
   mutationHost.encode("tobject", { kind: "tagged", payload: 29n }),

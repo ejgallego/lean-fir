@@ -1,3 +1,4 @@
+import { manageModuleInstance } from "./module-client.mjs";
 import assert from "../../../scripts/wasm_assert.mjs";
 
 import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-registry.mjs";
@@ -42,8 +43,9 @@ export async function checkConcretePrettyFormatInvocation({
 
   const physicalArgs = manifest.params.map((kind, index) =>
     host.encode(kind, concreteManifestValue(manifest.arguments[index])));
-  const { instance } = await WebAssembly.instantiate(
+  const { instance: rawInstance } = await WebAssembly.instantiate(
     bytes, host.imports(manifest.imports));
+  const instance = manageModuleInstance(rawInstance, host);
   const result = host.decode(manifest.result,
     instance.exports[manifest.entry](...physicalArgs));
   assert.equal(result.kind, "heap");

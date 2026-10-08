@@ -1,3 +1,4 @@
+import { manageModuleInstance } from "./module-client.mjs";
 import assert from "../../../scripts/wasm_assert.mjs";
 import {
   decodeManifestResult,
@@ -290,10 +291,11 @@ export async function executeConcreteValidationCase({
       `${caseId} concrete binary must export its float facade exactly once`,
     );
   }
-  const instance = await WebAssembly.instantiate(
+  const rawInstance = await WebAssembly.instantiate(
     wasmModule,
     host.imports(compilerManifest.imports),
   );
+  const instance = manageModuleInstance(rawInstance, host);
   const entry = instance.exports[entryName];
   assert.equal(typeof entry, "function", `missing concrete Wasm export ${entryName}`);
   assert.equal(entry.length, compilerManifest.params.length,

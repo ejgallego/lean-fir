@@ -162,6 +162,8 @@ export class ConcreteHost {
     this.addressLocations = new Map();
     this.locationAddresses = new Map();
     this.descriptors = new Map();
+    this.constructorProvenance = new Map();
+    this.executionPhases = ["host"];
     this.allocations = [];
 
     const operations = manifestImports.map((descriptor) => descriptor.operation);
@@ -288,6 +290,61 @@ export class ConcreteHost {
   synchronizeResidentFrontierAfterImport() {
     if (this.residentFrontier === undefined) return;
     this.residentFrontier.setFrontier(this.heapCursor);
+  }
+
+  // Descriptors are authoritative during a host phase. Guest execution can
+  // release/reuse addresses without an import, so constructor provenance is
+  // deliberately expired at each managed transition, never on a mismatch.
+  expireConstructorProvenance() {
+    if (this.residentFrontier === undefined) return;
+    for (const [address, descriptor] of this.descriptors) {
+      if (descriptor.kind === "constructor" || this.readU32(address) === KIND.constructor) {
+        this.descriptors.delete(address);
+      }
+    }
+    this.constructorProvenance.clear();
+  }
+
+  beginGuestCall() {
+    assert.equal(this.executionPhases.at(-1), "host", "guest call requires a host phase");
+    this.expireConstructorProvenance();
+    this.synchronizeResidentFrontierAfterImport();
+    this.executionPhases.push("guest");
+  }
+
+  endGuestCall() {
+    assert.equal(this.executionPhases.pop(), "guest", "unbalanced guest call");
+    this.synchronizeResidentFrontierBeforeImport();
+    this.expireConstructorProvenance();
+  }
+
+  beginHostImport() {
+    if (this.residentFrontier !== undefined) {
+      assert.equal(this.executionPhases.at(-1), "guest",
+        "resident import requires the managed module-client guest boundary");
+    }
+    this.synchronizeResidentFrontierBeforeImport();
+    this.expireConstructorProvenance();
+    this.executionPhases.push("host");
+  }
+
+  endHostImport() {
+    assert.equal(this.executionPhases.pop(), "host", "unbalanced host import");
+    this.synchronizeResidentFrontierAfterImport();
+    this.expireConstructorProvenance();
+  }
+
+  recordDescriptor(address, descriptor) {
+    this.descriptors.set(address, descriptor);
+    if (descriptor.kind === "constructor") {
+      const header = this.readHeader(address, false);
+      this.constructorProvenance.set(address, {
+        layout: [header.bytes, header.aux1, header.aux2, header.aux3],
+        descriptor: JSON.stringify(descriptor),
+      });
+    } else {
+      this.constructorProvenance.delete(address);
+    }
   }
 
   initialNaturalLimbs(value) {
@@ -577,7 +634,7 @@ export class ConcreteHost {
       this.addressLocations.set(address, cell.location);
       this.locationAddresses.set(cell.location, address);
       this.allocations.unshift(address);
-      this.descriptors.set(address, layout.descriptor);
+      this.recordDescriptor(address, layout.descriptor);
       layouts.set(cell.location, layout);
     }
 
@@ -797,7 +854,7 @@ export class ConcreteHost {
       aux2: capacity,
       aux3: 0,
     });
-    this.descriptors.set(address, {
+    this.recordDescriptor(address, {
       kind: "array",
       fieldKinds: Array.from({ length: elements.length }, () => "tobject"),
     });
@@ -838,7 +895,7 @@ export class ConcreteHost {
       aux2: 0,
       aux3: 0,
     });
-    this.descriptors.set(address, {
+    this.recordDescriptor(address, {
       kind: "constructor",
       fieldKinds: ["tobject", "tobject"],
     });
@@ -918,7 +975,7 @@ export class ConcreteHost {
     const address = this.allocate(KIND.natural, SLOT_BYTES * limbs.length,
       { aux0: 2, aux1: limbs.length });
     limbs.forEach((limb, index) => this.writeU64(address + HEADER_BYTES + SLOT_BYTES * index, limb));
-    this.descriptors.set(address, { kind: "natural" });
+    this.recordDescriptor(address, { kind: "natural" });
     return address;
   }
 
@@ -951,7 +1008,7 @@ export class ConcreteHost {
     });
     limbs.forEach((limb, index) =>
       this.writeU64(address + HEADER_BYTES + SLOT_BYTES * index, limb));
-    this.descriptors.set(address, { kind: "integer" });
+    this.recordDescriptor(address, { kind: "integer" });
     return address;
   }
 
@@ -987,7 +1044,7 @@ export class ConcreteHost {
       aux3: 0,
     });
     new Uint8Array(this.buffer, address + HEADER_BYTES, bytes.length).set(bytes);
-    this.descriptors.set(address, { kind: "string" });
+    this.recordDescriptor(address, { kind: "string" });
     return address;
   }
 
@@ -1183,7 +1240,7 @@ export class ConcreteHost {
     });
     fields.forEach((field, index) => this.writeWordSlot(address + HEADER_BYTES + SLOT_BYTES * index,
       field));
-    this.descriptors.set(address, {
+    this.recordDescriptor(address, {
       kind: "constructor",
       fieldKinds: [...operation.fields],
     });
@@ -1202,7 +1259,17 @@ export class ConcreteHost {
   constructorDescriptor(address, header) {
     assert.equal(header.kind, KIND.constructor,
       "constructor descriptor requires a constructor header");
+    assert.ok(header.bytes >=
+      align8(HEADER_BYTES + SLOT_BYTES * (header.aux1 + header.aux2) + header.aux3),
+      "concrete constructor fields exceed allocation extent");
     let descriptor = this.descriptors.get(address);
+    const provenance = this.constructorProvenance.get(address);
+    if (provenance !== undefined) {
+      assert.deepStrictEqual([header.bytes, header.aux1, header.aux2, header.aux3],
+        provenance.layout, "same-phase concrete constructor layout corruption");
+      assert.equal(JSON.stringify(descriptor), provenance.descriptor,
+        "same-phase concrete constructor descriptor corruption");
+    }
     if (descriptor === undefined) {
       // A resident Wasm allocator does not cross the import boundary where the
       // concrete host normally records allocation provenance. All constructor
@@ -1217,7 +1284,7 @@ export class ConcreteHost {
             ? "erased"
             : "tobject"),
       };
-      this.descriptors.set(address, descriptor);
+      this.recordDescriptor(address, descriptor);
     }
     assert.equal(descriptor.kind, "constructor",
       "concrete constructor address has a non-constructor descriptor");
@@ -1254,7 +1321,7 @@ export class ConcreteHost {
     this.writeU32(address + HEADER_BYTES + SLOT_BYTES * operation.index, field);
     const fieldKinds = [...descriptor.fieldKinds];
     fieldKinds[operation.index] = operation.field;
-    this.descriptors.set(address, { ...descriptor, fieldKinds });
+    this.recordDescriptor(address, { ...descriptor, fieldKinds });
   }
 
   usizeFieldIndex(header, slot) {
@@ -1430,7 +1497,7 @@ export class ConcreteHost {
     });
     operation.fields.forEach((kind, index) =>
       this.writeCapture(address + HEADER_BYTES + SLOT_BYTES * index, kind, args[index]));
-    this.descriptors.set(address, {
+    this.recordDescriptor(address, {
       kind: "closure",
       function: operation.function,
       fieldKinds: [...operation.fields],
@@ -1551,7 +1618,7 @@ export class ConcreteHost {
       aux1: payloadBytes,
     });
     this.writeU64(address + HEADER_BYTES, payload);
-    this.descriptors.set(address, { kind: "boxed", scalarKind: operation.scalar });
+    this.recordDescriptor(address, { kind: "boxed", scalarKind: operation.scalar });
     return signed32(address);
   }
 
@@ -1773,7 +1840,7 @@ export class ConcreteHost {
       aux2: operation.usize,
       aux3: operation.ssize,
     });
-    this.descriptors.set(token, {
+    this.recordDescriptor(token, {
       kind: "constructor",
       fieldKinds: [...operation.fields],
     });
@@ -1882,11 +1949,11 @@ export class ConcreteHost {
         `duplicate import ${descriptor.module}.${descriptor.name}`);
       const imported = this.importFunction(descriptor.operation);
       imports[descriptor.module][descriptor.name] = (...args) => {
-        this.synchronizeResidentFrontierBeforeImport();
+        this.beginHostImport();
         try {
           return imported(...args);
         } finally {
-          this.synchronizeResidentFrontierAfterImport();
+          this.endHostImport();
         }
       };
     }

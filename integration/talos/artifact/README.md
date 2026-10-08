@@ -844,6 +844,33 @@ unknown, or mismatched capability fields. The caller continues to allocate
 runtime values in the host and uses the shared manifest codecs rather than
 performing JavaScript floating-point conversion.
 
+Hosts providing both `beginGuestCall` and `endGuestCall` receive a frozen
+instance facade whose every callable export, including helpers and the selected
+entry, runs balanced lifecycle hooks. Function arity and memory/global identity
+are preserved. Hosts providing neither hook retain their raw-instance contract;
+a partial hook pair is rejected. The concrete invocation runners, validation
+consumer and browser worker also use `manageModuleInstance` for their supported
+calls. The facade deliberately exposes no raw WebAssembly.Instance escape.
+
+For ConcreteHost resident modules, constructor descriptors are authoritative
+only during a host phase. Every managed guest/host transition discards constructor
+provenance, because resident release/reuse is not visible through the monotonic
+frontier. The next host observation derives the current object-slot kinds from
+the physical constructor. This is an explicit validity boundary, not inferred
+allocator generations. Within a host phase, a separate recorded layout and
+descriptor snapshot reject descriptor or live-layout corruption; known kinds
+retain exact ABI decoding. Bounds, liveness, field extent, ownership, cache
+publication and recursive persistence checks remain independent of expiration.
+Nested guest -> import -> guest reentry and throws restore the prior phase.
+
+Standalone `resident-*-client.mjs` engine probes that instantiate raw modules,
+write synthetic headers or compare raw reference modules are physical diagnostic
+tests, outside the managed metadata contract. They must not claim host allocation
+provenance across raw guest execution. Supported module/invocation consumers use
+the managed boundary; raw memory/global access remains available for transport
+and explicit corruption controls. `test-concrete-lifecycle.mjs` and the two
+public-helper descriptor regressions cover the supported contract.
+
 For a fetch-capable JavaScript environment with a compatible semantic host:
 
 ```js

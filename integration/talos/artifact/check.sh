@@ -11,8 +11,10 @@ if [[ "$root_toolchain" != leanprover/lean4:v4.34.1 ||
   exit 1
 fi
 root_lake=(elan run "$root_toolchain" lake -d "$root")
-mkdir -p "$here/_build/tmp"
-export TMPDIR="$here/_build/tmp"
+# Chrome process-singleton sockets must fit Unix socket path limits. Keep
+# scratch worktree-local under the repository-standard, shorter .deps path.
+mkdir -p "$root/.deps/tmp"
+export TMPDIR="$root/.deps/tmp"
 exhaustive_pretty="${FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS:-0}"
 artifact_jobs="${FIR_CHECK_JOBS:-1}"
 if [[ "$exhaustive_pretty" != 0 && "$exhaustive_pretty" != 1 ]]; then
@@ -586,6 +588,14 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-setters.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-increments.wasm
+node repro-concrete-descriptor-lifetime.mjs \
+  _build/source-pretty-format-resident-releases.wasm \
+  _build/source-pretty-format-resident-allocator.wasm.json
+node repro-concrete-descriptor-provenance.mjs \
+  _build/source-pretty-format-resident-releases.wasm \
+  _build/source-pretty-format-resident-allocator.wasm.json
+node test-concrete-lifecycle.mjs \
+  _build/source-pretty-format-resident-releases.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-releases.wasm
 node call-concrete-pretty-format.mjs \

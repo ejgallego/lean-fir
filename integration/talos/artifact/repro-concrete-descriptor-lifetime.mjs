@@ -5,8 +5,8 @@ import { ConcreteHost } from "./concrete-host.mjs";
 import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-registry.mjs";
 import { instantiateModuleArtifact } from "./module-client.mjs";
 
-// Diagnostic reproducer: it deliberately leaves the production arity assertion
-// intact and fails there while host metadata outlives a resident allocation.
+// Regression for different-layout resident reuse through managed public helpers.
+// The production descriptor arity assertion remains intact.
 const [artifactPath, allocatorDescriptorPath] = process.argv.slice(2);
 assert.ok(artifactPath && allocatorDescriptorPath,
   "usage: node repro-concrete-descriptor-lifetime.mjs RELEASES.wasm ALLOCATOR.wasm.json");
@@ -43,3 +43,7 @@ console.log(JSON.stringify({ address: replacement, header,
   cachedDescriptor: host.descriptors.get(replacement) }));
 host.cacheSet({ kind: "cacheSet", declaration: "descriptor-lifetime-repro", value: "object" },
   [replacement]);
+
+assert.equal(host.constructorDescriptor(replacement, host.readHeader(replacement)).fieldKinds.length, 1);
+assert.equal(host.readHeader(replacement).persistent, true);
+console.log("PASS different-layout resident descriptor lifetime");

@@ -61,4 +61,4 @@ for (const [path, kind, bits] of [
 }
 
 console.log(
-  `PASS reusable raw module client with exact float facade (${manifest.entry})`);
+  `PASS reusable module client with exact float facade (${manifest.entry})`);

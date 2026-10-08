@@ -27,7 +27,7 @@ async function history(residentReuse) {
   const address = host.allocCtor({ kind: "allocCtor", name: "provenance-control",
     result: "object", size: 2, usize: 0, ssize: 0, tag: "0",
     fields: ["erased", "tobject"] }, [0, 3]) >>> 0;
-  instance.exports.fir_heap_set_frontier(host.heapCursor);
+  host.synchronizeResidentFrontierAfterImport();
   if (residentReuse) {
     instance.exports.fir_release_0(address);
     assert.equal(host.readHeader(address, false).live, false);
@@ -45,19 +45,20 @@ const corrupted = await history(false);
 assert.equal(reused.address, corrupted.address);
 assert.deepEqual(new Uint8Array(reused.instance.exports.memory.buffer),
   new Uint8Array(corrupted.instance.exports.memory.buffer), "physical heaps differ");
-assert.deepEqual([...reused.host.descriptors], [...corrupted.host.descriptors]);
+assert.equal(reused.host.descriptors.get(reused.address), undefined);
+assert.deepEqual(corrupted.host.descriptors.get(corrupted.address).fieldKinds, ["erased", "tobject"]);
 assert.deepEqual([...reused.host.addressLocations], [...corrupted.host.addressLocations]);
 assert.deepEqual(reused.host.allocations, corrupted.host.allocations);
 assert.equal(reused.host.heapCursor, corrupted.host.heapCursor);
-assert.equal(reused.instance.exports.fir_heap_frontier(),
-  corrupted.instance.exports.fir_heap_frontier());
-for (const state of [reused, corrupted]) {
-  assert.throws(() => state.host.objectJson(state.address,
-    state.host.readHeader(state.address)), /does not refine erased/);
-}
+assert.equal(reused.host.residentFrontier.frontier(),
+  corrupted.host.residentFrontier.frontier());
+assert.doesNotThrow(() => reused.host.objectJson(reused.address,
+  reused.host.readHeader(reused.address)));
+assert.throws(() => corrupted.host.objectJson(corrupted.address,
+  corrupted.host.readHeader(corrupted.address)), /does not refine erased/);
 reused.host.cacheSet({ kind: "cacheSet", declaration: "same-layout-repro", value: "object" },
   [reused.address]);
 assert.equal(reused.host.readHeader(reused.address).persistent, true);
 assert.equal(reused.host.readHeader(reused.child).persistent, true,
   "erased slots still participate in persistent traversal");
-console.log("CONFIRMED: identical current heaps/frontiers/host provenance for reuse and live corruption; both reject erased-slot decoding, while persistent traversal includes the child");
+console.log("PASS: identical heaps distinguished by managed execution history; same-phase erased corruption rejects and resident reuse traverses the child");

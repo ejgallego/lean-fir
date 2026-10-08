@@ -55,22 +55,16 @@ export function validateModuleDescriptor(manifest) {
 }
 
 /**
- * Instantiate an invocation-free FIR Wasm artifact from transport-neutral
- * inputs. The caller owns both the bytes and the semantic ABI host.
- *
- * This intentionally exposes the raw exported WebAssembly function. Callers
- * allocate Lean runtime values in `host`, encode them with the descriptor's
- * ABI kinds, and decode the physical result themselves.
+ * Attach a raw instance and expose a managed facade. Every callable export
+ * enters/leaves the optional host lifecycle; memories/globals remain identical.
+ * The raw WebAssembly.Instance is deliberately not returned. Independently
+ * instantiated diagnostic instances are outside this provenance contract.
  */
-export async function instantiateModuleArtifact({ bytes, manifest, host }) {
-  requireCondition(bytes instanceof ArrayBuffer || ArrayBuffer.isView(bytes),
-    "module bytes must be an ArrayBuffer or an ArrayBuffer view");
-  validateModuleDescriptor(manifest);
-  requireCondition(host && typeof host.imports === "function",
-    "module artifact host must provide imports(operations)");
-  requireCondition(WebAssembly.validate(bytes), "module failed WebAssembly validation");
-
-  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+export function manageModuleInstance(instance, host) {
+  const hooks = ["beginGuestCall", "endGuestCall"];
+  const managed = hooks.every((name) => typeof host[name] === "function");
+  requireCondition(managed || hooks.every((name) => host[name] === undefined),
+    "host must provide both guest lifecycle hooks or neither");
   const memory = instance.exports.memory;
   if (memory instanceof WebAssembly.Memory) {
     requireCondition(typeof host.attachMemory === "function",
@@ -79,19 +73,46 @@ export async function instantiateModuleArtifact({ bytes, manifest, host }) {
     const frontier = instance.exports.fir_heap_frontier;
     const setFrontier = instance.exports.fir_heap_set_frontier;
     if (frontier !== undefined || setFrontier !== undefined) {
-      requireCondition(typeof frontier === "function",
-        "fir_heap_frontier export must be callable");
-      requireCondition(typeof setFrontier === "function",
-        "fir_heap_set_frontier export must be callable");
-      requireCondition(Number.isInteger(host.heapCursor) &&
-        host.heapCursor >= 0 && host.heapCursor <= 0xffffffff,
-      "resident allocator host must expose a wasm32 heapCursor");
+      requireCondition(typeof frontier === "function" && typeof setFrontier === "function",
+        "resident heap frontier exports must be callable");
+      requireCondition(Number.isInteger(host.heapCursor) && host.heapCursor >= 0 &&
+        host.heapCursor <= 0xffffffff, "resident allocator host must expose a wasm32 heapCursor");
       setFrontier(host.heapCursor);
       requireCondition(typeof host.attachResidentFrontier === "function",
         "resident allocator host must provide attachResidentFrontier(frontier, setFrontier)");
       host.attachResidentFrontier(frontier, setFrontier);
     }
   }
+  if (!managed) return instance;
+  const exports = Object.create(null);
+  for (const [name, value] of Object.entries(instance.exports)) {
+    exports[name] = typeof value === "function" && managed ? (...args) => {
+      host.beginGuestCall();
+      try {
+        return value(...args);
+      } finally {
+        host.endGuestCall();
+      }
+    } : value;
+    if (typeof value === "function") {
+      Object.defineProperty(exports[name], "length", { value: value.length });
+      Object.defineProperty(exports[name], "name", { value: value.name });
+    }
+  }
+  return Object.freeze({ exports: Object.freeze(exports) });
+}
+
+/** Instantiate an invocation-free artifact with managed callable exports. */
+export async function instantiateModuleArtifact({ bytes, manifest, host }) {
+  requireCondition(bytes instanceof ArrayBuffer || ArrayBuffer.isView(bytes),
+    "module bytes must be an ArrayBuffer or an ArrayBuffer view");
+  validateModuleDescriptor(manifest);
+  requireCondition(host && typeof host.imports === "function",
+    "module artifact host must provide imports(operations)");
+  requireCondition(WebAssembly.validate(bytes), "module failed WebAssembly validation");
+
+  const { instance: rawInstance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const instance = manageModuleInstance(rawInstance, host);
   const entryName = manifestEntryName(manifest);
   const entry = instance.exports[entryName];
   requireCondition(typeof entry === "function",

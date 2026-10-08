@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-resident-release-host-descriptor-lifetime
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.34.1
 lean-revision: 5045d0056413266e57c625dcd7c365b10e377c52
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-10-08
 reproduction: integration/talos/artifact/repro-concrete-descriptor-lifetime.mjs
-regression: none
+regression: integration/talos/artifact/test-concrete-lifecycle.mjs
 ---
 
 # Summary
@@ -24,6 +24,7 @@ existing resident helper, reuse the same 48-byte block for a one-field
 SpaceResult constructor with two scalar bytes, then publish it through cacheSet.
 The tracked reproducer uses production helpers and preserves the original
 constructorDescriptor assertion; it invokes no prettyM formatter entry point.
+It now passes through the managed lifecycle boundary and verifies persistence.
 
 ## Exact commands
 
@@ -101,24 +102,41 @@ none
 
 ## Resolution and regression
 
-Unresolved. The host-only implementation lease preserves corruption guards.
-The additional `repro-concrete-descriptor-provenance.mjs` control releases a
-host [erased,tobject] constructor and reuses its block for [object,tobject]. A
-second history mutates the live erased slot without releasing. Entire heaps,
-frontiers, descriptor maps, allocation lists and logical address maps match.
-Both reject objectJson at `does not refine erased`, so same-layout reuse cannot
-be distinguished from live provenance corruption using the exposed state.
-Persistent traversal includes erased slots and correctly marks the child;
-this diagnostic does not establish an ownership omission.
+The diagnostic checkpoint `6ddeaa00d` preserves the pre-repair raw-interface
+information boundary: [erased,tobject] -> [object,tobject] resident reuse and an
+illicit live erased-slot mutation produced identical heaps, frontiers and host
+metadata. Both failed exact erased-field decoding. Persistent traversal already
+included erased slots; no child ownership omission was established.
 
-A safe reconciliation needs a lifetime signal. Raw module-client exports and
-public helper calls do not notify the host; frontier synchronization observes
-only monotonic allocation extent. A JavaScript guest-call lifecycle contract
-could delimit metadata validity without changing Wasm bytes, but changes the
-provider boundary and must cover reentrancy. An allocator generation signal
-would instead change the runtime/ABI contract. No reset-on-mismatch workaround
-or guard weakening has been implemented.
+Root selected an explicit JavaScript managed guest-call lifecycle contract.
+`module-client.mjs` now exposes a frozen instance facade for hosts with paired
+hooks. Every callable export balances guest entry/exit with finally, including
+helper routes. Memory/global identity and function arity are retained; raw
+instances are not exposed by the supported concrete client. Non-hook hosts
+retain their prior contract. Supported concrete Node/invocation/validation and
+browser consumers use this boundary. Standalone raw physical engine diagnostics
+are explicitly outside its provenance guarantee.
 
-Run the additional control with the same two artifact arguments as the minimal
-reproducer. Its success confirms the indistinguishability and guard behavior;
-it is diagnostic evidence, not a passing migration artifact gate.
+ConcreteHost discards constructor provenance across managed guest/host phase
+transitions for resident modules, without inferring generations or responding
+to arity mismatches. Current slots are re-derived on subsequent host observation.
+Within each host phase, recorded layout/descriptor snapshots reject corruption
+and exact ABI kinds remain authoritative. Field extent, bounds, liveness,
+ownership, recursive persistent traversal and disposal checks remain enforced.
+Nested guest/import/provider reentry and throw/unwind restore the prior phase.
+
+The two tracked public-helper regressions pass for different- and same-layout
+reuse; the latter now distinguishes otherwise identical heaps by their managed
+histories and rejects the same-phase erased mutation. The focused lifecycle
+regression additionally rejects descriptor/layout corruption, malformed field
+extent, invalid/released pointers and dead owned children; verifies memory
+growth/persistence, helper wrapping, reentrant imports, ordinary unwind and
+non-hook compatibility. A prior test that simulated resident allocation by
+silently deleting host metadata now creates an actual descriptor-free physical
+diagnostic allocation instead.
+
+No Wasm import/export signature, instruction or physical layout changes.
+All 35 Wasm artifacts shared with the accepted-main control are byte-identical.
+The complete exhaustive artifact gate passes, including browser/Worker and
+concrete browser validation. The final combined repository check is recorded
+in the migration report.

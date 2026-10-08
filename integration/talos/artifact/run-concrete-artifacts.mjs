@@ -1,3 +1,4 @@
+import { manageModuleInstance } from "./module-client.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -32,7 +33,8 @@ export async function runConcreteArtifact(manifestPath) {
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
     concreteArtifactExternalRegistry, manifest.closureDispatch,
     manifest.closureDescriptors);
-  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const { instance: rawInstance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const instance = manageModuleInstance(rawInstance, host);
   const entryName = manifestEntryName(manifest);
   const entry = instance.exports[entryName];
   assert.equal(typeof entry, "function", `missing exported entry ${entryName}`);
@@ -73,7 +75,8 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const bytes = await readFile(manifestPath.slice(0, -".json".length));
     const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
       undefined, manifest.closureDispatch, manifest.closureDescriptors);
-    const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+    const { instance: rawInstance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+    const instance = manageModuleInstance(rawInstance, host);
     let actual;
     try {
       instance.exports[manifestEntryName(manifest)]();
@@ -93,7 +96,8 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
       concreteArtifactExternalRegistry, manifest.closureDispatch,
       manifest.closureDescriptors);
-    const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+    const { instance: rawInstance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+    const instance = manageModuleInstance(rawInstance, host);
     let actual;
     try {
       instance.exports[manifestEntryName(manifest)]();

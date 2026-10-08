@@ -1,3 +1,4 @@
+import { manageModuleInstance } from "./module-client.mjs";
 import assert from "../../../scripts/wasm_assert.mjs";
 
 import {
@@ -50,7 +51,8 @@ async function runConcreteArtifact(fixture) {
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
     concreteArtifactExternalRegistry, manifest.closureDispatch,
     manifest.closureDescriptors);
-  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const { instance: rawInstance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const instance = manageModuleInstance(rawInstance, host);
   const entryName = manifestEntryName(manifest);
   const entry = instance.exports[entryName];
   assert.equal(typeof entry, "function", `missing exported entry ${entryName}`);
@@ -89,7 +91,8 @@ async function checkExpectedFault(fixture, expectedFault) {
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
     concreteArtifactExternalRegistry, manifest.closureDispatch,
     manifest.closureDescriptors);
-  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const { instance: rawInstance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const instance = manageModuleInstance(rawInstance, host);
   let actual;
   try {
     instance.exports[manifestEntryName(manifest)]();
@@ -107,7 +110,8 @@ async function checkDefaultExternalFault(fixture, expectedFault) {
   const bytes = await fetchBytes(`${fixture}.wasm`, `${fixture} module`);
   const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
     undefined, manifest.closureDispatch, manifest.closureDescriptors);
-  const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const { instance: rawInstance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
+  const instance = manageModuleInstance(rawInstance, host);
   let actual;
   try {
     instance.exports[manifestEntryName(manifest)]();
