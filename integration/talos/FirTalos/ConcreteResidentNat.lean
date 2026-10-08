@@ -9062,7 +9062,7 @@ structure CheckedNatAddPrefixExecution {host : Type}
   afterCount : Wasm.Locals
   afterCarry : Wasm.Locals
   afterResultCount : Wasm.Locals
-  scratchValid : initial.validIndex 15
+  scratchValid : (15 < initial.params.length + initial.locals.length)
   leftLocal : initial.get 0 = some (.i32 leftWord)
   rightLocal : initial.get 1 = some (.i32 rightWord)
   leftFlavorSet :
@@ -9123,7 +9123,7 @@ independent of Natural representation and arithmetic semantics. -/
 theorem exists_of_runs
     (leftLocal : initial.get 0 = some (.i32 leftWord))
     (rightLocal : initial.get 1 = some (.i32 rightWord))
-    (scratchValid : initial.validIndex 15)
+    (scratchValid : (15 < initial.params.length + initial.locals.length))
     (validateLeft : Wasm.TerminatesWith env module validateNaturalIndex store
       (.i32 leftWord :: tail)
       (fun final values => final = store ∧ values = tail))
@@ -9148,91 +9148,90 @@ theorem exists_of_runs
   have preserveValid
       {before after : Wasm.Locals} {index : Nat} {value : Wasm.Value}
       (updated : before.set? index value = some after)
-      {requested : Nat} (valid : before.validIndex requested) :
-      after.validIndex requested := by
+      {requested : Nat} (valid : (requested < before.params.length + before.locals.length)) :
+      (requested < after.params.length + after.locals.length) := by
     have lengths := FirTalos.Correctness.locals_lengths_of_set? updated
-    unfold Wasm.Locals.validIndex at valid ⊢
     omega
-  have inputValid (locals : Wasm.Locals) (values : List Wasm.Value)
-      {requested : Nat} (valid : locals.validIndex requested) :
-      ({ locals with values } : Wasm.Locals).validIndex requested := by
-    simpa [Wasm.Locals.validIndex] using valid
+  have inputValid (locals : Wasm.Locals) (_values : List Wasm.Value)
+      {requested : Nat} (valid : (requested < locals.params.length + locals.locals.length)) :
+      (requested < locals.params.length + locals.locals.length) := by
+    exact valid
   have lowerValid (locals : Wasm.Locals) {smaller larger : Nat}
-      (le : smaller ≤ larger) (valid : locals.validIndex larger) :
-      locals.validIndex smaller := by
-    unfold Wasm.Locals.validIndex at valid ⊢
+      (le : smaller ≤ larger) (valid : (larger < locals.params.length + locals.locals.length)) :
+      (smaller < locals.params.length + locals.locals.length) := by
     omega
   have initialFive :
-      ({ initial with values := .i32 0 :: tail } : Wasm.Locals).validIndex 5 :=
+      (5 < initial.params.length + initial.locals.length) :=
     inputValid initial (.i32 0 :: tail)
       (lowerValid initial (by omega) scratchValid)
   obtain ⟨afterLeftFlavor, leftFlavorSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { initial with values := .i32 0 :: tail })
       (value := .i32 0) initialFive
   have initialFifteen :
-      ({ initial with values := .i32 0 :: tail } : Wasm.Locals).validIndex 15 :=
+      (15 < initial.params.length + initial.locals.length) :=
     inputValid initial (.i32 0 :: tail) scratchValid
   have afterLeftFifteen := preserveValid leftFlavorSet initialFifteen
   have rightSix :
-      ({ afterLeftFlavor with values := .i32 0 :: tail } : Wasm.Locals).validIndex
-        6 :=
+      (6 < afterLeftFlavor.params.length + afterLeftFlavor.locals.length) :=
     inputValid afterLeftFlavor (.i32 0 :: tail)
       (lowerValid afterLeftFlavor (by omega) afterLeftFifteen)
   obtain ⟨afterRightFlavor, rightFlavorSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterLeftFlavor with values := .i32 0 :: tail })
       (value := .i32 0) rightSix
   have afterRightFifteen := preserveValid rightFlavorSet
     (inputValid afterLeftFlavor (.i32 0 :: tail) afterLeftFifteen)
   have leftSeven :
-      ({ afterRightFlavor with values := .i32 leftCount :: tail } :
-        Wasm.Locals).validIndex 7 :=
+      (7 < afterRightFlavor.params.length + afterRightFlavor.locals.length) :=
     inputValid afterRightFlavor (.i32 leftCount :: tail)
       (lowerValid afterRightFlavor (by omega) afterRightFifteen)
   obtain ⟨afterLeftCount, leftCountSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRightFlavor with values := .i32 leftCount :: tail })
       (value := .i32 leftCount) leftSeven
   have afterLeftCountFifteen := preserveValid leftCountSet
     (inputValid afterRightFlavor (.i32 leftCount :: tail)
       afterRightFifteen)
   have rightEight :
-      ({ afterLeftCount with values := .i32 rightCount :: tail } :
-        Wasm.Locals).validIndex 8 :=
+      (8 < afterLeftCount.params.length + afterLeftCount.locals.length) :=
     inputValid afterLeftCount (.i32 rightCount :: tail)
       (lowerValid afterLeftCount (by omega) afterLeftCountFifteen)
   obtain ⟨afterRightCount, rightCountSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterLeftCount with values := .i32 rightCount :: tail })
       (value := .i32 rightCount) rightEight
   have afterRightCountFifteen := preserveValid rightCountSet
     (inputValid afterLeftCount (.i32 rightCount :: tail)
       afterLeftCountFifteen)
   let count := checkedMaxCountWord leftCount rightCount
   have countNine :
-      ({ afterRightCount with values := .i32 count :: tail } :
-        Wasm.Locals).validIndex 9 :=
+      (9 < afterRightCount.params.length + afterRightCount.locals.length) :=
     inputValid afterRightCount (.i32 count :: tail)
       (lowerValid afterRightCount (by omega) afterRightCountFifteen)
   obtain ⟨afterCount, countSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRightCount with values := .i32 count :: tail })
       (value := .i32 count) countNine
   have afterCountFifteen := preserveValid countSet
     (inputValid afterRightCount (.i32 count :: tail)
       afterRightCountFifteen)
   have carryFifteen :
-      ({ afterCount with values := .i32 carry :: tail } :
-        Wasm.Locals).validIndex 15 :=
+      (15 < afterCount.params.length + afterCount.locals.length) :=
     inputValid afterCount (.i32 carry :: tail) afterCountFifteen
   obtain ⟨afterCarry, carrySet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterCount with values := .i32 carry :: tail })
       (value := .i32 carry) carryFifteen
   have afterCarryFifteen := preserveValid carrySet carryFifteen
   let resultCount := carry + count
   have resultTen :
-      ({ afterCarry with values := .i32 resultCount :: tail } :
-        Wasm.Locals).validIndex 10 :=
+      (10 < afterCarry.params.length + afterCarry.locals.length) :=
     inputValid afterCarry (.i32 resultCount :: tail)
       (lowerValid afterCarry (by omega) afterCarryFifteen)
   obtain ⟨afterResultCount, resultCountSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterCarry with values := .i32 resultCount :: tail })
       (value := .i32 resultCount) resultTen
   exact ⟨{
     afterLeftFlavor
@@ -9431,53 +9430,43 @@ theorem validIndex
     (execution : CheckedNatAddPrefixExecution env module store initial
       validateNaturalIndex magnitudeCountIndex sumCarryIndex leftWord
       rightWord leftCount rightCount carry tail)
-    {index : Nat} (valid : initial.validIndex index) :
-    execution.afterResultCount.validIndex index := by
+    {index : Nat} (valid : (index < initial.params.length + initial.locals.length)) :
+    (index < execution.afterResultCount.params.length + execution.afterResultCount.locals.length) := by
   have preserve {beforeLocals afterLocals : Wasm.Locals}
       {writtenIndex : Nat} {value : Wasm.Value}
       (updated : beforeLocals.set? writtenIndex value = some afterLocals)
-      (beforeValid : beforeLocals.validIndex index) :
-      afterLocals.validIndex index := by
+      (beforeValid : (index < beforeLocals.params.length + beforeLocals.locals.length)) :
+      (index < afterLocals.params.length + afterLocals.locals.length) := by
     have lengths := FirTalos.Correctness.locals_lengths_of_set? updated
-    unfold Wasm.Locals.validIndex at beforeValid ⊢
     omega
   have leftInputValid :
-      ({ initial with values := .i32 0 :: tail } : Wasm.Locals).validIndex
-        index := by
-    simpa [Wasm.Locals.validIndex] using valid
+      (index < initial.params.length + initial.locals.length) := by
+    exact valid
   have afterLeftValid := preserve execution.leftFlavorSet leftInputValid
   have rightInputValid :
-      ({ execution.afterLeftFlavor with values := .i32 0 :: tail } :
-        Wasm.Locals).validIndex index := by
-    simpa [Wasm.Locals.validIndex] using afterLeftValid
+      (index < execution.afterLeftFlavor.params.length + execution.afterLeftFlavor.locals.length) := by
+    exact afterLeftValid
   have afterRightValid := preserve execution.rightFlavorSet rightInputValid
   have leftCountInputValid :
-      ({ execution.afterRightFlavor with values := .i32 leftCount :: tail } :
-        Wasm.Locals).validIndex index := by
-    simpa [Wasm.Locals.validIndex] using afterRightValid
+      (index < execution.afterRightFlavor.params.length + execution.afterRightFlavor.locals.length) := by
+    exact afterRightValid
   have afterLeftCountValid := preserve execution.leftCountSet leftCountInputValid
   have rightCountInputValid :
-      ({ execution.afterLeftCount with values := .i32 rightCount :: tail } :
-        Wasm.Locals).validIndex index := by
-    simpa [Wasm.Locals.validIndex] using afterLeftCountValid
+      (index < execution.afterLeftCount.params.length + execution.afterLeftCount.locals.length) := by
+    exact afterLeftCountValid
   have afterRightCountValid :=
     preserve execution.rightCountSet rightCountInputValid
   have countInputValid :
-      ({ execution.afterRightCount with values :=
-        (.i32 (checkedMaxCountWord leftCount rightCount) :: tail) } :
-        Wasm.Locals).validIndex index := by
-    simpa [Wasm.Locals.validIndex] using afterRightCountValid
+      (index < execution.afterRightCount.params.length + execution.afterRightCount.locals.length) := by
+    exact afterRightCountValid
   have afterCountValid := preserve execution.countSet countInputValid
   have carryInputValid :
-      ({ execution.afterCount with values := .i32 carry :: tail } :
-        Wasm.Locals).validIndex index := by
-    simpa [Wasm.Locals.validIndex] using afterCountValid
+      (index < execution.afterCount.params.length + execution.afterCount.locals.length) := by
+    exact afterCountValid
   have afterCarryValid := preserve execution.carrySet carryInputValid
   have resultCountInputValid :
-      ({ execution.afterCarry with values :=
-        (.i32 execution.resultCount :: tail) } : Wasm.Locals).validIndex
-          index := by
-    simpa [Wasm.Locals.validIndex] using afterCarryValid
+      (index < execution.afterCarry.params.length + execution.afterCarry.locals.length) := by
+    exact afterCarryValid
   exact preserve execution.resultCountSet resultCountInputValid
 
 /-- The four scalar result slots of the one-limb producer can always be
@@ -9501,60 +9490,58 @@ theorem exists_oneLimbLocalSets
   have preserveValid
       {before after : Wasm.Locals} {index : Nat} {value : Wasm.Value}
       (updated : before.set? index value = some after)
-      {requested : Nat} (valid : before.validIndex requested) :
-      after.validIndex requested := by
+      {requested : Nat} (valid : (requested < before.params.length + before.locals.length)) :
+      (requested < after.params.length + after.locals.length) := by
     have lengths := FirTalos.Correctness.locals_lengths_of_set? updated
-    unfold Wasm.Locals.validIndex at valid ⊢
     omega
-  have inputValid (locals : Wasm.Locals) (values : List Wasm.Value)
-      {requested : Nat} (valid : locals.validIndex requested) :
-      ({ locals with values } : Wasm.Locals).validIndex requested := by
-    simpa [Wasm.Locals.validIndex] using valid
+  have inputValid (locals : Wasm.Locals) (_values : List Wasm.Value)
+      {requested : Nat} (valid : (requested < locals.params.length + locals.locals.length)) :
+      (requested < locals.params.length + locals.locals.length) := by
+    exact valid
   have lowerValid (locals : Wasm.Locals) {smaller larger : Nat}
-      (le : smaller ≤ larger) (valid : locals.validIndex larger) :
-      locals.validIndex smaller := by
-    unfold Wasm.Locals.validIndex at valid ⊢
+      (le : smaller ≤ larger) (valid : (larger < locals.params.length + locals.locals.length)) :
+      (smaller < locals.params.length + locals.locals.length) := by
     omega
-  have initialFourteen : initial.validIndex 14 :=
+  have initialFourteen : (14 < initial.params.length + initial.locals.length) :=
     lowerValid initial (by omega) execution.scratchValid
   have finalFourteen := execution.validIndex initialFourteen
   have leftEleven :
-      ({ execution.afterResultCount with values := .i32 leftLow :: tail } :
-        Wasm.Locals).validIndex 11 :=
+      (11 < execution.afterResultCount.params.length + execution.afterResultCount.locals.length) :=
     inputValid execution.afterResultCount (.i32 leftLow :: tail)
       (lowerValid execution.afterResultCount (by omega) finalFourteen)
   obtain ⟨afterLeftLow, leftLowSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { execution.afterResultCount with values := .i32 leftLow :: tail })
       (value := .i32 leftLow) leftEleven
   have afterLeftFourteen := preserveValid leftLowSet
     (inputValid execution.afterResultCount (.i32 leftLow :: tail)
       finalFourteen)
   have leftTwelve :
-      ({ afterLeftLow with values := .i32 leftHigh :: tail } :
-        Wasm.Locals).validIndex 12 :=
+      (12 < afterLeftLow.params.length + afterLeftLow.locals.length) :=
     inputValid afterLeftLow (.i32 leftHigh :: tail)
       (lowerValid afterLeftLow (by omega) afterLeftFourteen)
   obtain ⟨afterLeftHigh, leftHighSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterLeftLow with values := .i32 leftHigh :: tail })
       (value := .i32 leftHigh) leftTwelve
   have afterLeftHighFourteen := preserveValid leftHighSet
     (inputValid afterLeftLow (.i32 leftHigh :: tail) afterLeftFourteen)
   have rightThirteen :
-      ({ afterLeftHigh with values := .i32 rightLow :: tail } :
-        Wasm.Locals).validIndex 13 :=
+      (13 < afterLeftHigh.params.length + afterLeftHigh.locals.length) :=
     inputValid afterLeftHigh (.i32 rightLow :: tail)
       (lowerValid afterLeftHigh (by omega) afterLeftHighFourteen)
   obtain ⟨afterRightLow, rightLowSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterLeftHigh with values := .i32 rightLow :: tail })
       (value := .i32 rightLow) rightThirteen
   have afterRightLowFourteen := preserveValid rightLowSet
     (inputValid afterLeftHigh (.i32 rightLow :: tail) afterLeftHighFourteen)
   have rightFourteen :
-      ({ afterRightLow with values := .i32 rightHigh :: tail } :
-        Wasm.Locals).validIndex 14 :=
+      (14 < afterRightLow.params.length + afterRightLow.locals.length) :=
     inputValid afterRightLow (.i32 rightHigh :: tail) afterRightLowFourteen
   obtain ⟨afterRightHigh, rightHighSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRightLow with values := .i32 rightHigh :: tail })
       (value := .i32 rightHigh) rightFourteen
   exact ⟨afterLeftLow, afterLeftHigh, afterRightLow, afterRightHigh,
     leftLowSet, leftHighSet, rightLowSet, rightHighSet⟩
@@ -9597,7 +9584,7 @@ theorem NaturalAddPrefixInstallation.exists_checkedExecution_of_admissions
       some (.i32 (UInt32.ofNat left.value)))
     (rightLocal : initial.get 1 =
       some (.i32 (UInt32.ofNat right.value)))
-    (scratchValid : initial.validIndex 15)
+    (scratchValid : (15 < initial.params.length + initial.locals.length))
     (memoryRelated : ResidentMemoryRel state store.mem)
     (valid : state.FrontierInvariant)
     (leftRelated : NaturalObjectRel state left leftValue leftHeader)
@@ -10364,7 +10351,7 @@ theorem NaturalSumWriterInstallation.wp_checkedMultiLimbResultProgram_of_operand
     (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
       store.memoryCap module 0)
     (heapRelated : LiveHeapRel before witness runtime)
-    (scratchValid : initial.validIndex 17)
+    (scratchValid : (17 < initial.params.length + initial.locals.length))
     (leftLocal : initial.get 0 =
       some (.i32 (UInt32.ofNat left.value)))
     (rightLocal : initial.get 1 =
@@ -10469,40 +10456,33 @@ theorem NaturalSumWriterInstallation.wp_checkedMultiLimbResultProgram_of_operand
   have valid17_of_set {beforeLocals afterLocals : Wasm.Locals}
       {index : Nat} {value : Wasm.Value}
       (updated : beforeLocals.set? index value = some afterLocals)
-      (beforeValid : beforeLocals.validIndex 17) :
-      afterLocals.validIndex 17 := by
+      (beforeValid : (17 < beforeLocals.params.length + beforeLocals.locals.length)) :
+      (17 < afterLocals.params.length + afterLocals.locals.length) := by
     have lengths := FirTalos.Correctness.locals_lengths_of_set? updated
-    unfold Wasm.Locals.validIndex at beforeValid ⊢
     omega
   have rawInputTop :
-      ({ initial with values :=
-        (.i32 (UInt32.ofNat result.value) :: tail) } :
-          Wasm.Locals).validIndex 17 := by
-    simpa [Wasm.Locals.validIndex] using scratchValid
+      (17 < initial.params.length + initial.locals.length) := by
+    exact scratchValid
   have rawInputValid :
-      ({ initial with values :=
-        (.i32 (UInt32.ofNat result.value) :: tail) } :
-          Wasm.Locals).validIndex 2 := by
-    unfold Wasm.Locals.validIndex at rawInputTop ⊢
+      (2 < initial.params.length + initial.locals.length) := by
     omega
   obtain ⟨afterRaw, rawSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { initial with values := (.i32 (UInt32.ofNat result.value) :: tail) })
       (value := .i32 (UInt32.ofNat result.value)) rawInputValid
-  have afterRawTop : afterRaw.validIndex 17 :=
+  have afterRawTop : (17 < afterRaw.params.length + afterRaw.locals.length) :=
     valid17_of_set rawSet rawInputTop
   have carryInputTop :
-      ({ afterRaw with values := (.i32 sum.2 :: tail) } :
-        Wasm.Locals).validIndex 17 := by
-    simpa [Wasm.Locals.validIndex] using afterRawTop
+      (17 < afterRaw.params.length + afterRaw.locals.length) := by
+    exact afterRawTop
   have carryInputValid :
-      ({ afterRaw with values := (.i32 sum.2 :: tail) } :
-        Wasm.Locals).validIndex 16 := by
-    unfold Wasm.Locals.validIndex at carryInputTop ⊢
+      (16 < afterRaw.params.length + afterRaw.locals.length) := by
     omega
   obtain ⟨afterCarryExtra, carryExtraSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRaw with values := (.i32 sum.2 :: tail) })
       (value := .i32 sum.2) carryInputValid
-  have afterCarryTop : afterCarryExtra.validIndex 17 :=
+  have afterCarryTop : (17 < afterCarryExtra.params.length + afterCarryExtra.locals.length) :=
     valid17_of_set carryExtraSet carryInputTop
   refine ⟨writerStore, heap, witnessExtension,
     closureAllocationsPersistent, finalHeapRelated, finalRelated, ?_⟩
@@ -10531,61 +10511,56 @@ theorem NaturalSumWriterInstallation.wp_checkedMultiLimbResultProgram_of_operand
       rw [carryUpdate.2 (by decide)]
       exact countAfterRaw
     have carryScratchValid :
-        ({ afterCarryExtra with values :=
-          (.i32 (count + count) :: tail) } :
-            Wasm.Locals).validIndex 17 := by
-      simpa [Wasm.Locals.validIndex] using afterCarryTop
+        (17 < afterCarryExtra.params.length + afterCarryExtra.locals.length) := by
+      exact afterCarryTop
     obtain ⟨lowFirst, lowFirstSet⟩ :=
       FirTalos.Correctness.locals_set?_exists
+        (locals := { afterCarryExtra with values := (.i32 (count + count) :: tail) })
         (value := .i32 (count + count)) carryScratchValid
-    have lowFirstTop : lowFirst.validIndex 17 :=
+    have lowFirstTop : (17 < lowFirst.params.length + lowFirst.locals.length) :=
       valid17_of_set lowFirstSet carryScratchValid
     have lowSecondValid :
-        ({ lowFirst with values :=
-          (.i32 (count + count + (count + count)) :: tail) } :
-            Wasm.Locals).validIndex 17 := by
-      simpa [Wasm.Locals.validIndex] using lowFirstTop
+        (17 < lowFirst.params.length + lowFirst.locals.length) := by
+      exact lowFirstTop
     obtain ⟨lowSecond, lowSecondSet⟩ :=
       FirTalos.Correctness.locals_set?_exists
+        (locals := { lowFirst with values := (.i32 (count + count + (count + count)) :: tail) })
         (value := .i32 (count + count + (count + count))) lowSecondValid
-    have lowSecondTop : lowSecond.validIndex 17 :=
+    have lowSecondTop : (17 < lowSecond.params.length + lowSecond.locals.length) :=
       valid17_of_set lowSecondSet lowSecondValid
     have lowThirdValid :
-        ({ lowSecond with values :=
-          (.i32 (checkedScale8Word count) :: tail) } :
-            Wasm.Locals).validIndex 17 := by
-      simpa [Wasm.Locals.validIndex] using lowSecondTop
+        (17 < lowSecond.params.length + lowSecond.locals.length) := by
+      exact lowSecondTop
     obtain ⟨lowThird, lowThirdSet⟩ :=
       FirTalos.Correctness.locals_set?_exists
+        (locals := { lowSecond with values := (.i32 (checkedScale8Word count) :: tail) })
         (value := .i32 (checkedScale8Word count)) lowThirdValid
-    have lowThirdTop : lowThird.validIndex 17 :=
+    have lowThirdTop : (17 < lowThird.params.length + lowThird.locals.length) :=
       valid17_of_set lowThirdSet lowThirdValid
     have highFirstValid :
-        ({ lowThird with values :=
-          (.i32 (count + count) :: tail) } : Wasm.Locals).validIndex 17 := by
-      simpa [Wasm.Locals.validIndex] using lowThirdTop
+        (17 < lowThird.params.length + lowThird.locals.length) := by
+      exact lowThirdTop
     obtain ⟨highFirst, highFirstSet⟩ :=
       FirTalos.Correctness.locals_set?_exists
+        (locals := { lowThird with values := (.i32 (count + count) :: tail) })
         (value := .i32 (count + count)) highFirstValid
-    have highFirstTop : highFirst.validIndex 17 :=
+    have highFirstTop : (17 < highFirst.params.length + highFirst.locals.length) :=
       valid17_of_set highFirstSet highFirstValid
     have highSecondValid :
-        ({ highFirst with values :=
-          (.i32 (count + count + (count + count)) :: tail) } :
-            Wasm.Locals).validIndex 17 := by
-      simpa [Wasm.Locals.validIndex] using highFirstTop
+        (17 < highFirst.params.length + highFirst.locals.length) := by
+      exact highFirstTop
     obtain ⟨highSecond, highSecondSet⟩ :=
       FirTalos.Correctness.locals_set?_exists
+        (locals := { highFirst with values := (.i32 (count + count + (count + count)) :: tail) })
         (value := .i32 (count + count + (count + count))) highSecondValid
-    have highSecondTop : highSecond.validIndex 17 :=
+    have highSecondTop : (17 < highSecond.params.length + highSecond.locals.length) :=
       valid17_of_set highSecondSet highSecondValid
     have highThirdValid :
-        ({ highSecond with values :=
-          (.i32 (checkedScale8Word count) :: tail) } :
-            Wasm.Locals).validIndex 17 := by
-      simpa [Wasm.Locals.validIndex] using highSecondTop
+        (17 < highSecond.params.length + highSecond.locals.length) := by
+      exact highSecondTop
     obtain ⟨highThird, highThirdSet⟩ :=
       FirTalos.Correctness.locals_set?_exists
+        (locals := { highSecond with values := (.i32 (checkedScale8Word count) :: tail) })
         (value := .i32 (checkedScale8Word count)) highThirdValid
     have commonFits : count.toNat + 1 ≤ count.toNat + sum.2.toNat := by
       simp [carryOne]
@@ -10666,7 +10641,7 @@ theorem NaturalSumWriterInstallation.wp_checkedMultiLimbResultProgram_of_admissi
     (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
       store.memoryCap module 0)
     (heapRelated : LiveHeapRel before witness runtime)
-    (scratchValid : initial.validIndex 17)
+    (scratchValid : (17 < initial.params.length + initial.locals.length))
     (leftLocal : initial.get 0 =
       some (.i32 (UInt32.ofNat left.value)))
     (rightLocal : initial.get 1 =
@@ -10807,7 +10782,7 @@ theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_multi_of_ad
     (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
       store.memoryCap module 0)
     (heapRelated : LiveHeapRel before witness runtime)
-    (scratchValid : initial.validIndex 17) :
+    (scratchValid : (17 < initial.params.length + initial.locals.length)) :
     let leftWords := paddedNaturalLimbWords count.toNat leftValue
     let rightWords := paddedNaturalLimbWords count.toNat rightValue
     let sum := addLimbWords leftWords rightWords 0
@@ -10897,7 +10872,7 @@ theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_multi_of_in
     (withinCap : (allocated.heapCursor - 1) / wasmPageBytes + 1 ≤
       store.memoryCap module 0)
     (heapRelated : LiveHeapRel before witness runtime)
-    (scratchValid : initial.validIndex 17)
+    (scratchValid : (17 < initial.params.length + initial.locals.length))
     (leftLocal : initial.get 0 =
       some (.i32 (UInt32.ofNat left.value)))
     (rightLocal : initial.get 1 =
@@ -10931,8 +10906,7 @@ theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_multi_of_in
   let count := checkedNaturalAddCount leftHeader rightHeader
   let carry := checkedNaturalAddCarry leftHeader rightHeader leftValue
     rightValue
-  have prefixScratchValid : initial.validIndex 15 := by
-    unfold Wasm.Locals.validIndex at scratchValid ⊢
+  have prefixScratchValid : (15 < initial.params.length + initial.locals.length) := by
     omega
   obtain ⟨execution⟩ :=
     installation.exists_checkedExecution_of_admissions
@@ -11680,7 +11654,7 @@ theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_of_installe
     (allocatorRelated : ResidentAllocatorRel before store
       allocator.frontierIndex)
     (heapRelated : LiveHeapRel before witness runtime)
-    (scratchValid : initial.validIndex 17)
+    (scratchValid : (17 < initial.params.length + initial.locals.length))
     (leftLocal : initial.get 0 =
       some (.i32 (UInt32.ofNat left.value)))
     (rightLocal : initial.get 1 =
@@ -11733,8 +11707,7 @@ theorem NaturalSumWriterInstallation.wp_checkedNatAddFallbackProgram_of_installe
         allocator.objectIndex writer.index)
       (CheckedNaturalAddPost witness runtime (leftValue + rightValue) tail)
       store { initial with values := tail } env := by
-  have prefixScratchValid : initial.validIndex 15 := by
-    unfold Wasm.Locals.validIndex at scratchValid ⊢
+  have prefixScratchValid : (15 < initial.params.length + initial.locals.length) := by
     omega
   obtain ⟨execution⟩ :=
     installation.exists_checkedExecution_of_admissions
@@ -11820,7 +11793,7 @@ theorem NaturalSumWriterInstallation.wp_natAddHeapDispatch_of_installedAdmission
     (allocatorRelated : ResidentAllocatorRel before store
       allocator.frontierIndex)
     (heapRelated : LiveHeapRel before witness runtime)
-    (scratchValid : initial.validIndex 17)
+    (scratchValid : (17 < initial.params.length + initial.locals.length))
     (leftLocal : initial.get 0 =
       some (.i32 (UInt32.ofNat left.value)))
     (rightLocal : initial.get 1 =
@@ -12377,8 +12350,8 @@ theorem NaturalAddInstallation.terminatesWith_heap_of_admissions
   have targetLocalsLength : installation.targetFunction.locals.length = 17 := by
     rw [localsEq, List.length_map, Array.length_toList,
       natAddFunction_locals_size]
-  have scratchValid : entry.validIndex 17 := by
-    simp [entry, Wasm.Locals.validIndex, Wasm.Function.toLocals,
+  have scratchValid : (17 < entry.params.length + entry.locals.length) := by
+    simp [entry, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, targetLocalsLength,
       Fir.Wasm.Emit.ResidentBigNumeric.natAddFunction]
   apply installation.writer.wp_natAddHeapDispatch_of_installedAdmissions
@@ -13159,31 +13132,33 @@ theorem terminatesWith_modFunctionImmediate_nonzero
         makeNaturalAdapted pair.mod_fits makeNaturalNotImport
         makeNaturalTargetFound)
   have rawValid :
-      ({ entry with values := [.i32 (immediateRemainderWord pair)] }).validIndex
-        2 := by
+      (2 < entry.params.length + entry.locals.length) := by
     simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       localsEq, Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
   obtain ⟨afterRaw, rawSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists rawValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 (immediateRemainderWord pair)] })
+      rawValid
   have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
   have savedValid :
-      ({ afterRaw with values := [.i32 (store.mem.read32 0)] }).validIndex 3 := by
-    simp only [Wasm.Locals.validIndex]
+      (3 < afterRaw.params.length + afterRaw.locals.length) := by
     simp [rawLengths.1, rawLengths.2, entry, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, localsEq,
       Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
   obtain ⟨afterSaved, savedSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists savedValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRaw with values := [.i32 (store.mem.read32 0)] })
+      savedValid
   have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
   have resultValid :
-      ({ afterSaved with values := [.i32 (immediateRemainderWord pair)]
-        }).validIndex 4 := by
-    simp only [Wasm.Locals.validIndex]
+      (4 < afterSaved.params.length + afterSaved.locals.length) := by
     simp [savedLengths.1, savedLengths.2, rawLengths.1, rawLengths.2,
       entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       localsEq, Fir.Wasm.Emit.ResidentNatArithmetic.modFunction]
   obtain ⟨afterResult, resultSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists resultValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterSaved with values := [.i32 (immediateRemainderWord pair)] })
+      resultValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction
           ([.i32 (UInt32.ofNat rightWord.value),

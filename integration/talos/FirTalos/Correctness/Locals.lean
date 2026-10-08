@@ -143,9 +143,9 @@ theorem findFVar?_lt_length
 /-- An in-bounds Talos local can always be updated by its checked setter. -/
 theorem locals_set?_exists
     {locals : Wasm.Locals} {index : Nat} {value : Wasm.Value}
-    (valid : locals.validIndex index) :
+    (valid : (index < locals.params.length + locals.locals.length)) :
     ∃ updated, locals.set? index value = some updated := by
-  simp only [Wasm.Locals.validIndex] at valid
+
   unfold Wasm.Locals.set?
   split
   · exact ⟨_, rfl⟩

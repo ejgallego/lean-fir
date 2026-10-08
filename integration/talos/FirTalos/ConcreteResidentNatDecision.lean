@@ -387,9 +387,7 @@ theorem terminatesWith_decisionFunctionImmediate_of_adapted
     rw [localsEq, List.length_map, Array.length_toList,
       decisionFunction_locals_size]
   have branchValid :
-      ({ entry with values :=
-        [.i32 (ResidentPrimitives.immediateNaturalDecisionResult kind
-          leftPayload rightPayload)] }).validIndex 2 := by
+      (2 < entry.params.length + entry.locals.length) := by
     cases kind <;>
       simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
         targetLocalsLength, decisionFunction,
@@ -397,7 +395,9 @@ theorem terminatesWith_decisionFunctionImmediate_of_adapted
         Fir.Wasm.Emit.ResidentBigNumeric.natDecLtFunction,
         Fir.Wasm.Emit.ResidentBigNumeric.natDecLeFunction]
   obtain ⟨afterBranch, branchSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists branchValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 (ResidentPrimitives.immediateNaturalDecisionResult kind leftPayload rightPayload)] })
+      branchValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction
           ([.i32 (UInt32.ofNat rightWord.value),

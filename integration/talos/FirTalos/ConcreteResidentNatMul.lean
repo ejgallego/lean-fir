@@ -593,49 +593,45 @@ theorem terminatesWith_mulFunctionImmediate_of_adapted
     rw [localsEq, List.length_map, Array.length_toList,
       mulFunction_locals_size]
   have raw64Valid :
-      ({ entry with values :=
-        [.i64 (product64 leftPayload rightPayload)] }).validIndex 20 := by
+      (20 < entry.params.length + entry.locals.length) := by
     simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       targetLocalsLength, Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction]
   obtain ⟨afterRaw64, raw64Set⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i64 (product64 leftPayload rightPayload)] })
       (value := .i64 (product64 leftPayload rightPayload)) raw64Valid
   have raw64Lengths := FirTalos.Correctness.locals_lengths_of_set? raw64Set
   have lowValid :
-      ({ afterRaw64 with values :=
-        [.i32 (productLow leftPayload rightPayload)] }).validIndex 12 := by
-    simp only [Wasm.Locals.validIndex]
+      (12 < afterRaw64.params.length + afterRaw64.locals.length) := by
     simp [raw64Lengths.1, raw64Lengths.2, entry, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, targetLocalsLength]
   obtain ⟨afterLow, lowSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRaw64 with values := [.i32 (productLow leftPayload rightPayload)] })
       (value := .i32 (productLow leftPayload rightPayload)) lowValid
   have lowLengths := FirTalos.Correctness.locals_lengths_of_set? lowSet
   have highValid :
-      ({ afterLow with values :=
-        [.i32 (productHigh leftPayload rightPayload)] }).validIndex 13 := by
-    simp only [Wasm.Locals.validIndex]
+      (13 < afterLow.params.length + afterLow.locals.length) := by
     simp [lowLengths.1, lowLengths.2, raw64Lengths.1, raw64Lengths.2,
       entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       targetLocalsLength]
   obtain ⟨afterHigh, highSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterLow with values := [.i32 (productHigh leftPayload rightPayload)] })
       (value := .i32 (productHigh leftPayload rightPayload)) highValid
   have highLengths := FirTalos.Correctness.locals_lengths_of_set? highSet
   have rawValid :
-      ({ afterHigh with values := [.i32 resultWord] }).validIndex 19 := by
-    simp only [Wasm.Locals.validIndex]
+      (19 < afterHigh.params.length + afterHigh.locals.length) := by
     simp [highLengths.1, highLengths.2, lowLengths.1, lowLengths.2,
       raw64Lengths.1, raw64Lengths.2, entry, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, targetLocalsLength]
   obtain ⟨afterRaw, rawSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterHigh with values := [.i32 resultWord] })
       (value := .i32 resultWord) rawValid
   have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
   have savedValid :
-      ({ afterRaw with values := [.i32 (resultStore.mem.read32 0)]
-        }).validIndex 21 := by
-    simp only [Wasm.Locals.validIndex]
+      (21 < afterRaw.params.length + afterRaw.locals.length) := by
     simp [rawLengths.1, rawLengths.2, highLengths.1, highLengths.2,
       lowLengths.1, lowLengths.2, raw64Lengths.1, raw64Lengths.2,
       entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
@@ -643,11 +639,11 @@ theorem terminatesWith_mulFunctionImmediate_of_adapted
       Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction]
   obtain ⟨afterSaved, savedSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRaw with values := [.i32 (resultStore.mem.read32 0)] })
       (value := .i32 (resultStore.mem.read32 0)) savedValid
   have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
   have resultValid :
-      ({ afterSaved with values := [.i32 resultWord] }).validIndex 22 := by
-    simp only [Wasm.Locals.validIndex]
+      (22 < afterSaved.params.length + afterSaved.locals.length) := by
     simp [savedLengths.1, savedLengths.2, rawLengths.1, rawLengths.2,
       highLengths.1, highLengths.2, lowLengths.1, lowLengths.2,
       raw64Lengths.1, raw64Lengths.2, entry, Wasm.Function.toLocals,
@@ -655,6 +651,7 @@ theorem terminatesWith_mulFunctionImmediate_of_adapted
       Fir.Wasm.Emit.ResidentNatArithmetic.mulFunction]
   obtain ⟨afterResult, resultSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterSaved with values := [.i32 resultWord] })
       (value := .i32 resultWord) resultValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction

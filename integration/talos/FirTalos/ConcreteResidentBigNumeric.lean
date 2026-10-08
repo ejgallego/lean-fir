@@ -2094,12 +2094,13 @@ theorem terminatesWith_magnitudeLimbNatural_inBounds_of_adapted
   have targetLocalsLength : targetFunction.locals.length = 1 := by
     simp [localsEq, magnitudeLimbSourceFunction_locals]
   have countValid :
-      ({ entry with values := [.i32 count] }).validIndex 3 := by
+      (3 < entry.params.length + entry.locals.length) := by
     simp [entry, arguments, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq,
       magnitudeLimbSourceFunction_params, targetLocalsLength]
   obtain ⟨afterCount, countSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 count] })
       (value := .i32 count) countValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction arguments
@@ -2177,12 +2178,13 @@ theorem terminatesWith_magnitudeLimbNatural_outOfBounds_of_adapted
   have targetLocalsLength : targetFunction.locals.length = 1 := by
     simp [localsEq, magnitudeLimbSourceFunction_locals]
   have countValid :
-      ({ entry with values := [.i32 count] }).validIndex 3 := by
+      (3 < entry.params.length + entry.locals.length) := by
     simp [entry, arguments, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq,
       magnitudeLimbSourceFunction_params, targetLocalsLength]
   obtain ⟨afterCount, countSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 count] })
       (value := .i32 count) countValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction arguments
@@ -2478,33 +2480,34 @@ theorem terminatesWith_naturalLimb_of_adapted
   have targetLocalsLength : targetFunction.locals.length = 1 := by
     simp [localsEq, sourceFunction_locals]
   have firstValid :
-      ({ entry with values := [.i32 (index + index)] }).validIndex 2 := by
+      (2 < entry.params.length + entry.locals.length) := by
     simp [entry, arguments, Wasm.Function.toLocals, Wasm.Function.numParams,
       paramsEq, sourceFunction_params, targetLocalsLength]
   obtain ⟨afterFirst, firstSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 (index + index)] })
       (value := .i32 (index + index)) firstValid
   have firstLengths :=
     FirTalos.Correctness.locals_lengths_of_set? firstSet
   have secondValid :
-      ({ afterFirst with values :=
-          [.i32 (index + index + (index + index))] }).validIndex 2 := by
+      (2 < afterFirst.params.length + afterFirst.locals.length) := by
     simp [firstLengths.1, firstLengths.2, entry, arguments,
       Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       sourceFunction_params, targetLocalsLength]
   obtain ⟨afterSecond, secondSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterFirst with values := [.i32 (index + index + (index + index))] })
       (value := .i32 (index + index + (index + index))) secondValid
   have secondLengths :=
     FirTalos.Correctness.locals_lengths_of_set? secondSet
   have thirdValid :
-      ({ afterSecond with values :=
-          [.i32 (ResidentPrimitives.scale8Word index)] }).validIndex 2 := by
+      (2 < afterSecond.params.length + afterSecond.locals.length) := by
     simp [secondLengths.1, secondLengths.2, firstLengths.1, firstLengths.2,
       entry, arguments, Wasm.Function.toLocals, Wasm.Function.numParams,
       paramsEq, sourceFunction_params, targetLocalsLength]
   obtain ⟨afterThird, thirdSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { afterSecond with values := [.i32 (ResidentPrimitives.scale8Word index)] })
       (value := .i32 (ResidentPrimitives.scale8Word index)) thirdValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction arguments
@@ -2701,29 +2704,35 @@ theorem terminatesWith_naturalLimbZero_of_adapted
   have targetLocalsLength : targetFunction.locals.length = 1 := by
     simp [localsEq, sourceFunction_locals]
   have firstValid :
-      ({ entry with values := [.i32 0] }).validIndex 2 := by
+      (2 < entry.params.length + entry.locals.length) := by
     simp [entry, arguments, Wasm.Function.toLocals, Wasm.Function.numParams,
       paramsEq, sourceFunction_params, targetLocalsLength]
   obtain ⟨afterFirst, firstSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists (value := .i32 0) firstValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 0] })
+      (value := .i32 0) firstValid
   have firstLengths :=
     FirTalos.Correctness.locals_lengths_of_set? firstSet
   have secondValid :
-      ({ afterFirst with values := [.i32 0] }).validIndex 2 := by
+      (2 < afterFirst.params.length + afterFirst.locals.length) := by
     simp [firstLengths.1, firstLengths.2, entry, arguments,
       Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       sourceFunction_params, targetLocalsLength]
   obtain ⟨afterSecond, secondSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists (value := .i32 0) secondValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterFirst with values := [.i32 0] })
+      (value := .i32 0) secondValid
   have secondLengths :=
     FirTalos.Correctness.locals_lengths_of_set? secondSet
   have thirdValid :
-      ({ afterSecond with values := [.i32 0] }).validIndex 2 := by
+      (2 < afterSecond.params.length + afterSecond.locals.length) := by
     simp [secondLengths.1, secondLengths.2, firstLengths.1, firstLengths.2,
       entry, arguments, Wasm.Function.toLocals, Wasm.Function.numParams,
       paramsEq, sourceFunction_params, targetLocalsLength]
   obtain ⟨afterThird, thirdSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists (value := .i32 0) thirdValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterSecond with values := [.i32 0] })
+      (value := .i32 0) thirdValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction arguments
         (fun final values =>
@@ -3076,12 +3085,13 @@ theorem terminatesWith_validateNatural_of_naturalAdmission
   have targetLocalsLength : validateNaturalTarget.locals.length = 1 := by
     simp [localsEq, validateNaturalFunction_locals]
   have countValid :
-      ({ entry with values := [.i32 header.aux1] }).validIndex 1 := by
+      (1 < entry.params.length + entry.locals.length) := by
     simp [entry, arguments, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, validateNaturalFunction_params,
       targetLocalsLength]
   obtain ⟨afterCount, countSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 header.aux1] })
       (value := .i32 header.aux1) countValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost validateNaturalTarget arguments

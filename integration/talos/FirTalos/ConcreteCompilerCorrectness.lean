@@ -8293,10 +8293,10 @@ theorem ConcreteLocalFrameAligned.validIndex
         targetStore targetLocals witness)
     (found :
       findFVar? (functionBindings sourceFunction) fvar = some index) :
-    targetLocals.validIndex index := by
+    (index < targetLocals.params.length + targetLocals.locals.length) := by
   have bounded := FirTalos.Correctness.findFVar?_lt_length found
   simp only [functionBindings, List.length_append, Array.length_toList] at bounded
-  simpa [ConcreteLocalFrameAligned, Wasm.Locals.validIndex, aligned.1,
+  simpa [ConcreteLocalFrameAligned, aligned.1,
     aligned.2] using bounded
 
 /-- A checked destination write preserves the exact concrete frame shape. -/
@@ -8317,7 +8317,9 @@ theorem ConcreteLocalFrameAligned.set?
         ConcreteLocalFrameAligned sourceFunction nextRuntime nextEnv nextStore
           updated nextWitness := by
   obtain ⟨updated, targetSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists (aligned.validIndex found)
+    FirTalos.Correctness.locals_set?_exists
+      (locals := targetLocals)
+      (aligned.validIndex found)
   have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
   exact ⟨updated, targetSet,
     ⟨lengths.1.trans aligned.1, lengths.2.trans aligned.2⟩⟩
@@ -13678,6 +13680,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_naturalLiteral
       subst alignedResultIndex
       obtain ⟨updated, targetSet⟩ :=
         FirTalos.Correctness.locals_set?_exists
+          (locals := targetLocals)
           (budgeted.1.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.naturalLiteralCall callFound
@@ -13778,6 +13781,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_stringLiteral
       subst alignedResultIndex
       obtain ⟨updated, targetSet⟩ :=
         FirTalos.Correctness.locals_set?_exists
+          (locals := targetLocals)
           (budgeted.1.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.stringLiteralCall callFound
@@ -13891,6 +13895,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
       scalarBytesFit operationFacts.2 budgeted.2 constructorFits
   obtain ⟨updated, targetSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := targetLocals)
       (budgeted.1.validIndex resultFound)
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.allocCtorCall callFound
@@ -14525,6 +14530,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_box
           budgeted.2 boxFits
       obtain ⟨updated, targetSet⟩ :=
         FirTalos.Correctness.locals_set?_exists
+          (locals := targetLocals)
           (budgeted.1.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.boxCall callFound
@@ -16936,6 +16942,7 @@ theorem
           budget boxFits
       obtain ⟨updated, targetSet⟩ :=
         FirTalos.Correctness.locals_set?_exists
+          (locals := targetLocals)
           (frameAligned.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.boxCall callFound
@@ -17081,6 +17088,7 @@ theorem
       subst alignedResultIndex
       obtain ⟨updated, targetSet⟩ :=
         FirTalos.Correctness.locals_set?_exists
+          (locals := targetLocals)
           (frameAligned.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.naturalLiteralCall callFound
@@ -17232,6 +17240,7 @@ theorem
       subst alignedResultIndex
       obtain ⟨updated, targetSet⟩ :=
         FirTalos.Correctness.locals_set?_exists
+          (locals := targetLocals)
           (frameAligned.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.stringLiteralCall callFound
@@ -17653,6 +17662,7 @@ theorem
       scalarBytesFit operationFacts.2 budget constructorFits
   obtain ⟨updated, targetSet⟩ :=
     FirTalos.Correctness.locals_set?_exists
+      (locals := targetLocals)
       (frameAligned.validIndex resultFound)
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.allocCtorCall callFound

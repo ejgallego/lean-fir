@@ -774,20 +774,19 @@ theorem terminatesWith_conversionFunctionChecked_of_adapted
     rw [localsEq, List.length_map, Array.length_toList,
       conversionFunction_locals_size]
   have branchValid :
-      ({ entry with values := [.i64 (UInt64.ofNat natural)] }).validIndex
-        (rawIndex kind) := by
+      ((rawIndex kind) < entry.params.length + entry.locals.length) := by
     cases kind <;>
       simp [entry, arguments, callArguments, Wasm.Function.toLocals,
         Wasm.Function.numParams, paramsEq, targetLocalsLength, rawIndex,
         conversionFunction, Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
         Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
   obtain ⟨afterBranch, branchSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists branchValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i64 (UInt64.ofNat natural)] })
+      branchValid
   have branchLengths := FirTalos.Correctness.locals_lengths_of_set? branchSet
   have rawValid :
-      ({ afterBranch with values := [.i64 (UInt64.ofNat natural)] }).validIndex
-        (rawIndex kind) := by
-    simp only [Wasm.Locals.validIndex]
+      ((rawIndex kind) < afterBranch.params.length + afterBranch.locals.length) := by
     cases kind <;>
       simp [branchLengths.1, branchLengths.2, entry, arguments, callArguments,
         Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
@@ -795,12 +794,12 @@ theorem terminatesWith_conversionFunctionChecked_of_adapted
         Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
         Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
   obtain ⟨afterRaw, rawSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists rawValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterBranch with values := [.i64 (UInt64.ofNat natural)] })
+      rawValid
   have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
   have savedValid :
-      ({ afterRaw with values := [.i64 (store.mem.read64 0)] }).validIndex
-        (savedIndex kind) := by
-    simp only [Wasm.Locals.validIndex]
+      ((savedIndex kind) < afterRaw.params.length + afterRaw.locals.length) := by
     cases kind <;>
       simp [rawLengths.1, rawLengths.2, branchLengths.1, branchLengths.2,
         entry, arguments, callArguments, Wasm.Function.toLocals,
@@ -809,12 +808,12 @@ theorem terminatesWith_conversionFunctionChecked_of_adapted
         Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
         Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
   obtain ⟨afterSaved, savedSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists savedValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRaw with values := [.i64 (store.mem.read64 0)] })
+      savedValid
   have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
   have resultValid :
-      ({ afterSaved with values := [.i64 (UInt64.ofNat natural)] }).validIndex
-        (resultIndex kind) := by
-    simp only [Wasm.Locals.validIndex]
+      ((resultIndex kind) < afterSaved.params.length + afterSaved.locals.length) := by
     cases kind <;>
       simp [savedLengths.1, savedLengths.2, rawLengths.1, rawLengths.2,
         branchLengths.1, branchLengths.2, entry, arguments, callArguments,
@@ -823,7 +822,9 @@ theorem terminatesWith_conversionFunctionChecked_of_adapted
         Fir.Wasm.Emit.ResidentUSize.ofNatFunction,
         Fir.Wasm.Emit.ResidentUSize.ofNatLTFunction]
   obtain ⟨afterResult, resultSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists resultValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterSaved with values := [.i64 (UInt64.ofNat natural)] })
+      resultValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction arguments
         (fun final values =>
@@ -1612,47 +1613,56 @@ theorem terminatesWith_toNatFunctionChecked_of_adapted
     rw [localsEq, List.length_map, Array.length_toList,
       toNatFunction_locals_size]
   have lowValid :
-      ({ entry with values := [.i32 (lowWord payload)] }).validIndex 1 := by
+      (1 < entry.params.length + entry.locals.length) := by
     simp [entry, arguments, Wasm.Function.toLocals, Wasm.Function.numParams,
       paramsEq, targetLocalsLength]
   obtain ⟨afterLow, lowSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists lowValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 (lowWord payload)] })
+      lowValid
   have lowLengths := FirTalos.Correctness.locals_lengths_of_set? lowSet
   have highValid :
-      ({ afterLow with values := [.i32 (highWord payload)] }).validIndex 2 := by
-    simp [Wasm.Locals.validIndex, lowLengths.1, lowLengths.2, entry, arguments,
+      (2 < afterLow.params.length + afterLow.locals.length) := by
+    simp [lowLengths.1, lowLengths.2, entry, arguments,
       Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       targetLocalsLength]
   obtain ⟨afterHigh, highSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists highValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterLow with values := [.i32 (highWord payload)] })
+      highValid
   have highLengths := FirTalos.Correctness.locals_lengths_of_set? highSet
   have rawValid :
-      ({ afterHigh with values := [.i32 resultWord] }).validIndex 3 := by
-    simp [Wasm.Locals.validIndex, highLengths.1, highLengths.2,
+      (3 < afterHigh.params.length + afterHigh.locals.length) := by
+    simp [highLengths.1, highLengths.2,
       lowLengths.1, lowLengths.2, entry, arguments, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, targetLocalsLength]
   obtain ⟨afterRaw, rawSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists rawValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterHigh with values := [.i32 resultWord] })
+      rawValid
   have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
   have savedValid :
-      ({ afterRaw with values :=
-        [.i64 (resultStore.mem.read64 0)] }).validIndex 4 := by
-    simp [Wasm.Locals.validIndex, rawLengths.1, rawLengths.2,
+      (4 < afterRaw.params.length + afterRaw.locals.length) := by
+    simp [rawLengths.1, rawLengths.2,
       highLengths.1, highLengths.2, lowLengths.1, lowLengths.2, entry,
       arguments, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       targetLocalsLength]
   obtain ⟨afterSaved, savedSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists savedValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRaw with values := [.i64 (resultStore.mem.read64 0)] })
+      savedValid
   have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
   have resultValid :
-      ({ afterSaved with values := [.i32 resultWord] }).validIndex 5 := by
-    simp [Wasm.Locals.validIndex, savedLengths.1, savedLengths.2,
+      (5 < afterSaved.params.length + afterSaved.locals.length) := by
+    simp [savedLengths.1, savedLengths.2,
       rawLengths.1, rawLengths.2, highLengths.1, highLengths.2,
       lowLengths.1, lowLengths.2, entry, arguments, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, targetLocalsLength,
       Fir.Wasm.Emit.ResidentUSize.toNatFunction]
   obtain ⟨afterResult, resultSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists resultValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterSaved with values := [.i32 resultWord] })
+      resultValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction arguments
         (fun final values =>

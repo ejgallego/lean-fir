@@ -466,45 +466,46 @@ theorem terminatesWith_natSubFunctionImmediate_of_adapted
     rw [localsEq, List.length_map, Array.length_toList,
       natSubFunction_locals_size]
   have choiceValid :
-      ({ entry with values := [.i32 (immediateDifferenceWord pair)]
-        }).validIndex 2 := by
+      (2 < entry.params.length + entry.locals.length) := by
     simp [entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       targetLocalsLength,
       Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction]
   obtain ⟨afterChoice, choiceSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists choiceValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { entry with values := [.i32 (immediateDifferenceWord pair)] })
+      choiceValid
   have choiceLengths := FirTalos.Correctness.locals_lengths_of_set? choiceSet
   have rawValid :
-      ({ afterChoice with values := [.i32 (immediateDifferenceWord pair)]
-        }).validIndex 2 := by
-    simp only [Wasm.Locals.validIndex]
+      (2 < afterChoice.params.length + afterChoice.locals.length) := by
     simp [choiceLengths.1, choiceLengths.2, entry, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, targetLocalsLength,
       Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction]
   obtain ⟨afterRaw, rawSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists rawValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterChoice with values := [.i32 (immediateDifferenceWord pair)] })
+      rawValid
   have rawLengths := FirTalos.Correctness.locals_lengths_of_set? rawSet
   have savedValid :
-      ({ afterRaw with values := [.i32 (store.mem.read32 0)]
-        }).validIndex 3 := by
-    simp only [Wasm.Locals.validIndex]
+      (3 < afterRaw.params.length + afterRaw.locals.length) := by
     simp [rawLengths.1, rawLengths.2, choiceLengths.1, choiceLengths.2,
       entry, Wasm.Function.toLocals, Wasm.Function.numParams, paramsEq,
       targetLocalsLength,
       Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction]
   obtain ⟨afterSaved, savedSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists savedValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterRaw with values := [.i32 (store.mem.read32 0)] })
+      savedValid
   have savedLengths := FirTalos.Correctness.locals_lengths_of_set? savedSet
   have resultValid :
-      ({ afterSaved with values := [.i32 (immediateDifferenceWord pair)]
-        }).validIndex 4 := by
-    simp only [Wasm.Locals.validIndex]
+      (4 < afterSaved.params.length + afterSaved.locals.length) := by
     simp [savedLengths.1, savedLengths.2, rawLengths.1, rawLengths.2,
       choiceLengths.1, choiceLengths.2, entry, Wasm.Function.toLocals,
       Wasm.Function.numParams, paramsEq, targetLocalsLength,
       Fir.Wasm.Emit.ResidentBigNumeric.natSubFunction]
   obtain ⟨afterResult, resultSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists resultValid
+    FirTalos.Correctness.locals_set?_exists
+      (locals := { afterSaved with values := [.i32 (immediateDifferenceWord pair)] })
+      resultValid
   have returned :
       FirTalos.Correctness.FunctionBodyPost targetFunction
           ([.i32 (UInt32.ofNat rightWord.value),
