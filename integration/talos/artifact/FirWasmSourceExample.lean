@@ -387,15 +387,23 @@ run_cmd do
     residentProjectionArtifact.module.runtimeOperations.filter
       Fir.Wasm.Emit.ResidentRuntime.supportsClosureProjection
   let expectedClosureCoordinates :=
-    Fir.Wasm.Emit.ResidentRuntime.prettyFormatSourceClosureProjectionCoordinates
-  unless closureProjections.size == 104 &&
-      closureProjections.all (fun operation =>
+    -- The catalogue records stored capture kinds. compileFixedClosureField
+    -- widens object-like projection results to tobject; deduplicate those
+    -- result coordinates without discarding any source-capture coordinate.
+    Fir.Wasm.Emit.ResidentRuntime.prettyFormatSourceClosureProjectionCoordinates.foldl
+      (init := #[]) fun coordinates (index, kind) =>
+        let coordinate := (index, Fir.Wasm.closureProjectionKind kind)
+        if coordinates.contains coordinate then coordinates else coordinates.push coordinate
+  let inventoryMatches (operations : Array Fir.Wasm.RuntimeOp) : Bool :=
+    operations.size == 104 &&
+      operations.all (fun operation =>
         (Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation).any
           expectedClosureCoordinates.contains) &&
       expectedClosureCoordinates.all (fun coordinate =>
-        closureProjections.any fun operation =>
+        operations.any fun operation =>
           Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation ==
-            some coordinate) do
+            some coordinate)
+  unless inventoryMatches closureProjections do
     let actualCoordinates := closureProjections.foldl (init := #[])
       fun coordinates operation =>
         match Fir.Wasm.Emit.ResidentRuntime.closureProjectionCoordinate? operation with
@@ -403,6 +411,23 @@ run_cmd do
             if coordinates.contains coordinate then coordinates else coordinates.push coordinate
         | none => coordinates
     throwError "resident Format closure-projection inventory changed ({closureProjections.size} actual operations, {expectedClosureCoordinates.size} expected coordinates): actual={repr actualCoordinates}; expected={repr expectedClosureCoordinates}"
+  -- Same-count mutations must still fail even though object and tobject share
+  -- an i32 lane. Check both an unexpected result kind and lost coordinate
+  -- coverage, in addition to the independent operation-count ratchet.
+  let wrongIndex4Kind := closureProjections.map fun operation =>
+    match operation with
+    | .closureProj target arity fixed 4 _ => .closureProj target arity fixed 4 .object
+    | _ => operation
+  let missingIndex4 := closureProjections.map fun operation =>
+    match operation with
+    | .closureProj target arity fixed 4 kind => .closureProj target arity fixed 3 kind
+    | _ => operation
+  if inventoryMatches wrongIndex4Kind then
+    throwError "resident Format closure inventory accepted a same-count wrong result kind"
+  if inventoryMatches missingIndex4 then
+    throwError "resident Format closure inventory accepted same-count missing coordinate coverage"
+  if inventoryMatches closureProjections.pop then
+    throwError "resident Format closure inventory accepted a missing operation"
   let residentClosureArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeClosureProjections
         residentProjectionArtifact with

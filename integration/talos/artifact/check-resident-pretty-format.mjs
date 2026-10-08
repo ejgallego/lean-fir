@@ -860,24 +860,21 @@ assert.ok(residentProjections.exports.some(({ name, kind }) =>
 assert.ok(residentClosures.exports.some(({ name, kind }) =>
   name === residentClosures.manifest.entry && kind === "function"),
 "resident-closure prettyM entry export is missing");
-for (const name of [
-  "fir_cproj_0_object",
-  "fir_cproj_0_tobject",
-  "fir_cproj_0_uint8",
-  "fir_cproj_1_object",
-  "fir_cproj_1_tobject",
-  "fir_cproj_1_uint8",
-  "fir_cproj_1_uint32",
-  "fir_cproj_2_object",
-  "fir_cproj_2_tobject",
-  "fir_cproj_3_object",
-  "fir_cproj_3_tobject",
-  "fir_cproj_4_object",
-]) {
+// Match every live projection result in the producer's pre-link manifest.
+// Stored descriptor kinds remain precise, while object-like results have
+// already been widened to tobject by compileFixedClosureField.
+const closureProjectionExportNames = new Set(residentProjections.manifest.imports
+  .filter(({ operation }) => operation.kind === "closureProj")
+  .map(({ operation }) => `fir_cproj_${operation.index}_${operation.result}`));
+for (const name of closureProjectionExportNames) {
   assert.ok(residentClosures.exports.some((entry) =>
     entry.name === name && entry.kind === "function"),
   `resident-closure prettyM helper export ${name} is missing`);
 }
+assert.deepEqual(residentClosures.exports
+  .filter(({ name, kind }) => name.startsWith("fir_cproj_") && kind === "function")
+  .map(({ name }) => name).sort(), [...closureProjectionExportNames].sort(),
+"resident-closure prettyM helper exports differ from the complete producer projection inventory");
 assert.ok(residentClosures.exports.some(({ name, kind }) =>
   name === "memory" && kind === "memory"),
 "resident-closure prettyM memory export is missing");
