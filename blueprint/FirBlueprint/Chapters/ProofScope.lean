@@ -2,6 +2,7 @@ import Verso
 import VersoManual
 import VersoBlueprint
 import FirBlueprint.Chapters.W6
+import FirBlueprint.RetainedInitializerScene
 
 open Verso.Genre Verso.Genre.Manual Informal
 open Verso.Genre.Manual.InlineLean
@@ -232,11 +233,11 @@ symbolic concrete byte addresses, distinct from the source location $`c`.
 *
   * Publication: step 13
   * The yielded heap object at $`c` is cached and marked persistent. Its source destination-bind frame is still pending.
-  * Publication executes cache/global updates and reloads the result representation; the target destination `local.set` is still pending. The rooted relation at $`A` and `HeapRegionClosed c` hold.
+  * Publication executes cache/global updates and reloads the result representation. Caller target locals/frames are already restored, with the result on the operand head and destination `local.set` pending. The rooted relation at $`A` and `HeapRegionClosed c` hold.
 *
   * Caller resumed: step 14
   * Bind $`d` to the heap object at $`c` and continue with $`k`. Joins and caller frames are exactly the original ones.
-  * Execute the destination `local.set` and restore the original target frames. The validated caller relation has the updated environment/global, budget $`B-\Delta` and only $`d`'s old reuse fact erased.
+  * Execute the destination `local.set`; the original target frames remain restored. The validated caller relation has the updated environment/global, budget $`B-\Delta` and only $`d`'s old reuse fact erased.
 :::
 
 The runtime definitions
@@ -245,6 +246,58 @@ append the two ordered events `Array.mkEmpty` and `Array.push`, with their exact
 source arguments/results. The primitive responses preserve world. Publication
 changes the global/persistence state; binding changes the environment. This
 local return has cache/bind frames and is not a completed export evaluation.
+
+## Source and target at four proof checkpoints
+
+These native Illuminate panels depict a *symbolic family of theorem
+checkpoints*, not a sampled execution or a universal proof. Assume the related
+supported caller/root, cold cache, source primitive laws, installed handler
+laws and $`\Delta\le B` from the premise table. Each panel's derived facts are
+conditional on those inputs. The figures use schematic layout coordinates;
+source locations and concrete byte addresses have separate meanings.
+
+The saved caller anchor $`(r_h,S_h,w_h)` may precede the initializer entry
+$`(r_0,S_0,w_0)`. Both anchors, cutoff $`c` and original ABI $`A` stay fixed.
+Phase-indexed witnesses $`w_k` and addresses $`a_k` are existential; the panels
+do not assume a generic equality or extension law between them. The physical
+result $`q_k` and tagged-element word $`z_k` are different roles. A drawn
+saved token $`\ell` stands for any tracked token, if one exists.
+
+*Step 2 — cold entry.* The saved cache/bind and generated call/label
+continuations are installed; no fresh object mapping is asserted yet.
+The entry segment takes three target steps.
+
+```diagram
+FirBlueprint.RetainedInitializerScene.entered
+```
+
+*Step 12 — local return.* Ten body source steps have produced the singleton
+Array and a fresh-yield relation. The tagged element is data, with no owned
+heap edge. The body target-path length $`T` is existential.
+
+```diagram
+FirBlueprint.RetainedInitializerScene.returned
+```
+
+*Step 13 — publication.* The source still has its callee environment/joins
+and pending bind capturing caller $`E,J`. The target has already restored
+caller locals/frames and reloaded $`q_{13}`; only its destination `local.set`
+remains pending. This is the thirteen-step theorem's rooted/closed endpoint.
+Publication contributes seven target steps.
+
+```diagram
+FirBlueprint.RetainedInitializerScene.published
+```
+
+*Step 14 — caller resumption.* The companion theorem restores source
+$`E[d\mapsto\operatorname{heap}(c)]`, caller joins and frames. The target writes
+the corresponding local index $`i` in one step; its frames remain restored.
+The public fourteen-step result exposes validated caller restoration, without
+a separate final `HeapRegionClosed` conjunct.
+
+```diagram
+FirBlueprint.RetainedInitializerScene.resumed
+```
 
 ## Why closure of the fresh graph protects the caller
 
