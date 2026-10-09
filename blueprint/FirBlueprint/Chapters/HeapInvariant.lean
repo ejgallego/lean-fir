@@ -260,6 +260,9 @@ existing rooted global pre-bind outcome. The final source bind and target
 only the destination's old reuse fact is removed.
 
 The retained RC2 initializer is a useful complete consumer of these rules.
+The {ref "worked-retained-initializer"}[worked proof] follows its caller,
+construction and publication states, with exact retained premises and the
+separate thirteen- and fourteen-step conclusions.
 Its actual body is two literals, empty Array allocation, UInt8 boxing,
 fresh non-full tagged push and return. `body_returns` ([source](https://github.com/ejgallego/lean-fir/blob/340f4612ac622aa39d6a870528f96d6b827d97b8/integration/talos/retained-initializer/RetainedArrayCalls.lean#L620)) derives ten source
 steps and the corresponding target path. The complete validated/rooted let

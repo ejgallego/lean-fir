@@ -139,6 +139,202 @@ coverage of every failure would require further arguments. A finite regression
 input range does not restrict the universal instance statement, and stored
 compression does not certify Level-1 or arbitrary DEFLATE.
 
+# Worked proof: publishing the retained initializer
+%%%
+tag := "worked-retained-initializer"
+%%%
+
+Consider one actual block of the captured Stored program: a caller's let
+binding invokes `RetainedRC2.initializer` with no arguments. The initializer
+builds an Array containing tagged zero with capacity five. We can prove this
+block for every related caller state satisfying the premises below, even
+though {bpref "stored-export-instance"}[] for the whole export remains open.
+There is no finite list of caller heaps or inputs in the theorem.
+
+The accepted source theorem
+[`rootedLet_publishesAtBind`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1016)
+derives thirteen source steps, an actual finite target path, the rooted relation
+at the original export ABI, and closure of the fresh heap region. Its
+[`rootedLet_publishes_and_resumesCaller`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1100)
+companion adds the destination bind and derives the fourteen-step restored
+caller. The latter statement exposes caller restoration rather than a separate
+final region-closure conjunct. These are reviewed accepted theorem sources;
+this exposition adds no Lean association or fresh retained-initializer proof
+build. Their statement/proof files at `f6850d79f` are unchanged at this chapter's
+`61fae7690` exposition base.
+
+## What is quantified, and what remains assumed?
+
+The fixed program and initializer do not fix the caller runtime. Both theorems
+quantify supported caller functions, related source/target states, environments,
+stores, witnesses and continuations. Their exact invocation is a let whose
+value is the captured initializer's nullary full application.
+Write $`\Delta` for the five-slot Array allocation cost,
+{InlineLean.lean}`Fir.Wasm.Concrete.residentArrayAllocationBytes 5`.
+
+:::table +header
+*
+  * Retained premise
+  * Meaning in this example
+*
+  * Supported caller and validated current relation
+  * The actual compiled/adapted function, current let and saved frames are related. Active-result and root-agreement evidence retain the original export ABI $`A`, even though the initializer returns an object.
+*
+  * Cold cache
+  * The initializer is absent from the source runtime globals. This proof takes the cache-miss branch.
+*
+  * `FreshArrayExternalContract`
+  * Uniform source laws specify empty allocation and the fresh, non-full, tagged-element push branch. The actual calls use capacity five and payload zero; wider Array behavior is outside this contract.
+*
+  * Installed concrete handler laws
+  * Empty allocation and in-place push conform for every related concrete request, including the intermediate runtime and witness produced by allocation. Source laws alone do not establish these implementation equations.
+*
+  * Finite headroom
+  * $`\Delta\le B`, where $`B` is the related allocation budget. Boxing and this push branch allocate no additional physical bytes.
+:::
+
+The client supplies neither a source execution nor a target path. Callee
+support, generated cache/continuation facts, the five binding-kind lookups and
+the post-body resource scope are derived inside the proof. The handler laws
+remain contracts for the installed concrete host; they do not prove execution
+of a resident W7 helper or JavaScript implementation.
+
+## Follow the actual states
+
+Let $`r_0,S_0,w_0` be the runtime, concrete store and witness at initializer
+entry, and set $`c=r_0.\mathrm{nextLocation}`. The saved caller can have an older
+entry runtime/store/witness and a different historical cutoff; those anchors
+remain fixed. Let $`d`
+be the destination and $`k` its continuation. Target addresses below are
+symbolic concrete byte addresses, distinct from the source location $`c`.
+
+:::table +header
+*
+  * Milestone
+  * Source state
+  * Concrete target and representation
+*
+  * Caller before the call: step 0
+  * Code is the let binding of the initializer to $`d`; environment, joins and caller frames are saved. The cache is cold.
+  * Validated generated lazy-call code and related locals/store. The original root ABI is $`A`.
+*
+  * Cold callee entry: step 2
+  * Initializer code starts with empty local environment. Cache and destination-bind frames sit above the saved caller frames.
+  * The emitted call/label continuation is installed. The active construction scope is anchored at $`r_0,S_0,w_0` and cutoff $`c`.
+*
+  * Six body steps completed: step 8
+  * The two literals, empty-Array call/bind and UInt8 boxing have run. The empty Array is at $`c` with capacity five, boxed tagged zero is bound, and the runtime is `afterMkEmpty` applied to $`r_0`.
+  * Allocation derives a witness $`w_1` mapping $`c` to a concrete address $`a`. A physical word $`z` represents tagged zero; its numeric encoding is not assumed.
+*
+  * Initializer's local return: step 12
+  * Three push steps and one return complete the ten-step body. The Array now contains one tagged zero; the runtime is `afterPush` applied to $`r_0`. Cache/bind frames remain above the caller.
+  * The fresh in-place push stores $`z` without a second allocation. The fresh-yield relation supplies a physical result $`q` representing the heap object at $`c`, under the produced witness and original construction entry.
+*
+  * Publication: step 13
+  * The yielded heap object at $`c` is cached and marked persistent. Its source destination-bind frame is still pending.
+  * Publication executes cache/global updates and reloads the result representation; the target destination `local.set` is still pending. The rooted relation at $`A` and `HeapRegionClosed c` hold.
+*
+  * Caller resumed: step 14
+  * Bind $`d` to the heap object at $`c` and continue with $`k`. Joins and caller frames are exactly the original ones.
+  * Execute the destination `local.set` and restore the original target frames. The validated caller relation has the updated environment/global, budget $`B-\Delta` and only $`d`'s old reuse fact erased.
+:::
+
+The runtime definitions
+[`afterMkEmpty` and `afterPush`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L59)
+append the two ordered events `Array.mkEmpty` and `Array.push`, with their exact
+source arguments/results. The primitive responses preserve world. Publication
+changes the global/persistence state; binding changes the environment. This
+local return has cache/bind frames and is not a completed export evaluation.
+
+## Why closure of the fresh graph protects the caller
+
+Transport from the historical caller witness into $`w_0`, followed by the
+related initializer-entry heap, puts saved retained-token locations $`\ell`
+below $`c`. No equality of the two entry cutoffs is assumed.
+The Array root is $`c` itself, and its only element is tagged zero, which has no
+owned heap edge. Allocation, the in-place push and publication maintain closure
+at the original cutoff. In the notation of the
+{ref "heap-caller-invariant"}[heap/caller argument],
+
+$$`\ell<c\le j.`
+
+Here $`j` is any owned-reachable source location from the returned root,
+distinct from the physical target result $`q`.
+
+Consequently marking the returned graph persistent cannot reach the caller's
+saved token locations. {bpref "fresh-publication-separation"}[] derives this
+separation and transports the retained facts. Representation at the object ABI
+alone would not imply it: an arbitrary older object could reach a saved token.
+
+The current witness may evolve, while the historical caller and initializer
+entry runtime/store/witness anchors remain fixed. Transport to the produced
+witness is legitimate. Resetting the construction entry to the post-allocation
+runtime/store/witness would move its cutoff past $`c` and invalidate the
+returned-root lower bound. The proof transports the original caller facts
+through the active construction scope, then consumes it to restore the caller.
+
+## Compose local steps into the two endpoints
+
+The proof is a concrete composition, without the general current-step
+admission law as a premise:
+
+1. [`stageFreshLazyAtRoot`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L58) takes one source step and saves the validated caller/root/publication continuation; the target state is unchanged.
+2. [`ConcreteStructuredFreshLazyFrame.enter`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L109) takes one source step and three target steps into the cold initializer. [`initializer_bindingKinds`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L440) derives the actual five local ABI facts from supported compilation.
+3. [`literals_mkEmpty_box`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L545) supplies six body steps; [`push_stage_call_bind`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L303) supplies three more. [`body_returns`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L621) adds the return and composes their target paths. Region-indexed local/host transports derive the fresh-yield relation at the original entry; the yielded value is the initializer's local endpoint.
+4. [`ConcreteStructuredFreshLazyReturned.publish`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L199) consumes that fresh yield and saved frame: one source step and seven target steps reach the rooted pre-bind outcome, preserving region closure.
+5. The fourteen-step companion uses the actual source bind and target `local.set`, then reindexes the saved root agreement at the unchanged caller frame stacks.
+
+Thus the source counts are $`1+1+10+1=13` and $`13+1=14`. Target paths are
+concatenated with their actual lengths; the top-level theorems quantify the
+total target count existentially. The source and target do not share a clock.
+The final caller statement retains $`A`, not a replacement object ABI chosen
+because the initializer returned an Array.
+
+## What this contributes to the whole Stored theorem
+
+This block supplies a real semantic proof ingredient and tests the maintained
+relation design: saved validated caller, fixed construction entry, evolving
+representation and fresh-result publication fit together. It proves neither
+all reached operations of Stored nor its whole-export
+$`P_{\mathrm{success}}`. General nested heap misses, producer/use-site
+provenance and current-step admission remain obligations.
+
+The current {bpref "conditional-return"}[] consumer requires a uniform law
+for every supported function and recursively validated current outcome of the
+program. This block derives its own paths directly; it does not construct that
+whole law. The independent {bpref "stored-export-instance"}[] must cover the
+remaining code; its planned route through {bpref "conditional-return"}[] must
+discharge that consumer's interface before a complete successful-export result
+can follow. A direct selected-entry proof could use another route. The eventual
+general theorem is a later proof route, not a premise of this example.
+
+## A state-grounded visualization specification
+
+A future Illuminate scene can make the table inspectable using existing FIR
+player/interaction infrastructure; this chapter specifies the scene, not a
+new viewer implementation. Show paired source and target panels at the
+milestones above, with expandable body steps and lemma links.
+
+* Use source locations and a fixed line $`c` in the source heap panel; put the
+  saved retained-token region below it and the fresh Array graph at or above it.
+  Show the tagged leaf as data, not a heap node. Concrete memory has its own
+  address/frontier axis; $`c` is not a Wasm byte address.
+* Overlay the proof-only witness mapping $`c\mapsto a` after allocation,
+  labelled existential and evolving. Keep the historical caller entry and
+  original root ABI $`A` visible and fixed. Distinguish the saved caller's
+  historical cutoff from the initializer's current entry cutoff.
+* Pair each source step with its derived finite target segment: zero target
+  steps at staging, three at entry, the body path, seven at publication and
+  destination binding. Do not animate equal source/target clocks or invent
+  numeric addresses/total target counts.
+* At publication show persistence/cache updates and a pending bind; only the
+  fourteen-step view changes the destination and restores the caller. Keep
+  the retained contract/headroom panel and the open whole-export goal visible.
+
+The viewer would display theorem-supplied states and paths, or clearly labelled
+representative instantiations. It must not present a sampled animation as the
+universal proof or as execution of a released resident-linked artifact.
+
 # Compiler phases and pass composition
 %%%
 tag := "compiler-phases"

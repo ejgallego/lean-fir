@@ -76,7 +76,7 @@ semantic examples, but have different conclusions from the whole-export goal.
 *
   * Captured initializer family, $`Q_{\mathrm{init}}`
   * A derived target path matches thirteen source steps and fresh-region publication; the fourteen-step companion restores the rooted validated caller.
-  * Genuine local semantic proofs cited as reviewed source evidence. Primitive/handler laws, related callers, cold cache and finite headroom remain inputs; neither theorem proves the whole export.
+  * Genuine local semantic proofs cited as reviewed source evidence. Primitive/handler laws, related callers, cold cache and finite headroom remain inputs; neither theorem proves the whole export. The {ref "worked-retained-initializer"}[worked proof] follows the actual states and lemma composition.
 *
   * {bpref "rooted-steps"}[] and {bpref "conditional-return"}[]
   * Every finite source prefix has a matching target path; a successful source evaluation yields an actual export return with the selected ABI and exact observation.
