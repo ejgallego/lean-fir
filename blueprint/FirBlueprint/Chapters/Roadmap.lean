@@ -17,12 +17,13 @@ the intended argument, assumptions, holes, design choices and useful next work
 from this document. FIR proof work follows its owners; VBP evaluation checks
 whether the tool can represent that argument and explain useful next actions.
 
-Read the {ref "retained-example-boundary"}[concrete lean-zip account] first:
-source application theorems and retained initializer proofs supply real
-semantic examples. The {bpref "successful-export-property"}[successful-export property],
-open {bpref "stored-export-instance"}[program instance] and general
-{bpref "validated-return"}[compiler theorem] then use one exact return relation.
-Finite execution checks remain validation evidence alongside this proof plan.
+Start with the {ref "w6-theorem-menu"}[theorem statements and status], then the
+{ref "w6-machines"}[machines], {ref "w6-rooted-relation"}[relation] and
+{ref "w6-proof-mechanism"}[conditional proof mechanism]. The
+{ref "retained-example-boundary"}[concrete lean-zip account] gives genuine source
+application and initializer theorems. The open fixed-program instance and the
+eventual general theorem share one successful-export property over all allowed
+inputs; finite execution checks remain separate validation evidence.
 
 The W6 chapter contains the mathematical statements and dependency graph. This
 page links to those nodes without adding planning arrows to the mathematical
@@ -37,9 +38,11 @@ instructions. The completed migration census remains in Git history.
 
 ## 1. Make the selected argument recoverable
 
-Define the property and concrete instance before following
+State the guarantee and its status before following
 {bpref "validated-return"}[] to its intended conclusion,
 retained execution assumptions, unfinished specification and admission proof.
+The {ref "w6-invariant-design"}[invariant questions] are motivated by the
+guarded step proof, rather than introduced as an unexplained list of predicates.
 The formal slice already exposes {bpref "external-spec"}[] and
 {bpref "admission-closure"}[] as holes. Explain how the broader
 {bpref "closed-export"}[] adds faults and how {bpref "resident-linking"}[]

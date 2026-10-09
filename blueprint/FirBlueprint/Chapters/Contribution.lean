@@ -18,6 +18,13 @@ statement, trust and consumer review; its September 2026 scope is not a current
 assignment. Publishing an external task follows review of its exact statement
 and reproducible environment.
 
+Use the {ref "w6-theorem-menu"}[theorem menu] to identify the promised property
+and its current status before choosing an obligation. A proof for a selected
+program still covers all of its allowed inputs. Its independent route through
+the {ref "w6-proof-mechanism"}[conditional simulation] can guide the general
+invariant; future specialization of the general theorem is a later proof route,
+not a prerequisite of that initial instance proof.
+
 # Authority, holes and retained conditions
 %%%
 tag := "contribution-authority"

@@ -16,32 +16,21 @@ open Verso.Genre.Manual.InlineLean
 
 #doc (Manual) "W6: from validated compiler output to execution" =>
 
-This chapter's original declaration narrative was reviewed at FIR `81bb0e2ab`.
-The current package uses accepted VBP `19451b009` and Lean 4.34.1; its Lean
-associations are checked against the current FIR checkout and official
-worktree-local Talos overlay. Historical PR475 candidate evaluations retain
-their separate revisions in the {ref "evaluation-findings"}[evaluation cases].
-The accepted-main text review on 2026-10-05 uses FIR
-`8f4222cb2`, including W6 checkpoint `f6850d79f`. Newer accepted results are
-explained in the {ref "heap-caller-invariant"}[maintained heap/caller argument]
-as reviewed source evidence. A source citation does not itself add a Lean
-association. In particular, construction-step preservation and the
-fresh saved validated caller have advanced; general heap-miss admission and
-resident linking remain open. An absent association here is an artifact
-boundary, not evidence that the accepted proof is missing.
+The goal is a compiler guarantee: when a supported source program returns,
+its compiled export executes and returns a related value at the export's
+selected ABI, preserving the source observation. Some conditional ingredients
+are proved; the whole-program instance and the general compiler theorem still
+have open obligations. The statements below distinguish these claims before
+explaining their proof.
 
-The goal is to make assumptions and useful remaining contributions visible.
-The {ref "documentation-migration"}[source and evidence boundaries] identify
-the maintained argument and its production source/audit authorities.
-
-*Reading the graph.* An arrow is a mathematical dependency. Existing nodes
-use Lean dependency inference; open nodes have explicitly authored proof plans.
-A proved conditional result and a theorem eliminating its premise are separate
-nodes. The Blueprint is the specification and obligation map for these targets;
-its draft statements and admitted proofs evolve together. Tags describe our editorial classification; they do not change
-Blueprint's computed status. Resource contracts remain explicit execution
-conditions. Integration and axiom evidence are discussed in the evaluation
-chapter, separately from the graph's formalization colors.
+Read the {ref "w6-theorem-menu"}[theorem menu], then the
+{ref "w6-machines"}[two machines], their
+{ref "w6-rooted-relation"}[rooted relation] and the
+{ref "w6-proof-mechanism"}[step-to-return argument]. The later node catalog
+expands the invariant and operation obligations in that argument. The
+{ref "retained-example-boundary"}[lean-zip account] supplies the concrete source
+and initializer theorems; {ref "development-roadmap"}[the roadmap] explains
+how fixed-program proofs can lead to general correctness.
 
 :::author "w6" (name := "FIR W6 proof lane")
 :::
@@ -64,7 +53,49 @@ Execution
 Open obligations
 :::
 
-# Observable contracts
+# Guarantees and target theorems
+%%%
+tag := "w6-theorem-menu"
+%%%
+
+The first goal is successful-return correctness, written
+$`P_{\mathrm{success}}(p)`. Fixing $`p` fixes a program, not an input: a program
+instance must cover every related admitted entry and input. The source
+application theorem and the initializer proofs below are already useful
+semantic examples, but have different conclusions from the whole-export goal.
+
+:::table +header
+*
+  * Claim
+  * Guarantee
+  * Status and retained premises
+*
+  * Source stored-compression roundtrip, $`Q_{\mathrm{stored}}`
+  * Decoding the compressed source bytes returns the original arbitrary byte array, with an explicit decoder output-size bound.
+  * Reviewed theorem source at the pinned lean-zip revision; no fresh external build or Blueprint association. See the {ref "retained-example-boundary"}[source statement].
+*
+  * Captured initializer family, $`Q_{\mathrm{init}}`
+  * A derived target path matches thirteen source steps and fresh-region publication; the fourteen-step companion restores the rooted validated caller.
+  * Genuine local semantic proofs cited as reviewed source evidence. Primitive/handler laws, related callers, cold cache and finite headroom remain inputs; neither theorem proves the whole export.
+*
+  * {bpref "rooted-steps"}[] and {bpref "conditional-return"}[]
+  * Every finite source prefix has a matching target path; a successful source evaluation yields an actual export return with the selected ABI and exact observation.
+  * Proved conditional theorems. Uniform compiler admission, address-space safety and the existing entry/cache/arity conditions are supplied.
+*
+  * {bpref "stored-export-instance"}[]
+  * $`P_{\mathrm{success}}(p_{\mathrm{stored}})` for the selected captured program, universally over its allowed inputs.
+  * Open. First construct this program's semantic facts and use the proved conditional consumer; the unfinished general theorem is not a prerequisite.
+*
+  * {bpref "validated-return"}[]
+  * Eventually, $`\forall p,\ H(p)\Longrightarrow P_{\mathrm{success}}(p)` for supported compiled exports.
+  * Local composition is checked, but the external specification and admission construction are explicit holes. $`H` is static supported-export/compilation evidence; compiler-owned admission must be derived.
+*
+  * Faults, closed exports and resident linking
+  * {bpref "conditional-fault"}[] proves a refined executable trap from a supplied certificate. {bpref "closed-export"}[] would combine prefixes, returns and faults; {bpref "resident-linking"}[] adds installed implementations.
+  * The certificate consumer is proved; general fault construction and both extensions are open. Linking and released-byte correctness require their own bridges.
+:::
+
+## The successful-export property
 
 :::definition "return-post" (parent := "contracts") (lean := "FirTalos.Concrete.RefinedReturnPost") (autoDeps := true)
 A successful target return represents the exact source value at the specified
@@ -107,6 +138,222 @@ and does not determine globals or the location cursor. This rough definition
 uses the exact wrapper conclusion at both instance and general levels; the
 stronger path-resolved internal theorem supplies proof evidence.
 :::
+
+## First whole-program instance
+
+:::theorem "stored-export-instance" (parent := "execution") (owner := "w6") (tags := "open, statement-review") (priority := "high") (uses := "successful-export-property")
+For the actual captured final impure program with selected entry
+`Zip.Wasm.compressStored`, prove $`P_{\mathrm{success}}(p_{\mathrm{stored}})`
+after its production supported-export assembly. The source nomination is
+lean-zip `273d0d6cd9cab77c7f3489b0b0b1f6e543315d21` with zip-common
+`4425bab1f9522307d77e8d485bc536149ba31c36`. The compiled module and result ABI
+must be those supplied by the selected export.
+
+This rough instance theorem remains open. It quantifies every related admitted
+input, entry runtime and successful finite source evaluation, with the same
+observation and return postcondition as the general target. Source primitive
+laws, installed implementation conformance and finite resources remain explicit
+execution contracts. A finite smoke corpus supplies separate validation evidence.
+The {ref "retained-example-boundary"}[concrete account] identifies existing
+source application and initializer theorems, plus the further bridges needed
+for a released-byte roundtrip.
+:::
+:::proof "stored-export-instance" (uses := "conditional-return")
+The current independent route checks the actual captured declarations/body,
+export/ABI and lowering/adaptation equations, then constructs the program's
+semantic admission and maintained-invariant facts. Concrete initializer blocks
+already derive source/target paths and caller preservation; complete operation
+coverage, intermediate provenance and heap-miss admission still need proof.
+Supply the resulting admission to the existing conditional return consumer.
+Its current interface quantifies every supported function and recursively
+validated current outcome of this program; proving only the initializer's
+reached states does not discharge that uniform law. Static validator acceptance
+alone cannot supply these semantic premises.
+
+After {bpref "validated-return"}[] is complete, a future route may specialize
+that general theorem and discharge this program's premises. That planned route
+does not form a current proof dependency. The statement, quantified input scope
+and retained conditions must stay the same when its proof route changes.
+:::
+
+## Eventual general theorem
+
+The intended general statement is
+$`\forall p,\ H(p)\Longrightarrow P_{\mathrm{success}}(p)`.
+Here $`H(p)` is supported-export and static compilation, adaptation and
+host-resolution evidence. The independent external/resource/entry contracts
+still scope the invocations quantified in $`P_{\mathrm{success}}`;
+compiler-owned admission, provenance and heap-miss preservation must be derived.
+{bpref "validated-return"}[] is the checked local assembly for this target,
+with unfinished {bpref "external-spec"}[] and {bpref "admission-closure"}[].
+It is not a completed compiler theorem. The later catalog retains its formal
+attachment and explicit native-status caveat.
+
+# The two machines
+%%%
+tag := "w6-machines"
+%%%
+
+The source is FIR's final impure LCNF machine. The target is the structured
+machine for the Wasm subset emitted by the adapter, executing ordinary
+instructions and imported calls through Talos. It runs the contracted module
+with resolved hosts; a theorem about resident-linked or released bytes is a
+later boundary. Neither machine is native execution of the original Lean source.
+
+:::table +header
+*
+  * Machine
+  * Configuration and transition
+  * Observable boundary
+*
+  * Source
+  * {name Fir.LeanIR.Impure.MachineState}`MachineState` contains the program, current code or yielded/call control, environment, joins, continuation frames and runtime. {name Fir.LeanIR.Impure.executeStep}`executeStep` either advances, returns an observation or reports a semantic fault; {name Fir.LeanIR.Impure.ExecSteps}`ExecSteps` records a finite execution.
+  * A return observation contains value, heap, world and ordered external trace. Globals and the location cursor belong to runtime state but are absent from this public observation.
+*
+  * Concrete target
+  * {name FirTalos.Correctness.StructuredWasmState}`StructuredWasmState` contains the Talos store, running/branch/return/halted control and block/loop/call frames. {name FirTalos.Correctness.StructuredWasmStep}`StructuredWasmStep` exposes the emitted control flow while Talos executes atomic instructions and imported calls.
+  * Physical values and memory must represent the source value/runtime. Finite structured paths are lifted to actual executable export termination at the fixed selected ABI.
+:::
+
+The source and target need not take equal numbers of steps. Interpreter fuel
+is a bound on a runner, not a semantic fault or a shared clock. The return
+property assumes a finite successful source evaluation and derives an adequate
+target execution; it does not prove source termination for arbitrary inputs.
+
+# The relation carried through execution
+%%%
+tag := "w6-rooted-relation"
+%%%
+
+Fix the program, compiled/adapted modules, resolved hosts, external
+implementation and original export ABI $`A`. For this explanation only, write
+
+$$`R_A(s,t)\;\equiv\;\exists w,\ \operatorname{Rooted}_A(w,s,t).`
+
+Here $`\operatorname{Rooted}` abbreviates the existing
+{name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt}`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt`
+with those fixed arguments. This is expository notation, not a new Lean
+invariant. It is the witness-hiding relation already used by
+{name FirTalos.Concrete.ConcreteStructuredCompilerCurrentStepAdmission.toRootedTraceSimulation}`toRootedTraceSimulation`.
+
+The relation records the validated current control and generated continuation,
+precise value/ABI facts, related runtime and caches, and saved caller/root
+information. The current callee's ABI may differ from $`A`; the saved rooted
+facts retain the original export ABI until the final return. One witness $`w`
+relates values and the live heap, globals, world and ordered trace at that
+state. The next state may require a different witness. The argument does not
+fix the entry witness forever or assume an arbitrary monotone extension law.
+
+The entry contract relates the encoded parameters and source environment,
+heap/runtime, reuse capacities and caches. The compiler constructs the rooted
+control relation from that contract; callers do not supply a new whole-program
+simulation or a future target path. The {ref "heap-caller-invariant"}[heap/caller
+account] explains the detailed saved-frame and construction-region components.
+
+# From one step to an executable return
+%%%
+tag := "w6-proof-mechanism"
+%%%
+
+The conditional proof has four stages. They explain what the invariant must
+retain and where the missing compiler facts are consumed.
+
+## 1. Establish the entry relation
+
+Supported compilation fixes the entry/export, adapted function, hosts and
+selected result kind. Cache alignment and the existing runtime/parameter
+contract give $`R_A(s_0,t_0)` through the checked {bpref "rooted-entry"}[].
+
+## 2. Match a successful source step
+
+The proved
+{name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step}`advance_of_step`
+has the following schematic form under uniform current-step admission and
+address-space safety. The successful source transition is an explicit premise:
+
+$$`\begin{aligned}
+&R_A(s,t)\land(s\leadsto s')\\
+&\quad\Longrightarrow\exists m,t',\quad
+ t\longrightarrow^{m}t'\ \land\ R_A(s',t')\\
+&\qquad\land\bigl(m=0\Longrightarrow
+\operatorname{rank}(s')<\operatorname{rank}(s)\bigr).
+\end{aligned}`
+
+The guards are real hypotheses, not conclusions of validator acceptance.
+The rank is {name FirTalos.Concrete.compilerStructuredControlRank}`compilerStructuredControlRank`.
+A source administrative step may take zero target steps; strict rank decrease
+prevents an infinite sequence of zero-target-step matches. It gives no uniform
+bound on finite stuttering bursts between positive target paths. Other steps
+may require several target instructions. This theorem handles successful source
+advancement, not the general fault case.
+
+## 3. Compose a finite path
+
+Induction concatenates the derived target paths and carries the relation at
+each new witness, with the same original ABI. Its observation component gives
+world and ordered-trace agreement at every finite prefix. No new entry
+invariant is requested at intermediate states. The proved conditional
+consumer is {bpref "rooted-steps"}[].
+
+## 4. Extract the terminal value and use adequacy
+
+A successful source endpoint has a yielded value and an empty source
+continuation. The rooted relation identifies its representation at $`A`.
+Target-only administrative labels may still need unwinding: terminal extraction
+and executable adequacy derive the remaining target path and exported return.
+The public conclusion is the observation-facing postcondition of
+$`P_{\mathrm{success}}`, with the observation and {bpref "return-post"}[]
+already stated above. This is the checked conclusion of
+{bpref "conditional-return"}[].
+
+The internal path theorem uses the actual source endpoint runtime. The public
+wrapper constructs that runtime as its existential witness; equality of the
+public observations alone does not identify globals or the location cursor.
+Thus the path theorem is proof evidence for the wrapper, not a reason to
+silently strengthen the stated property.
+
+Faults require a separate terminal argument. The existing certificate
+consumer {bpref "conditional-fault"}[] is proved, while {bpref "fault-closure"}[]
+must construct its evidence and executable trap correspondence internally.
+
+# Why these invariants are needed
+%%%
+tag := "w6-invariant-design"
+%%%
+
+The proof mechanism determines the invariant questions. To invoke the guarded
+step theorem at each intermediate state, validated code must retain semantic
+facts that static validation alone cannot recover.
+
+:::table +header
+*
+  * Preservation question
+  * Required information and destination
+*
+  * Does each value have the representation its next use expects?
+  * Precise producer/use-site ABI facts, including non-directional object-family cases: {bpref "provenance-closure"}[] and the {ref "provenance-design"}[provenance account].
+*
+  * Can an allocation or mutation safely advance the related heap?
+  * Live roots, reuse/capacity facts and finite resource guards. Fresh heap results need a construction region and publication back into the saved caller: {bpref "heap-miss-closure"}[] and the {ref "heap-caller-invariant"}[heap/caller account].
+*
+  * Does a call, cache lookup or external operation preserve the continuation and effects?
+  * Exact argument/result ABI rows, saved frames/cache state and primitive/handler laws: {bpref "external-spec"}[], {bpref "external-admission"}[] and the {ref "admission-coverage"}[operation map].
+:::
+
+For a first program instance, prove the semantic facts from its actual code
+and checked blocks, then discharge the conditional consumer's full admission
+interface. These instance proofs can expose the right general invariant.
+Later, {bpref "admission-closure"}[] must construct admission uniformly from
+supported compilation and the maintained relation. That future result cannot
+be a premise of the independent instance proof used to guide it.
+
+The graph gives the mathematical dependencies among these obligations;
+{bpref "closed-export"}[] and {bpref "resident-linking"}[] identify extensions
+of the successful-return result. Prose navigation links describe the future
+specialization route without making it a current proof edge. The node catalog
+below expands the branches without changing the theorem menu's status claims.
+
+# Contract and operation catalog
 
 :::definition "fault-post" (parent := "contracts") (lean := "FirTalos.Concrete.RefinedFaultPost") (autoDeps := true)
 A target trap represents the source's structured semantic fault under a common
@@ -195,40 +442,6 @@ It covers tagged, heap and mixed inputs, and both tagged and allocating results,
 with arbitrary request type metadata. This discharges availability and response
 correctness for this source-handler slice without assuming a successful call.
 It proves neither compiler admission nor execution of the resident Wasm helper.
-:::
-
-# A concrete program instance
-
-:::theorem "stored-export-instance" (parent := "execution") (owner := "w6") (tags := "open, statement-review") (priority := "high") (uses := "successful-export-property")
-For the actual captured final impure program with selected entry
-`Zip.Wasm.compressStored`, prove $`P_{\mathrm{success}}(p_{\mathrm{stored}})`
-after its production supported-export assembly. The source nomination is
-lean-zip `273d0d6cd9cab77c7f3489b0b0b1f6e543315d21` with zip-common
-`4425bab1f9522307d77e8d485bc536149ba31c36`. The compiled module and result ABI
-must be those supplied by the selected export.
-
-This rough instance theorem remains open. It quantifies every related admitted
-input, entry runtime and successful finite source evaluation, with the same
-observation and return postcondition as the general target. Source primitive
-laws, installed implementation conformance and finite resources remain explicit
-execution contracts. A finite smoke corpus supplies separate validation evidence.
-The {ref "retained-example-boundary"}[concrete account] identifies existing
-source application and initializer theorems, plus the further bridges needed
-for a released-byte roundtrip.
-:::
-:::proof "stored-export-instance" (uses := "conditional-return")
-The current independent route checks the actual captured declarations/body,
-export/ABI and lowering/adaptation equations, then constructs the program's
-semantic admission and maintained-invariant facts. Concrete initializer blocks
-already derive source/target paths and caller preservation; complete operation
-coverage, intermediate provenance and heap-miss admission still need proof.
-Supply the resulting admission to the existing conditional return consumer.
-Static validator acceptance alone cannot supply these semantic premises.
-
-After {bpref "validated-return"}[] is complete, a future route may specialize
-that general theorem and discharge this program's premises. That planned route
-does not form a current proof dependency. The statement, quantified input scope
-and retained conditions must stay the same when its proof route changes.
 :::
 
 # Compiler-derived facts
@@ -687,3 +900,35 @@ Compose helper implementation refinements and installation/import closure
 with the contracted compiler theorem. Generation tests and linked artifact
 tests supply separate evidence; they do not discharge the semantic proof.
 :::
+
+# Source and graph reading boundaries
+%%%
+tag := "w6-source-boundary"
+%%%
+
+This chapter's original declaration narrative was reviewed at FIR `81bb0e2ab`.
+The current package uses accepted VBP `19451b009` and Lean 4.34.1; its Lean
+associations are checked against the current FIR checkout and official
+worktree-local Talos overlay. Historical PR475 candidate evaluations retain
+their separate revisions in the {ref "evaluation-findings"}[evaluation cases].
+The accepted-main text review on 2026-10-05 uses FIR
+`8f4222cb2`, including W6 checkpoint `f6850d79f`. Newer accepted results are
+explained in the {ref "heap-caller-invariant"}[maintained heap/caller argument]
+as reviewed source evidence. A source citation does not itself add a Lean
+association. In particular, construction-step preservation and the
+fresh saved validated caller have advanced; general heap-miss admission and
+resident linking remain open. An absent association here is an artifact
+boundary, not evidence that the accepted proof is missing.
+
+The goal is to make assumptions and useful remaining contributions visible.
+The {ref "documentation-migration"}[source and evidence boundaries] identify
+the maintained argument and its production source/audit authorities.
+
+*Reading the graph.* An arrow is a mathematical dependency. Existing nodes
+use Lean dependency inference; open nodes have explicitly authored proof plans.
+A proved conditional result and a theorem eliminating its premise are separate
+nodes. The Blueprint is the specification and obligation map for these targets;
+its draft statements and admitted proofs evolve together. Tags describe our editorial classification; they do not change
+Blueprint's computed status. Resource contracts remain explicit execution
+conditions. Integration and axiom evidence are discussed in the evaluation
+chapter, separately from the graph's formalization colors.

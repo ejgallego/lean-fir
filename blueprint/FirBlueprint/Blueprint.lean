@@ -19,24 +19,28 @@ open Verso.Genre Verso.Genre.Manual Informal
 
 #doc (Manual) "FIR compiler correctness Blueprint" =>
 
-This Blueprint records the selected W6 compiler-correctness argument and its
-development roadmap. Start with the
-{ref "retained-example-boundary"}[concrete lean-zip proofs and compiler property],
-then follow the {ref "development-roadmap"}[roadmap] from an independent program
-instance to general correctness and future specialization. The roadmap also
-separates Blueprint evaluation from the FIR proof development being documented.
-The chapters contain the proof account, contribution policy and VBP acceptance
-cases. The README supplies repository setup; source and trust evidence remain
-with production definitions and owner audits. Chapters distinguish checked
-declaration associations from explicitly dated source facts.
+What should a compiled program guarantee, and how can we prove it? Start with
+the {ref "w6-theorem-menu"}[theorem statements and their status]: conditional
+results are checked, the selected whole-program instance is open, and general
+compiler correctness is the eventual target. A fixed-program instance still
+quantifies every allowed input. The initial proof route is independent of the
+unfinished general theorem; later the same statement can follow by specialization.
 
-{include 0 FirBlueprint.Chapters.Roadmap}
+The argument then introduces the {ref "w6-machines"}[source and target machines],
+their {ref "w6-rooted-relation"}[rooted relation], and the
+{ref "w6-proof-mechanism"}[step, finite-path and terminal proof]. The
+{ref "retained-example-boundary"}[lean-zip account] distinguishes genuine source
+and local initializer proofs from the open whole-export property. Detailed
+invariants and operation obligations extend that argument through the graph.
+Development policy and tool-evaluation cases follow the mathematical chapters.
 
-{include 0 FirBlueprint.Chapters.Migration}
-
-{include 0 FirBlueprint.Chapters.ProofScope}
+The README supplies repository setup. Production definitions and owner audits
+remain the source and trust authorities; checked declaration associations and
+dated source-reviewed evidence are identified separately.
 
 {include 0 FirBlueprint.Chapters.W6}
+
+{include 0 FirBlueprint.Chapters.ProofScope}
 
 {include 0 FirBlueprint.Chapters.HeapInvariant}
 
@@ -46,7 +50,11 @@ declaration associations from explicitly dated source facts.
 
 {include 0 FirBlueprint.Chapters.ExternalDomains}
 
+{include 0 FirBlueprint.Chapters.Roadmap}
+
 {include 0 FirBlueprint.Chapters.Contribution}
+
+{include 0 FirBlueprint.Chapters.Migration}
 
 {include 0 FirBlueprint.Chapters.Experiment}
 

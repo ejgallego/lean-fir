@@ -11,21 +11,26 @@ open Verso.Genre.Manual.InlineLean
 tag := "proof-scope"
 %%%
 
-This chapter starts with concrete lean-zip programs and follows the
-correctness property from a program instance to the general W6 theorem.
-It also captures the surrounding proof, observation and implementation boundaries.
-Sources were reviewed on 2026-10-05 at FIR `93c2e7ec7`, and compared read-only
-with accepted main `8f4222cb2`. Several source documents describe historical
-Lean 4.33 or 4.34.0-rc2 checkpoints; accepted main uses Lean 4.34.1. Their old
-toolchain names, corpus counts and chronological “next” paragraphs do not define
-current proof readiness. The retained-input boundary below includes the
-accepted October successor; exact compiled inventories remain in their source
-registries.
+The {ref "w6-theorem-menu"}[W6 theorem menu] states the compiler guarantees
+before explaining the machines and simulation. This chapter supplies concrete
+examples and the surrounding semantic boundaries. It distinguishes a source
+application theorem, proved blocks of a captured program, the open whole-export
+instance and the further claim about released bytes. These statements have
+different conclusions; one finite execution check cannot stand in for any of
+their universal proofs.
 
 # From lean-zip programs to a general compiler theorem
 %%%
 tag := "retained-example-boundary"
 %%%
+
+The initial development strategy is to prove the fixed-program compiler
+property for some selected programs, universally over their allowed inputs.
+Their code and semantic blocks can guide the invariant and admission proof.
+Once a general compiler theorem is available, those same instance statements
+can follow by specialization. The {ref "w6-proof-mechanism"}[conditional proof
+mechanism] is already available; constructing its semantic premises remains
+part of the independent instance proof.
 
 The selected source function is `Zip.Wasm.compressStored : ByteArray → ByteArray`.
 At the immutable lean-zip nomination `273d0d6cd9cab77c7f3489b0b0b1f6e543315d21`,
