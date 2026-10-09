@@ -95,6 +95,56 @@ semantic examples, but have different conclusions from the whole-export goal.
   * The certificate consumer is proved; general fault construction and both extensions are open. Linking and released-byte correctness require their own bridges.
 :::
 
+## Notation for the statements
+%%%
+tag := "w6-notation"
+%%%
+
+The formulas below abbreviate existing Lean predicates. They introduce no new
+invariant or assumption. The {ref "worked-retained-initializer"}[worked example]
+uses the same vocabulary for a smaller, proved program block.
+
+:::table +header
+*
+  * Symbols
+  * Meaning and scope
+*
+  * $`p,M,e,A`
+  * Fixed impure program $`p`; compiled package $`M` consisting of the contracted module, adapted Wasm module and resolved hosts; export name $`e` with its selected source entry; original result ABI $`A`. A supported-export specification fixes these choices. $`M` abbreviates these existing arguments, not a new Lean module type.
+*
+  * $`\sigma,\tau,w`
+  * Source machine state, structured target state and refinement witness. Source runtime $`r`, environment $`E`, joins and frames are components of $`\sigma`; target store $`S`, locals and frames belong to $`\tau`. The source external implementation $`\varepsilon` is fixed for an argument.
+*
+  * $`c,\ell,j;\ a,q,z`
+  * $`c,\ell,j` are source heap locations. $`a` is a concrete byte address; $`q,z` are physical Wasm values, not source locations. In the initializer, $`c=r_0.\mathrm{nextLocation}` is fixed at entry; $`B` is the byte budget and $`\Delta` the five-slot allocation cost.
+:::
+
+Write $`\sigma\overset{n}{\leadsto}_{s}\sigma'` for
+{name Fir.LeanIR.Impure.ExecSteps}`ExecSteps` with external implementation
+$`\varepsilon` and exactly $`n` successful source steps. The one-step form
+$`\sigma\leadsto_s\sigma'` means
+{name Fir.LeanIR.Impure.executeStep}`executeStep` returns `.next` $`\sigma'`.
+Write $`\tau\overset{m}{\longrightarrow}_{M}\tau'` for a finite path of
+{name FirTalos.Correctness.StructuredWasmStep}`StructuredWasmStep` in the adapted
+module and resolved host environment, with exactly $`m` target steps. Neither
+notation asserts termination or equal source/target counts.
+
+Successful source evaluation is the abbreviation
+
+$$`\begin{aligned}
+\sigma\Downarrow_{\varepsilon}(o,v)\equiv{}&
+\operatorname{ExecEvaluates}(\varepsilon,\sigma,o)\\
+&\land\ o.\mathrm{outcome}=\operatorname{returned}(v).
+\end{aligned}`
+
+Here $`o` is a source observation and $`v` a source value. Finally,
+$`\operatorname{ownedReach}_h(v)` is the set of source locations $`j` satisfying
+{name Fir.LeanIR.Impure.Reachable}`Reachable` $`h\ [v]\ j`: it includes a heap
+root itself and follows only owned heap-reference fields, including sharing
+and cycles. Tagged data creates no heap edge. The witness-explicit rooted
+notation $`R_{A,w}` and its existential form $`R_A` are defined in the
+{ref "w6-rooted-relation"}[relation section].
+
 ## The successful-export property
 
 :::definition "return-post" (parent := "contracts") (lean := "FirTalos.Concrete.RefinedReturnPost") (autoDeps := true)
@@ -106,37 +156,75 @@ kind would weaken the contract.
 :::
 
 :::definition "successful-export-property" (parent := "contracts") (uses := "return-post")
-Fix an impure program, its selected source/export entry, compiler-produced
-contracted module, adapted module, resolved hosts and export-selected result
-ABI. Write $`P_{\mathrm{success}}(p)` for the following property, using the
-observation-facing conclusion of {bpref "conditional-return"}[]. For every
-related source entry/runtime/environment, concrete initial store and parameter
-row satisfying the retained external-runtime and finite-resource contracts,
-and every successful finite source evaluation with observation $`o` and
-returned value $`v`, there exists a source result runtime $`r` such that
+**Fixed parameters.** Fix $`p,M,e,A` through the selected supported-export
+specification, with $`A=\mathrm{spec.sourceResultKind}`. Its context and source
+code determine the source entry. Fix the source external implementation
+$`\varepsilon` subject to the retained contracts below. This property uses the observation-facing
+conclusion of {bpref "conditional-return"}[].
+
+**Quantified invocations and retained hypotheses.** Quantify every source
+entry runtime $`r_0`, environment $`E_0`, concrete store $`S_0`, initial witness
+$`w_0`, physical parameter row $`\bar u`, reuse facts and finite byte budget.
+Require the following named clauses, rather than a supplied simulation:
+
+* *External/resource contracts:* the reviewed source primitive and installed
+  implementation contracts, whose general coverage remains incomplete where
+  documented. Finite-resource bounds and address-space safety remain explicit
+  execution conditions.
+  Neither follows from static validator acceptance.
+* *Cache alignment:* the compilation context's cached declarations equal the
+  program's cached declaration names.
+* *Arity:* $`|\bar u|=\mathrm{spec.targetFunction.numParams}`.
+* *Related entry:* the existing
+  {name FirTalos.Concrete.ConcreteReuseCapacityCacheAbiFrame}`ConcreteReuseCapacityCacheAbiFrame`
+  relates $`r_0,E_0,S_0,w_0`, the reuse facts/budget and the parameter-derived
+  target locals, including its cache/reuse/closure ABI conditions.
+
+Let $`\sigma_0` be the source code-entry state from this runtime/environment.
+For every such invocation, the required conclusion is
 
 $$`\begin{aligned}
-&o=\operatorname{ReturnedObservation}(r,v)\\
-&\land\operatorname{ConcreteExportTerminatesWith}\\
-&\qquad\bigl(\operatorname{RefinedReturnPost}(r,v,\mathrm{selectedABI},[])\bigr).
+&\forall o,v,\quad\sigma_0\Downarrow_{\varepsilon}(o,v)\\
+&\quad\Longrightarrow\exists r,\quad
+o=\operatorname{ReturnedObservation}(r,v)\\
+&\qquad\land\ \operatorname{Return}_{M,e}(S_0,\bar u;r,v,A).
 \end{aligned}`
 
-The omitted export arguments are those fixed by the compiled module and
-invocation. The empty list is the exported invocation's caller operand tail.
-One terminal refinement witness relates the result representation and the
-complete source/concrete runtime, including heap, globals, world and ordered
-trace; the witness can evolve from entry. Cache alignment, parameter count and
-the reviewed entry cache/reuse/closure ABI relation remain explicit entry
-conditions. Current-step admission, reached-state provenance and heap-miss
-preservation are compiler obligations to construct internally.
+The last predicate is only an abbreviation for the existing exported
+termination predicate, with all invocation arguments shown:
 
-This fixes a partial-correctness property over all related admitted inputs;
-it claims target termination whenever the finite source run returns. In the
-existing proof, $`r` is constructed from that source execution's final runtime.
-The public observation equality itself records value, heap, world and trace,
-and does not determine globals or the location cursor. This rough definition
-uses the exact wrapper conclusion at both instance and general levels; the
-stronger path-resolved internal theorem supplies proof evidence.
+$$`\begin{aligned}
+&\operatorname{Return}_{M,e}(S_0,\bar u;r,v,A)\equiv\\
+&\quad\operatorname{ConcreteExportTerminatesWith}\\
+&\qquad\bigl(M.\mathrm{env},M.\mathrm{wasm},e,S_0,\bar u,\\
+&\qquad\quad\operatorname{RefinedReturnPost}(r,v,A,[])\bigr).
+\end{aligned}`
+
+$`M.\mathrm{env}` is the resolved host environment `hosts.env`, and
+$`M.\mathrm{wasm}` is the adapted module's `wasmModule`.
+
+**Reading and Lean correspondence.** $`P_{\mathrm{success}}(p)` means that this
+statement holds for *all* its allowed invocations: fixing the program does not
+fix the input. It preserves every finite successful source evaluation and
+derives actual target export termination. It asserts no source totality. The
+empty list is the exported invocation's caller operand tail. The existing
+{bpref "return-post"}[] uses one terminal witness and physical value to relate
+the complete runtimes and exact result ABI, clear the target failure channel,
+and produce the singleton return stack. That witness need not equal $`w_0`.
+
+The displayed conclusion is exactly the wrapper's shape, with the fixed
+arguments abbreviated. Its proof chooses $`r` to be the actual source final
+runtime; observation equality alone records value, heap, world and trace,
+without identifying globals or the location cursor. The stronger path-resolved
+internal result is proof evidence, not an extra public conclusion.
+
+**Status.** The property definition adds no Lean declaration. The fixed
+Stored instance and eventual general compiler theorem remain open.
+{bpref "conditional-return"}[] proves this conclusion *conditionally* on
+uniform current-step admission and address-space safety. That route must
+construct compiler-owned admission; address-space safety remains an explicit
+execution condition. Admission, reached-state provenance and
+heap-miss preservation are not hidden in the allowed entry clauses above.
 :::
 
 ## First whole-program instance
@@ -225,12 +313,15 @@ target execution; it does not prove source termination for arbitrary inputs.
 tag := "w6-rooted-relation"
 %%%
 
-Fix the program, compiled/adapted modules, resolved hosts, external
-implementation and original export ABI $`A`. For this explanation only, write
+Fix $`p,M,\varepsilon,A` as in the {ref "w6-notation"}[notation section].
+For this explanation only, write
 
-$$`R_A(s,t)\;\equiv\;\exists w,\ \operatorname{Rooted}_A(w,s,t).`
+$$`\begin{aligned}
+R_{A,w}(\sigma,\tau)&\equiv\operatorname{Rooted}_A(w;\sigma,\tau),\\
+R_A(\sigma,\tau)&\equiv\exists w,\ R_{A,w}(\sigma,\tau).
+\end{aligned}`
 
-Here $`\operatorname{Rooted}` abbreviates the existing
+Here $`\operatorname{Rooted}_A(w;\sigma,\tau)` abbreviates the existing
 {name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt}`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt`
 with those fixed arguments. This is expository notation, not a new Lean
 invariant. It is the witness-hiding relation already used by
@@ -262,7 +353,8 @@ retain and where the missing compiler facts are consumed.
 
 Supported compilation fixes the entry/export, adapted function, hosts and
 selected result kind. Cache alignment and the existing runtime/parameter
-contract give $`R_A(s_0,t_0)` through the checked {bpref "rooted-entry"}[].
+contract give $`R_{A,w_0}(\sigma_0,\tau_0)` through the checked
+{bpref "rooted-entry"}[].
 
 ## 2. Match a successful source step
 
@@ -272,11 +364,11 @@ has the following schematic form under uniform current-step admission and
 address-space safety. The successful source transition is an explicit premise:
 
 $$`\begin{aligned}
-&R_A(s,t)\land(s\leadsto s')\\
-&\quad\Longrightarrow\exists m,t',\quad
- t\longrightarrow^{m}t'\ \land\ R_A(s',t')\\
+&R_{A,w}(\sigma,\tau)\land(\sigma\leadsto_s\sigma')\\
+&\quad\Longrightarrow\exists m,\tau',w',\quad
+ \tau\overset{m}{\longrightarrow}_{M}\tau'\ \land\ R_{A,w'}(\sigma',\tau')\\
 &\qquad\land\bigl(m=0\Longrightarrow
-\operatorname{rank}(s')<\operatorname{rank}(s)\bigr).
+\operatorname{rank}(\sigma')<\operatorname{rank}(\sigma)\bigr).
 \end{aligned}`
 
 The guards are real hypotheses, not conclusions of validator acceptance.

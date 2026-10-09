@@ -164,14 +164,31 @@ this exposition adds no Lean association or fresh retained-initializer proof
 build. Their statement/proof files at `f6850d79f` are unchanged at this chapter's
 `61fae7690` exposition base.
 
-## What is quantified, and what remains assumed?
+## Shared parameters and hypotheses
 
-The fixed program and initializer do not fix the caller runtime. Both theorems
-quantify supported caller functions, related source/target states, environments,
-stores, witnesses and continuations. Their exact invocation is a let whose
-value is the captured initializer's nullary full application.
-Write $`\Delta` for the five-slot Array allocation cost,
+Use the {ref "w6-notation"}[shared mathematical vocabulary]. **Fix**
+$`p=\mathrm{RetainedRC2.program}`, its captured initializer, a supported compiled
+package $`M`, source external implementation $`\varepsilon` and original root
+ABI $`A`. The two statements below then quantify **every** supported caller
+row and related source/target state $`\sigma,\tau`: caller context/function,
+active function ABI and expected caller result, label context, historical entry
+$`(r_h,S_h,w_h)`, current runtime/store/witness $`r_0,S_0,w_0`, source environment
+$`E`, target locals/code, reuse facts $`F`, byte budget $`B`, destination $`d`
+and continuation $`k`. Fixing the captured program does not select a finite
+family of caller heaps or inputs.
+
+The cold staging/entry prefix uses the current $`r_0,S_0,w_0` as the
+initializer's construction anchor. It does not replace the saved historical
+caller anchor $`r_h,S_h,w_h`.
+
+Write $`\mathcal V` for the existing validated current-code relation at this
+caller row and let binding. It abbreviates
+{name FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome}`ConcreteStructuredValidatedCodeOutcome`
+with all those indices; it is not a
+new invariant. Set $`c=r_0.\mathrm{nextLocation}` and let $`\Delta` be
 {InlineLean.lean}`Fir.Wasm.Concrete.residentArrayAllocationBytes 5`.
+The source location $`c` belongs to a different address space from concrete
+byte addresses; no numerical inequality between those coordinates is assumed.
 
 :::table +header
 *
@@ -179,7 +196,7 @@ Write $`\Delta` for the five-slot Array allocation cost,
   * Meaning in this example
 *
   * Supported caller and validated current relation
-  * The actual compiled/adapted function, current let and saved frames are related. Active-result and root-agreement evidence retain the original export ABI $`A`, even though the initializer returns an object.
+  * A supported caller specification and $`\mathcal V` relate the actual compiled/adapted function, current let and saved frames. Active-result equality and root agreement retain $`A`, even though the initializer returns an object. The let value is exactly the nullary application of the captured initializer.
 *
   * Cold cache
   * The initializer is absent from the source runtime globals. This proof takes the cache-miss branch.
@@ -188,7 +205,7 @@ Write $`\Delta` for the five-slot Array allocation cost,
   * Uniform source laws specify empty allocation and the fresh, non-full, tagged-element push branch. The actual calls use capacity five and payload zero; wider Array behavior is outside this contract.
 *
   * Installed concrete handler laws
-  * Empty allocation and in-place push conform for every related concrete request, including the intermediate runtime and witness produced by allocation. Source laws alone do not establish these implementation equations.
+  * The empty handler conforms at $`S_0,w_0` for every related capacity-five request. The push law quantifies every concrete runtime/witness related to `afterMkEmpty` $`r_0`, every mapped address of $`c`, every word representing tagged zero, and every request with the exact `Array.push` name/arguments. It concludes the in-place handler equation. Source laws alone do not establish these implementation equations.
 *
   * Finite headroom
   * $`\Delta\le B`, where $`B` is the related allocation budget. Boxing and this push branch allocate no additional physical bytes.
@@ -199,6 +216,96 @@ support, generated cache/continuation facts, the five binding-kind lookups and
 the post-body resource scope are derived inside the proof. The handler laws
 remain contracts for the installed concrete host; they do not prove execution
 of a resident W7 helper or JavaScript implementation.
+
+## Publication: the thirteen-step statement
+
+**Conclusion.** For every caller row and initial pair $`\sigma,\tau`
+satisfying *all* the named hypotheses above,
+
+$$`\begin{aligned}
+&\exists m,w',\sigma',\tau',\quad
+\sigma\overset{13}{\leadsto}_{s}\sigma'\\
+&\quad\land\ \tau\overset{m}{\longrightarrow}_{M}\tau'\\
+&\quad\land\ R_{A,w'}(\sigma',\tau')
+\ \land\ \operatorname{Closed}_c(\sigma'.\mathrm{runtime.heap}).
+\end{aligned}`
+
+Here $`\operatorname{Closed}_c(h)` abbreviates the *whole*
+{name FirTalos.Concrete.HeapRegionClosed}`HeapRegionClosed` $`c\ h` predicate:
+every owned heap-reference edge from a
+parent at or above $`c` leads to a child at or above $`c`. Closure concerns all
+such parents, not just the returned root. The rooted relation has the same
+fixed $`p,M,\varepsilon,A` and the existential *final* witness $`w'`.
+
+**Reading and correspondence.** The exact source count is thirteen; the target
+count, final states and witness are derived existentially. This is the exposed
+conclusion of the source-reviewed
+[`rootedLet_publishesAtBind`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1016),
+with Lean arguments abbreviated. Its construction additionally identifies the
+published global and yielded root $`\operatorname{heap}(c)`: the source bind
+is pending while the target caller frames are already restored and its
+destination `local.set` is pending. Those are facts of the constructed
+endpoint, rather than extra conjuncts of the displayed top-level signature.
+
+## Caller resumption: the separate fourteen-step statement
+
+Define the source runtime abbreviation
+
+$$`\begin{aligned}
+\operatorname{Pub}(r_0)\equiv{}&
+\operatorname{setGlobal}\bigl(\operatorname{afterPush}(r_0),\\
+&\qquad\mathrm{initializer},\operatorname{heap}(c)\bigr).
+\end{aligned}`
+
+It means the actual `afterPush` runtime with the initializer global set to the
+source object value at $`c`. The notation $`\operatorname{heap}(c)` denotes
+that source *value*, not the location by itself. Let $`\mathcal V'` abbreviate
+the same validated caller relation with the following indices:
+
+:::table +header
+*
+  * Preserved indices
+  * Updated indices
+*
+  * Historical entry $`r_h,S_h,w_h`, caller context/function, labels, active ABI and expected result
+  * Facts $`\operatorname{eraseFact}(F,d)`; budget $`B-\Delta`; runtime $`\operatorname{Pub}(r_0)`; environment $`E[d\mapsto\operatorname{heap}(c)]`; continuation $`k`
+*
+  * Compiled package and source implementation
+  * Existential target store $`S'`, locals $`L'`, remaining target code $`C'`, witness $`w'` and states $`\sigma',\tau'`
+:::
+
+$`\operatorname{eraseFact}(F,d)` abbreviates
+{name Fir.Wasm.eraseReuseCapacityFact}`eraseReuseCapacityFact` at the
+let destination. For a witness $`\nu:\mathcal V'`,
+$`\operatorname{RootAgreement}_A(\nu)` abbreviates
+{name FirTalos.Concrete.ConcreteStructuredValidationAgreesAtRoot}`ConcreteStructuredValidationAgreesAtRoot`
+for $`\nu`'s agreement and validated
+frames. $`A` stays fixed in the ambient root assertions, rather than indexing
+$`\mathcal V'`; it is not changed to the initializer's object ABI.
+
+**Conclusion.** For every caller row and initial pair satisfying the *same*
+named hypotheses,
+
+$$`\begin{aligned}
+&\exists m,S',L',C',w',\sigma',\tau',\quad
+\sigma\overset{14}{\leadsto}_{s}\sigma'\\
+&\quad\land\ \tau\overset{m}{\longrightarrow}_{M}\tau'\\
+&\quad\land\ \exists\nu:\mathcal V',\quad
+\operatorname{RootAgreement}_A(\nu)\\
+&\qquad\land\ R_{A,w'}(\sigma',\tau')\\
+&\quad\land\ \sigma'.\mathrm{joins}=\sigma.\mathrm{joins}
+\ \land\ \sigma'.\mathrm{frames}=\sigma.\mathrm{frames}\\
+&\quad\land\ \tau'.\mathrm{frames}=\tau.\mathrm{frames}.
+\end{aligned}`
+
+**Reading and correspondence.** The source binds $`d` and resumes $`k`;
+the target writes its corresponding local and retains the restored caller
+frames. This abbreviates the exposed signature of the source-reviewed
+[`rootedLet_publishes_and_resumesCaller`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1100).
+Lean explicitly provides the new validated relation and its root agreement.
+There is no separate final $`\operatorname{Closed}_c` conjunct in this
+fourteen-step signature. Neither statement assumes intermediate paths,
+future publication separation or whole-program current-step admission.
 
 ## Follow the actual states
 
@@ -258,9 +365,10 @@ source locations and concrete byte addresses have separate meanings.
 
 The saved caller anchor $`(r_h,S_h,w_h)` may precede the initializer entry
 $`(r_0,S_0,w_0)`. Both anchors, cutoff $`c` and original ABI $`A` stay fixed.
-Phase-indexed witnesses $`w_k` and addresses $`a_k` are existential; the panels
+Phase-indexed witnesses such as $`w_{12},w_{13},w_{14}` and corresponding
+addresses are existential; the panels
 do not assume a generic equality or extension law between them. The physical
-result $`q_k` and tagged-element word $`z_k` are different roles. A drawn
+result $`q_{13}` and tagged-element word $`z_{13}` are different roles. A drawn
 saved token $`\ell` stands for any tracked token, if one exists.
 
 *Step 2 — cold entry.* The saved cache/bind and generated call/label
@@ -311,8 +419,44 @@ at the original cutoff. In the notation of the
 
 $$`\ell<c\le j.`
 
-Here $`j` is any owned-reachable source location from the returned root,
-distinct from the physical target result $`q`.
+Here $`j\in\operatorname{ownedReach}_{h}(\operatorname{heap}(c))`, with $`h`
+the returned source heap, is distinct from the physical target result $`q`.
+For the tracked set, use two partial maps, undefined outside these exact cases:
+
+* $`\operatorname{cap}_F(x)=b` exactly when the authoritative
+  {name Fir.Wasm.findReuseCapacityEvidence?}`findReuseCapacityEvidence?`
+  query at $`F,x` returns a retained-at-least capacity bound $`b\in\mathbb N`.
+* $`\operatorname{tok}_E(x)=\ell` exactly when source environment lookup at
+  $`E,x` returns a reuse token containing source location $`\ell`.
+
+These abbreviate the precise results `some (.retainedAtLeast b)` and
+`some (.reuseToken (some ℓ))`, respectively. The identifier $`x` may be any
+tracked variable, not only the let destination. $`\operatorname{cap}_F`
+reports the retained-capacity evidence; it does not by itself assert an actual
+heap capacity. Thus
+
+$$`\begin{aligned}
+\operatorname{Tracked}(F,E)=\{\ell\mid{}&\exists x,b,\quad
+\operatorname{cap}_F(x)=b\\
+&\land\ \operatorname{tok}_E(x)=\ell\}.
+\end{aligned}`
+
+This definition excludes untracked tokens and arbitrary environment heap
+references. The
+historical facts/transport/entry heap relation and region closure give
+
+$$`\begin{aligned}
+&\operatorname{Tracked}(F,E)\subseteq\{\ell\mid\ell<c\},\\
+&\operatorname{ownedReach}_{h}(\operatorname{heap}(c))
+\subseteq\{j\mid c\le j\},\\
+&\operatorname{Tracked}(F,E)\cap
+\operatorname{ownedReach}_{h}(\operatorname{heap}(c))=\varnothing.
+\end{aligned}`
+
+The disjointness is the caller-facing consequence. It is weaker than the
+whole-region $`\operatorname{Closed}_c(h)` proved at publication; it does not
+replace that predicate in the thirteen-step statement. Its Lean counterpart is
+{name FirTalos.Concrete.ReuseTokenPublicationDisjoint}`ReuseTokenPublicationDisjoint`.
 
 Consequently marking the returned graph persistent cannot reach the caller's
 saved token locations. {bpref "fresh-publication-separation"}[] derives this
