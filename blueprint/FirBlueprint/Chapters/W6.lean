@@ -14,23 +14,17 @@ import FirTalos.ConcretePublicationValidation
 open Verso.Genre Verso.Genre.Manual Informal
 open Verso.Genre.Manual.InlineLean
 
-#doc (Manual) "W6: from validated compiler output to execution" =>
+#doc (Manual) "Formal reference catalog (W6)" =>
+%%%
+tag := "w6-formal-catalog"
+%%%
 
-The goal is a compiler guarantee: when a supported source program returns,
-its compiled export executes and returns a related value at the export's
-selected ABI, preserving the source observation. Some conditional ingredients
-are proved; the whole-program instance and the general compiler theorem still
-have open obligations. The statements below distinguish these claims before
-explaining their proof.
-
-Read the {ref "w6-theorem-menu"}[theorem menu], then the
-{ref "w6-machines"}[two machines], their
-{ref "w6-rooted-relation"}[rooted relation] and the
-{ref "w6-proof-mechanism"}[step-to-return argument]. The later node catalog
-expands the invariant and operation obligations in that argument. The
-{ref "retained-example-boundary"}[lean-zip account] supplies the concrete source
-and initializer theorems; {ref "development-roadmap"}[the roadmap] explains
-how fixed-program proofs can lead to general correctness.
+The {ref "compiler-argument"}[compiler argument] develops the first-reading
+account from a concrete call to the successful-return guarantee. This catalog
+records its contracts, checked Lean associations and open obligations. Node
+status describes the associated declaration or planned statement; the
+{ref "proof-trust"}[trust account] records the separate axiom and contract
+boundaries.
 
 :::author "w6" (name := "FIR W6 proof lane")
 :::
@@ -53,99 +47,7 @@ Execution
 Open obligations
 :::
 
-# Guarantees and target theorems
-%%%
-tag := "w6-theorem-menu"
-%%%
-
-The first goal is successful-return correctness, written
-$`P_{\mathrm{success}}(p)`. Fixing $`p` fixes a program, not an input: a program
-instance must cover every related admitted entry and input. The source
-application theorem and the initializer proofs below are already useful
-semantic examples, but have different conclusions from the whole-export goal.
-
-:::table +header
-*
-  * Claim
-  * Guarantee
-  * Status and retained premises
-*
-  * Source stored-compression roundtrip, $`Q_{\mathrm{stored}}`
-  * Decoding the compressed source bytes returns the original arbitrary byte array, with an explicit decoder output-size bound.
-  * Reviewed theorem source at the pinned lean-zip revision; no fresh external build or Blueprint association. See the {ref "retained-example-boundary"}[source statement].
-*
-  * Captured initializer family, $`Q_{\mathrm{init}}`
-  * A derived target path matches thirteen source steps and fresh-region publication; the fourteen-step companion restores the rooted validated caller.
-  * Genuine local semantic proofs cited as reviewed source evidence. Primitive/handler laws, related callers, cold cache and finite headroom remain inputs; neither theorem proves the whole export. The {ref "worked-retained-initializer"}[worked proof] follows the actual states and lemma composition.
-*
-  * {bpref "rooted-steps"}[] and {bpref "conditional-return"}[]
-  * Every finite source prefix has a matching target path; a successful source evaluation yields an actual export return with the selected ABI and exact observation.
-  * Proved conditional theorems. Uniform compiler admission, address-space safety and the existing entry/cache/arity conditions are supplied.
-*
-  * {bpref "stored-export-instance"}[]
-  * $`P_{\mathrm{success}}(p_{\mathrm{stored}})` for the selected captured program, universally over its allowed inputs.
-  * Open. First construct this program's semantic facts and use the proved conditional consumer; the unfinished general theorem is not a prerequisite.
-*
-  * {bpref "validated-return"}[]
-  * Eventually, $`\forall p,\ H(p)\Longrightarrow P_{\mathrm{success}}(p)` for supported compiled exports.
-  * Local composition is checked, but the external specification and admission construction are explicit holes. $`H` is static supported-export/compilation evidence; compiler-owned admission must be derived.
-*
-  * Faults, closed exports and resident linking
-  * {bpref "conditional-fault"}[] proves a refined executable trap from a supplied certificate. {bpref "closed-export"}[] would combine prefixes, returns and faults; {bpref "resident-linking"}[] adds installed implementations.
-  * The certificate consumer is proved; general fault construction and both extensions are open. Linking and released-byte correctness require their own bridges.
-:::
-
-## Notation for the statements
-%%%
-tag := "w6-notation"
-%%%
-
-The formulas below abbreviate existing Lean predicates. They introduce no new
-invariant or assumption. The {ref "worked-retained-initializer"}[worked example]
-uses the same vocabulary for a smaller, proved program block.
-
-:::table +header
-*
-  * Symbols
-  * Meaning and scope
-*
-  * $`p,M,e,A`
-  * Fixed impure program $`p`; compiled package $`M` consisting of the contracted module, adapted Wasm module and resolved hosts; export name $`e` with its selected source entry; original result ABI $`A`. A supported-export specification fixes these choices. $`M` abbreviates these existing arguments, not a new Lean module type.
-*
-  * $`\sigma,\tau,w`
-  * Source machine state, structured target state and refinement witness. Source runtime $`r`, environment $`E`, joins and frames are components of $`\sigma`; target store $`S`, locals and frames belong to $`\tau`. The source external implementation $`\varepsilon` is fixed for an argument.
-*
-  * $`c,\ell,j;\ a,q,z`
-  * $`c,\ell,j` are source heap locations. $`a` is a concrete byte address; $`q,z` are physical Wasm values, not source locations. In the initializer, $`c=r_0.\mathrm{nextLocation}` is fixed at entry; $`B` is the byte budget and $`\Delta` the five-slot allocation cost.
-:::
-
-Write $`\sigma\overset{n}{\leadsto}_{s}\sigma'` for
-{name Fir.LeanIR.Impure.ExecSteps}`ExecSteps` with external implementation
-$`\varepsilon` and exactly $`n` successful source steps. The one-step form
-$`\sigma\leadsto_s\sigma'` means
-{name Fir.LeanIR.Impure.executeStep}`executeStep` returns `.next` $`\sigma'`.
-Write $`\tau\overset{m}{\longrightarrow}_{M}\tau'` for a finite path of
-{name FirTalos.Correctness.StructuredWasmStep}`StructuredWasmStep` in the adapted
-module and resolved host environment, with exactly $`m` target steps. Neither
-notation asserts termination or equal source/target counts.
-
-Successful source evaluation is the abbreviation
-
-$$`\begin{aligned}
-\sigma\Downarrow_{\varepsilon}(o,v)\equiv{}&
-\operatorname{ExecEvaluates}(\varepsilon,\sigma,o)\\
-&\land\ o.\mathrm{outcome}=\operatorname{returned}(v).
-\end{aligned}`
-
-Here $`o` is a source observation and $`v` a source value. Finally,
-$`\operatorname{ownedReach}_h(v)` is the set of source locations $`j` satisfying
-{name Fir.LeanIR.Impure.Reachable}`Reachable` $`h\ [v]\ j`: it includes a heap
-root itself and follows only owned heap-reference fields, including sharing
-and cycles. Tagged data creates no heap edge. The witness-explicit rooted
-notation $`R_{A,w}` and its existential form $`R_A` are defined in the
-{ref "w6-rooted-relation"}[relation section].
-
-## The successful-export property
+# Successful returns and the selected instance
 
 :::definition "return-post" (parent := "contracts") (lean := "FirTalos.Concrete.RefinedReturnPost") (autoDeps := true)
 A successful target return represents the exact source value at the specified
@@ -156,75 +58,18 @@ kind would weaken the contract.
 :::
 
 :::definition "successful-export-property" (parent := "contracts") (uses := "return-post")
-**Fixed parameters.** Fix $`p,M,e,A` through the selected supported-export
-specification, with $`A=\mathrm{spec.sourceResultKind}`. Its context and source
-code determine the source entry. Fix the source external implementation
-$`\varepsilon` subject to the retained contracts below. This property uses the observation-facing
-conclusion of {bpref "conditional-return"}[].
+For the supported program/package/export $`p,M,e` and its fixed result ABI
+$`A`, every related allowed invocation and successful finite source evaluation
+must yield actual target export termination with {bpref "return-post"}[] and
+exact source observation identity. The {ref "w6-notation"}[full property]
+spells out the entry/cache/arity and external/resource conditions, quantified
+arguments and observation-facing existential runtime conclusion.
 
-**Quantified invocations and retained hypotheses.** Quantify every source
-entry runtime $`r_0`, environment $`E_0`, concrete store $`S_0`, initial witness
-$`w_0`, physical parameter row $`\bar u`, reuse facts and finite byte budget.
-Require the following named clauses, rather than a supplied simulation:
-
-* *External/resource contracts:* the reviewed source primitive and installed
-  implementation contracts, whose general coverage remains incomplete where
-  documented. Finite-resource bounds and address-space safety remain explicit
-  execution conditions.
-  Neither follows from static validator acceptance.
-* *Cache alignment:* the compilation context's cached declarations equal the
-  program's cached declaration names.
-* *Arity:* $`|\bar u|=\mathrm{spec.targetFunction.numParams}`.
-* *Related entry:* the existing
-  {name FirTalos.Concrete.ConcreteReuseCapacityCacheAbiFrame}`ConcreteReuseCapacityCacheAbiFrame`
-  relates $`r_0,E_0,S_0,w_0`, the reuse facts/budget and the parameter-derived
-  target locals, including its cache/reuse/closure ABI conditions.
-
-Let $`\sigma_0` be the source code-entry state from this runtime/environment.
-For every such invocation, the required conclusion is
-
-$$`\begin{aligned}
-&\forall o,v,\quad\sigma_0\Downarrow_{\varepsilon}(o,v)\\
-&\quad\Longrightarrow\exists r,\quad
-o=\operatorname{ReturnedObservation}(r,v)\\
-&\qquad\land\ \operatorname{Return}_{M,e}(S_0,\bar u;r,v,A).
-\end{aligned}`
-
-The last predicate is only an abbreviation for the existing exported
-termination predicate, with all invocation arguments shown:
-
-$$`\begin{aligned}
-&\operatorname{Return}_{M,e}(S_0,\bar u;r,v,A)\equiv\\
-&\quad\operatorname{ConcreteExportTerminatesWith}\\
-&\qquad\bigl(M.\mathrm{env},M.\mathrm{wasm},e,S_0,\bar u,\\
-&\qquad\quad\operatorname{RefinedReturnPost}(r,v,A,[])\bigr).
-\end{aligned}`
-
-$`M.\mathrm{env}` is the resolved host environment `hosts.env`, and
-$`M.\mathrm{wasm}` is the adapted module's `wasmModule`.
-
-**Reading and Lean correspondence.** $`P_{\mathrm{success}}(p)` means that this
-statement holds for *all* its allowed invocations: fixing the program does not
-fix the input. It preserves every finite successful source evaluation and
-derives actual target export termination. It asserts no source totality. The
-empty list is the exported invocation's caller operand tail. The existing
-{bpref "return-post"}[] uses one terminal witness and physical value to relate
-the complete runtimes and exact result ABI, clear the target failure channel,
-and produce the singleton return stack. That witness need not equal $`w_0`.
-
-The displayed conclusion is exactly the wrapper's shape, with the fixed
-arguments abbreviated. Its proof chooses $`r` to be the actual source final
-runtime; observation equality alone records value, heap, world and trace,
-without identifying globals or the location cursor. The stronger path-resolved
-internal result is proof evidence, not an extra public conclusion.
-
-**Status.** The property definition adds no Lean declaration. The fixed
-Stored instance and eventual general compiler theorem remain open.
-{bpref "conditional-return"}[] proves this conclusion *conditionally* on
-uniform current-step admission and address-space safety. That route must
-construct compiler-owned admission; address-space safety remains an explicit
-execution condition. Admission, reached-state provenance and
-heap-miss preservation are not hidden in the allowed entry clauses above.
+This expository definition adds no Lean declaration. The fixed Stored instance
+and general compiler theorem remain open. {bpref "conditional-return"}[]
+proves the conclusion from supplied uniform compiler current-step admission
+and address-space safety; admission and reached-state preservation must be
+derived for the desired compiler theorem.
 :::
 
 ## First whole-program instance
@@ -263,187 +108,6 @@ that general theorem and discharge this program's premises. That planned route
 does not form a current proof dependency. The statement, quantified input scope
 and retained conditions must stay the same when its proof route changes.
 :::
-
-## Eventual general theorem
-
-The intended general statement is
-$`\forall p,\ H(p)\Longrightarrow P_{\mathrm{success}}(p)`.
-Here $`H(p)` is supported-export and static compilation, adaptation and
-host-resolution evidence. The independent external/resource/entry contracts
-still scope the invocations quantified in $`P_{\mathrm{success}}`;
-compiler-owned admission, provenance and heap-miss preservation must be derived.
-{bpref "validated-return"}[] is the checked local assembly for this target,
-with unfinished {bpref "external-spec"}[] and {bpref "admission-closure"}[].
-It is not a completed compiler theorem. The later catalog retains its formal
-attachment and explicit native-status caveat.
-
-# The two machines
-%%%
-tag := "w6-machines"
-%%%
-
-The source is FIR's final impure LCNF machine. The target is the structured
-machine for the Wasm subset emitted by the adapter, executing ordinary
-instructions and imported calls through Talos. It runs the contracted module
-with resolved hosts; a theorem about resident-linked or released bytes is a
-later boundary. Neither machine is native execution of the original Lean source.
-
-:::table +header
-*
-  * Machine
-  * Configuration and transition
-  * Observable boundary
-*
-  * Source
-  * {name Fir.LeanIR.Impure.MachineState}`MachineState` contains the program, current code or yielded/call control, environment, joins, continuation frames and runtime. {name Fir.LeanIR.Impure.executeStep}`executeStep` either advances, returns an observation or reports a semantic fault; {name Fir.LeanIR.Impure.ExecSteps}`ExecSteps` records a finite execution.
-  * A return observation contains value, heap, world and ordered external trace. Globals and the location cursor belong to runtime state but are absent from this public observation.
-*
-  * Concrete target
-  * {name FirTalos.Correctness.StructuredWasmState}`StructuredWasmState` contains the Talos store, running/branch/return/halted control and block/loop/call frames. {name FirTalos.Correctness.StructuredWasmStep}`StructuredWasmStep` exposes the emitted control flow while Talos executes atomic instructions and imported calls.
-  * Physical values and memory must represent the source value/runtime. Finite structured paths are lifted to actual executable export termination at the fixed selected ABI.
-:::
-
-The source and target need not take equal numbers of steps. Interpreter fuel
-is a bound on a runner, not a semantic fault or a shared clock. The return
-property assumes a finite successful source evaluation and derives an adequate
-target execution; it does not prove source termination for arbitrary inputs.
-
-# The relation carried through execution
-%%%
-tag := "w6-rooted-relation"
-%%%
-
-Fix $`p,M,\varepsilon,A` as in the {ref "w6-notation"}[notation section].
-For this explanation only, write
-
-$$`\begin{aligned}
-R_{A,w}(\sigma,\tau)&\equiv\operatorname{Rooted}_A(w;\sigma,\tau),\\
-R_A(\sigma,\tau)&\equiv\exists w,\ R_{A,w}(\sigma,\tau).
-\end{aligned}`
-
-Here $`\operatorname{Rooted}_A(w;\sigma,\tau)` abbreviates the existing
-{name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt}`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt`
-with those fixed arguments. This is expository notation, not a new Lean
-invariant. It is the witness-hiding relation already used by
-{name FirTalos.Concrete.ConcreteStructuredCompilerCurrentStepAdmission.toRootedTraceSimulation}`toRootedTraceSimulation`.
-
-The relation records the validated current control and generated continuation,
-precise value/ABI facts, related runtime and caches, and saved caller/root
-information. The current callee's ABI may differ from $`A`; the saved rooted
-facts retain the original export ABI until the final return. One witness $`w`
-relates values and the live heap, globals, world and ordered trace at that
-state. The next state may require a different witness. The argument does not
-fix the entry witness forever or assume an arbitrary monotone extension law.
-
-The entry contract relates the encoded parameters and source environment,
-heap/runtime, reuse capacities and caches. The compiler constructs the rooted
-control relation from that contract; callers do not supply a new whole-program
-simulation or a future target path. The {ref "heap-caller-invariant"}[heap/caller
-account] explains the detailed saved-frame and construction-region components.
-
-# From one step to an executable return
-%%%
-tag := "w6-proof-mechanism"
-%%%
-
-The conditional proof has four stages. They explain what the invariant must
-retain and where the missing compiler facts are consumed.
-
-## 1. Establish the entry relation
-
-Supported compilation fixes the entry/export, adapted function, hosts and
-selected result kind. Cache alignment and the existing runtime/parameter
-contract give $`R_{A,w_0}(\sigma_0,\tau_0)` through the checked
-{bpref "rooted-entry"}[].
-
-## 2. Match a successful source step
-
-The proved
-{name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step}`advance_of_step`
-has the following schematic form under uniform current-step admission and
-address-space safety. The successful source transition is an explicit premise:
-
-$$`\begin{aligned}
-&R_{A,w}(\sigma,\tau)\land(\sigma\leadsto_s\sigma')\\
-&\quad\Longrightarrow\exists m,\tau',w',\quad
- \tau\overset{m}{\longrightarrow}_{M}\tau'\ \land\ R_{A,w'}(\sigma',\tau')\\
-&\qquad\land\bigl(m=0\Longrightarrow
-\operatorname{rank}(\sigma')<\operatorname{rank}(\sigma)\bigr).
-\end{aligned}`
-
-The guards are real hypotheses, not conclusions of validator acceptance.
-The rank is {name FirTalos.Concrete.compilerStructuredControlRank}`compilerStructuredControlRank`.
-A source administrative step may take zero target steps; strict rank decrease
-prevents an infinite sequence of zero-target-step matches. It gives no uniform
-bound on finite stuttering bursts between positive target paths. Other steps
-may require several target instructions. This theorem handles successful source
-advancement, not the general fault case.
-
-## 3. Compose a finite path
-
-Induction concatenates the derived target paths and carries the relation at
-each new witness, with the same original ABI. Its observation component gives
-world and ordered-trace agreement at every finite prefix. No new entry
-invariant is requested at intermediate states. The proved conditional
-consumer is {bpref "rooted-steps"}[].
-
-## 4. Extract the terminal value and use adequacy
-
-A successful source endpoint has a yielded value and an empty source
-continuation. The rooted relation identifies its representation at $`A`.
-Target-only administrative labels may still need unwinding: terminal extraction
-and executable adequacy derive the remaining target path and exported return.
-The public conclusion is the observation-facing postcondition of
-$`P_{\mathrm{success}}`, with the observation and {bpref "return-post"}[]
-already stated above. This is the checked conclusion of
-{bpref "conditional-return"}[].
-
-The internal path theorem uses the actual source endpoint runtime. The public
-wrapper constructs that runtime as its existential witness; equality of the
-public observations alone does not identify globals or the location cursor.
-Thus the path theorem is proof evidence for the wrapper, not a reason to
-silently strengthen the stated property.
-
-Faults require a separate terminal argument. The existing certificate
-consumer {bpref "conditional-fault"}[] is proved, while {bpref "fault-closure"}[]
-must construct its evidence and executable trap correspondence internally.
-
-# Why these invariants are needed
-%%%
-tag := "w6-invariant-design"
-%%%
-
-The proof mechanism determines the invariant questions. To invoke the guarded
-step theorem at each intermediate state, validated code must retain semantic
-facts that static validation alone cannot recover.
-
-:::table +header
-*
-  * Preservation question
-  * Required information and destination
-*
-  * Does each value have the representation its next use expects?
-  * Precise producer/use-site ABI facts, including non-directional object-family cases: {bpref "provenance-closure"}[] and the {ref "provenance-design"}[provenance account].
-*
-  * Can an allocation or mutation safely advance the related heap?
-  * Live roots, reuse/capacity facts and finite resource guards. Fresh heap results need a construction region and publication back into the saved caller: {bpref "heap-miss-closure"}[] and the {ref "heap-caller-invariant"}[heap/caller account].
-*
-  * Does a call, cache lookup or external operation preserve the continuation and effects?
-  * Exact argument/result ABI rows, saved frames/cache state and primitive/handler laws: {bpref "external-spec"}[], {bpref "external-admission"}[] and the {ref "admission-coverage"}[operation map].
-:::
-
-For a first program instance, prove the semantic facts from its actual code
-and checked blocks, then discharge the conditional consumer's full admission
-interface. These instance proofs can expose the right general invariant.
-Later, {bpref "admission-closure"}[] must construct admission uniformly from
-supported compilation and the maintained relation. That future result cannot
-be a premise of the independent instance proof used to guide it.
-
-The graph gives the mathematical dependencies among these obligations;
-{bpref "closed-export"}[] and {bpref "resident-linking"}[] identify extensions
-of the successful-return result. Prose navigation links describe the future
-specialization route without making it a current proof edge. The node catalog
-below expands the branches without changing the theorem menu's status claims.
 
 # Contract and operation catalog
 
