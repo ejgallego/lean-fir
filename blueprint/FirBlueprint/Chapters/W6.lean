@@ -125,16 +125,22 @@ additional requirement.
 :::
 
 :::definition "admission-interface" (parent := "contracts") (lean := "FirTalos.Concrete.ConcreteStructuredCompilerCurrentStepAdmission") (autoDeps := true)
-For every supported function, recursively validated current outcome and
-successful source step, recover current-node admission and its exact allocation
-cost. This is a quantified compiler law. Having defined this structure does
-not construct an inhabitant for every supported program.
+The step proof needs a semantic operation contract whenever validated source
+code advances. Current-step admission supplies the representation and operation
+facts together with the exact resource cost. Its uniform law covers every
+supported function, recursively validated current outcome and successful source
+step at that outcome. The compiler
+correctness argument must construct this law from compiled code and the
+maintained invariant.
+
 :::
 
 :::definition "address-space" (parent := "contracts") (lean := "FirTalos.Concrete.ConcreteStructuredCurrentStepAddressSpaceSafety") (autoDeps := true)
-Allocation-producing steps have sufficient wasm32 address space at their
-actual frame budget. This execution condition is deliberately retained. It is
-not an open compiler lemma whose eventual proof promises unbounded memory.
+An admitted allocation still has to fit the physical wasm32 address space. This law
+checks an admitted operation's recorded cost against the current frame's
+remaining budget. It is an execution resource condition retained separately
+from semantic admission.
+
 :::
 
 :::definition "finite-runtime" (parent := "contracts") (lean := "FirTalos.Concrete.ConcreteStructuredCurrentStepFiniteRuntimeSafety") (autoDeps := true)
@@ -332,18 +338,22 @@ yet derive all of its inputs automatically.
 # What the current endpoints establish
 
 :::theorem "rooted-steps" (parent := "execution") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteSupportedExport.rootedExecSteps_of_currentStepAdmission") (autoDeps := true)
-Given current-step admission, address-space safety and the entry contract,
-every finite source execution produces a target path retaining the original
-root ABI and matching prefix observations. The witness may evolve with
-allocation; it is not fixed to the entry witness.
+Each finite successful source path from a related entry with cache alignment
+has a matching finite target path when uniform
+current-step admission and address-space safety are supplied. The
+proof concatenates the operation segments and preserves the rooted relation,
+including the original export ABI, world and ordered trace, along the path.
+
 :::
 
 :::theorem "conditional-return" (parent := "execution") (owner := "w6") (tags := "conditional") (lean := "FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates") (autoDeps := true)
-Successful source evaluation yields actual export termination with the exact
-source observation and result ABI. Current-step admission, address-space
-safety, cache alignment, arity and the entry runtime relation remain explicit.
-This theorem is proved. Closing its compiler-owned premise is the distinct
-open target {bpref "admission-closure"}[].
+A finite successful source evaluation yields an actual executable return of
+the selected compiled export. The represented result uses the export's original
+ABI and reproduces the source observation. The proof obtains the target path
+from rooted simulation, then uses terminal extraction and adequacy. Uniform
+current-step admission, address-space safety and the entry/cache/arity
+conditions remain its premises.
+
 :::
 
 :::theorem "conditional-fault" (parent := "execution") (owner := "w6") (tags := "conditional") (lean := "FirTalos.Concrete.ConcreteSupportedExport.faultCorrectOfSimulation") (autoDeps := true)

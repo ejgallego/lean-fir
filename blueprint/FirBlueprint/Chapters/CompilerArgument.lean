@@ -12,352 +12,356 @@ open Verso.Genre.Manual.InlineLean
 tag := "compiler-argument"
 %%%
 
-A compiler should preserve what a program does. Here the first promise is
-precise: if the source program returns successfully, its compiled Wasm export
-also returns, with the same represented result and observable effects of
-external operations, in the same order. The proof must connect actual executions and keep the export's chosen
-result representation throughout calls and returns. Conditional versions of
-this argument are checked; the complete compiler guarantee still has open
-obligations.
+When a Lean program is compiled to Wasm, its values become machine words and
+its objects become regions of linear memory. The two executions therefore look
+different. We want to prove that they still do the same computation: whenever
+the source returns, the compiled export returns a representation of the same
+value and preserves the observable effects of external operations, in order.
+Following a call that constructs and returns a small Array will show why this
+requires a relation between whole machine states, as well as between values.
 
-The current strategy starts with selected programs and their real semantic
-blocks. A theorem for one fixed program must cover every allowed input and
-related entry state. Proving those instances independently can reveal the
-invariants needed for a general compiler theorem. Once the general theorem
-exists, the same instance statements can follow by specialization. We begin
-with an initializer in a captured program, for which a local execution and
-caller-preservation proof already exists.
+We are building this argument first for selected programs, using their actual
+compiled code and the semantic behavior of their operations. A theorem about
+one such program must apply to every allowed input and entry state. These
+instance proofs can reveal what a general compiler proof needs to remember.
+Later, a general theorem could establish the same instance statements by
+specialization. For now, we have proved some local blocks and conditional
+execution theorems; the whole-program guarantees remain goals.
 
 # A call that must return to its caller
 
-The captured program contains `RetainedRC2.initializer`, a function taking no arguments. It
-creates an Array with capacity five, pushes tagged zero into it, and
-returns the resulting singleton Array. Consider a supported caller whose next
-let binding invokes this initializer. The caller must eventually bind the
-result to its destination and continue with its saved environment, control
-points and continuation frames.
+Our example is an initializer in a captured Lean program. It takes no arguments,
+creates an Array with capacity five, pushes tagged zero into it, and returns
+the resulting singleton. Its caller is paused at a let binding: it needs the
+Array in order to bind the destination variable and continue. During the call,
+the machine must remember both the caller's variables and where its execution
+should resume.
 
-The initializer is lazy: its result can be cached in a runtime global. We take
-the cold-cache case, where that global is absent and the body must execute.
-After the body returns, publication caches the result and marks its reachable
-heap graph persistent, protecting its cells from ordinary reuse. Only then can the source caller bind the result and
-resume. This is a useful test of correctness: representing the returned Array
-alone would not explain why publication preserves the caller's saved heap facts.
+The initializer is lazy. Its result is stored in a global cache, so later calls
+can reuse it. We consider a cold cache, where the result is absent and the body
+runs. Returning from that body is only part of the operation. The runtime must
+also publish the Array in the cache and mark its owned heap graph persistent,
+protecting those cells from ordinary reuse, before it resumes the source caller.
 
-This proof covers every related supported caller satisfying its stated
-contracts, rather than a finite list of test heaps. It establishes a local
-block for the initializer in the captured program. Whether the selected
-`compressStored` export reaches this block, and correctness of that whole
-export, require further arguments.
+Publication creates the main proof problem. The suspended caller may hold a
+reuse token for an older heap cell, together with facts that allow it to reuse
+that cell later. Those facts require the cell to remain ordinary, or
+nonpersistent. The initializer must therefore return an Array whose publication
+preserves them. We will prove this by separating the freshly constructed graph
+from the caller's tracked cells. The local theorem applies to any supported
+caller satisfying its assumptions; correctness of the selected compression
+export, including whether it reaches this block, is a further question.
 
 # The source program and the two machines
 %%%
 tag := "w6-machines"
 %%%
 
-The source of this proof is Lean's final intermediate representation, impure
-LCNF, captured as a FIR program $`p`. It makes representation, allocation,
-mutation and ownership operations explicit. A source configuration $`\sigma` contains the program, current code
-or yielded/call control, an environment mapping variables to values, join
-points, continuation frames and runtime $`r`. The runtime contains a heap,
-globals, world, ordered external trace and a cursor for fresh source locations.
-This machine is the semantic boundary captured from Lean's compiler; a proof
-relating the original Lean source to that capture is a separate bridge.
+The source program $`p` is written in Lean's final intermediate representation,
+impure LCNF. At this stage, operations such as allocation, reference counting,
+mutation and object access are explicit. FIR gives this language a machine
+semantics. The compiler theorem compares this captured final-LCNF execution
+with Wasm; relating the original Lean program to that capture is an additional
+proof. In the example, the source machine evaluates the initializer's
+operations, saves the caller during the call, and eventually resumes its
+continuation.
 
-{name Fir.LeanIR.Impure.executeStep}`executeStep` can advance to another state,
-return an observation, or report a semantic fault. Write
-$`\sigma\leadsto_s\sigma'` when it returns `.next` $`\sigma'`, with the source
-external implementation $`\varepsilon` fixed. This implementation supplies the
-semantic responses to source calls such as `Array.mkEmpty` and `Array.push`. The finite path notation
-$`\sigma\overset{n}{\leadsto}_s\sigma'` abbreviates
-{name Fir.LeanIR.Impure.ExecSteps}`ExecSteps` with exactly $`n` successful steps.
-Neither a source step nor a finite path asserts eventual termination.
+Write $`\sigma` for a source state. It records the current code, the environment
+of local variables, local join points, saved continuation frames and runtime
+$`r`. The runtime holds the source heap and global cache, as well as the state
+and history of external operations. An environment maps variables to semantic
+values; a continuation frame records work to do after the current computation
+returns. Source heap references name locations rather than concrete addresses.
+
+A source step either advances to another state, reports a return, or reports a
+semantic fault. For successful advancement, write
+$`\sigma\leadsto_s\sigma'`; write $`\sigma\overset{n}{\leadsto}_s\sigma'` for
+exactly $`n` such steps. The source external implementation $`\varepsilon` is
+fixed during an argument. It specifies the semantic response to calls such as
+`Array.mkEmpty` and `Array.push`. These arrows describe FIR's
+{name Fir.LeanIR.Impure.executeStep}`executeStep` and
+{name Fir.LeanIR.Impure.ExecSteps}`ExecSteps`.
 
 ## The target package, export and result ABI
 
-Compilation selects an export name $`e` and its source entry. The target runs
-a compiled Wasm module together with host functions that implement its imports.
-The supported-export specification supplies the compiler's symbolic module,
+Compilation produces a Wasm module and selects an export $`e` corresponding to
+the source entry. The target execution also needs implementations of imported
+operations. Write $`M` for the compiled package: the compiler's symbolic module,
 the Wasm module produced by its adapter, and the resolved host environment.
-Write $`M` for these existing arguments. Host contracts specify the behavior
-required of imported operations; this is the contracted package proved here.
-Resident linking and released bytes need additional correspondence proofs.
+The host functions are required to satisfy the operation contracts used in the
+proof. This is the contracted execution boundary; connecting it to a module
+with resident implementations and to released bytes will require further
+proofs.
 
-The concrete target configuration $`\tau` contains a Talos store $`S`, locals,
-running/branch/return/halted control, and block, loop and call frames.
-{name FirTalos.Correctness.StructuredWasmStep}`StructuredWasmStep` exposes emitted
-control flow while Talos executes atomic instructions and imported calls.
-Write $`\tau\overset{m}{\longrightarrow}_M\tau'` for exactly $`m` such steps in
-the adapted module and resolved hosts. A source operation can require several
-target instructions; an administrative source step can require none.
+Write $`\tau` for a target state and $`S` for its store. The store contains
+concrete memory, while target locals and the operand stack contain physical
+Wasm values. Target frames record how execution returns through calls, blocks
+and loops. The structured target machine exposes this control flow and uses
+Talos to execute the individual instructions and imported calls. Its finite
+paths are written $`\tau\overset{m}{\longrightarrow}_M\tau'`, with $`m` target
+steps. They are defined by
+{name FirTalos.Correctness.StructuredWasmStep}`StructuredWasmStep`.
 
-The export also fixes a result application binary interface (ABI) kind $`A=\mathrm{spec.sourceResultKind}`:
-it is the agreed encoding of the source result as a physical Wasm value.
-An initializer may return an object while its caller ultimately returns at a
-different kind. The root of the execution remembers the original export's
-$`A` across these calls. Choosing a convenient new ABI at the end would change
-the guarantee.
+A compiler proof must allow different step counts. The source can finish a
+binding in one step while the target needs several instructions to obtain and
+store its representation. Conversely, saving a source continuation may require
+no target instruction. We will relate the states reached by these unequal
+paths, rather than ask the two machines to advance in lockstep.
 
-Interpreter fuel bounds a runner; it is neither a semantic fault nor a shared
-clock for the machines. The successful-return theorem starts from a finite
-successful source evaluation and derives a sufficient target execution. It
-makes no claim that every source input terminates.
+The export fixes how its final result is represented. This is its result
+application binary interface (ABI) kind, which we denote by $`A`. A nested
+initializer can return an object even when the enclosing export returns a
+scalar. The relation must remember the export's original $`A` while these
+nested calls run, so that the final return has the representation the export
+promised. The successful-return argument begins with a finite source evaluation;
+it derives a target execution from that evaluation. Source totality is a
+separate property, and interpreter fuel is only a limit on an executable runner.
 
 # Observations and the representation carried through a call
 %%%
 tag := "w6-rooted-relation"
 %%%
 
-A returned source observation $`o` records a value $`v`, heap, world and ordered
-external trace. The world records the observable state of external operations;
-the trace records their names, arguments and results in order. Globals and the fresh-location cursor are runtime components
-outside this public observation. Exact observation identity therefore keeps
-these observable fields but does not identify every runtime field.
+Suppose a source variable refers to an Array at heap location $`\ell`. Its
+compiled local contains a Wasm word $`q`, and the Array occupies a concrete
+memory region beginning at byte address $`a`. Correctness must explain how
+$`q` and that memory represent the source Array. A refinement witness $`w`
+records this correspondence for source values and live heap objects. At a
+related state, it also relates the global cache, the state of external
+operations and their ordered trace.
 
-Source heap locations and concrete byte addresses are different coordinates.
-A refinement witness $`w` records how source values and live heap objects are
-represented in target values and memory. At one state the same witness also
-relates globals, world and ordered trace. Each witness satisfies the relation's validity requirements, including
-lookup-visible injectivity: distinct source locations visible through the
-witness have distinct represented target addresses. A successor may use a new witness. No extra
-cross-phase equality, fixed physical address or monotone extension law relates
-all the phase witnesses.
+The invariant requires each witness to be valid. In particular, distinct source
+locations visible through its mapping have distinct represented addresses.
+When allocation or return changes the states, the proof may produce a new
+witness. Each new witness has its own validity proof; the argument does not
+require every phase to use the entry witness or an extra uniform extension
+law between all witnesses.
 
-The execution relation must retain more than this value correspondence. It
-also records validated current code, generated continuations, caches and saved
-caller information. For fixed $`p,M,\varepsilon,A`, use the abbreviations
+Representation alone is insufficient during a call. The two machines must
+also agree on what computation is running and what will happen when it returns.
+Write $`R_{A,w}(\sigma,\tau)` for this full execution relation. It combines
+value and runtime representation with validated current code, generated
+continuations, cache agreement and the facts saved for callers. The index $`A`
+remembers the original export's result kind. The active callee retains the
+representation facts appropriate to its own result, which may have a different
+kind. Hiding the witness gives the relation
 
-$$`\begin{aligned}
-R_{A,w}(\sigma,\tau)&\equiv\operatorname{Rooted}_A(w;\sigma,\tau),\\
-R_A(\sigma,\tau)&\equiv\exists w,\ R_{A,w}(\sigma,\tau).
-\end{aligned}`
+$$`R_A(\sigma,\tau)\quad\Longleftrightarrow\quad
+\exists w,\ R_{A,w}(\sigma,\tau).`
 
-Here $`\operatorname{Rooted}_A` is the existing
-{name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt}`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt`
-with those fixed arguments. This notation introduces no new invariant. Its
-existential form is the relation used by
+The initial relation is obtained from the correspondence between source entry
+data and encoded target parameters. Carrying the saved caller facts through construction lets publication
+re-establish this relation. The proof can then move from a locally represented
+Array back to a validated caller, and finally to the representation promised
+by the export.
+
+At the end of a source execution, the public observation $`o` consists of its
+outcome, heap, world and ordered external trace. The world records the observable
+state of external operations; the trace records their names, arguments and
+results in order. Write $`O(r,v)` for the returned observation built from
+runtime $`r` and value $`v`. Globals and the fresh-location cursor are parts of
+$`r`'s runtime state, but are absent from this public observation. Thus an
+observation describes more than a returned value, while identifying less than
+an entire runtime.
+
+The relation $`R_{A,w}` abbreviates
+{name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt}`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt`.
+Its witness-hiding form is used by the conversion
 {name FirTalos.Concrete.ConcreteStructuredCompilerCurrentStepAdmission.toRootedTraceSimulation}`toRootedTraceSimulation`.
-The current callee's ABI may differ from $`A`; saved rooted facts retain $`A`
-until the final export return.
-
-The entry contract relates encoded parameters to the source environment,
-heap/runtime, reuse capacities and caches. The compiler constructs the rooted
-control relation from this contract. The client supplies related entry data;
-the proof derives intermediate states and future target paths.
+These links identify the Lean relations underlying the mathematical notation.
 
 # The precise successful-return guarantee
 %%%
 tag := "w6-notation"
 %%%
 
-We can now state the property the compiler should establish. For a source
-observation $`o` and value $`v`, abbreviate successful evaluation by
+Choose a supported source program $`p`, its compiled package $`M`, export $`e`
+and the export's result ABI $`A`. These choices fix the code and representation
+convention. They leave the input and the related entry states arbitrary. Also
+fix the source external implementation $`\varepsilon`, subject to the operation
+contracts used below.
+
+An invocation starts with source runtime $`r_0` and environment $`E_0`, concrete
+target store $`S_0`, a row $`\bar u` of encoded Wasm parameters, and an initial
+refinement witness $`w_0`. It includes the caller's retained reuse facts and a
+finite byte budget. The allowed invocations satisfy four conditions:
+
+* The source primitive laws and installed implementation contracts cover the
+  operations in the argument. Finite resource bounds and address-space safety
+  hold for the execution.
+* The compilation context and source program have the same cached declarations.
+* The encoded parameter row has the selected target function's parameter count.
+* The source runtime and environment are related to the target store and
+  parameter-derived locals, including the required cache, reuse, capacity and
+  closure-ABI facts.
+
+Let $`\sigma_0` be the source entry state for such an invocation. Write
+$`\sigma_0\Downarrow_{\varepsilon}(o,v)` when its finite source evaluation has
+observation $`o` and returned value $`v`. This abbreviates
+{name Fir.LeanIR.Impure.ExecEvaluates}`ExecEvaluates` with returned outcome.
+For the target, write
+$`\operatorname{Return}_{M,e}(S_0,\bar u;r,v,A)` when the export actually
+terminates from $`S_0,\bar u` with the refined return postcondition for runtime
+$`r`, value $`v` and ABI $`A`. That postcondition supplies one terminal witness
+and physical result. It relates the live runtime and result, clears the target
+failure channel, and leaves the represented result as the single returned
+operand with an empty caller tail.
+
+Successful-return correctness is the following requirement for every allowed
+invocation:
 
 $$`\begin{aligned}
-\sigma\Downarrow_{\varepsilon}(o,v)\equiv{}&
-\operatorname{ExecEvaluates}(\varepsilon,\sigma,o)\\
-&\land\ o.\mathrm{outcome}=\operatorname{returned}(v).
-\end{aligned}`
-
-Keep $`p,M,e,A` fixed through the selected supported-export
-specification, with $`A=\mathrm{spec.sourceResultKind}`. Its context and source
-code determine the source entry. Fix the source external implementation
-$`\varepsilon` subject to the retained contracts below. This property uses the observation-facing
-conclusion of {bpref "conditional-return"}[].
-
-For each invocation, quantify a source
-entry runtime $`r_0`, environment $`E_0`, concrete store $`S_0`, initial witness
-$`w_0`, physical parameter row $`\bar u`, reuse facts and finite byte budget.
-Require the following entry and execution conditions:
-
-* *External/resource contracts:* the reviewed source primitive and installed
-  implementation contracts, whose general coverage remains incomplete where
-  documented. Finite-resource bounds and address-space safety remain explicit
-  execution conditions.
-  Neither follows from static validator acceptance.
-* *Cache alignment:* the compilation context's cached declarations equal the
-  program's cached declaration names.
-* *Arity:* $`|\bar u|=\mathrm{spec.targetFunction.numParams}`.
-* *Related entry:* the existing
-  {name FirTalos.Concrete.ConcreteReuseCapacityCacheAbiFrame}`ConcreteReuseCapacityCacheAbiFrame`
-  relates $`r_0,E_0,S_0,w_0`, the reuse facts/budget and the parameter-derived
-  target locals, including its cache/reuse/closure ABI conditions.
-
-Let $`\sigma_0` be the source code-entry state from this runtime/environment.
-Call the resulting program property $`P_{\mathrm{success}}(p)`. In words, every
-allowed invocation that returns in the source must have a matching actual
-export return. The required conclusion is
-
-$$`\begin{aligned}
-&\forall o,v,\quad\sigma_0\Downarrow_{\varepsilon}(o,v)\\
+&\forall o,v,\quad \sigma_0\Downarrow_{\varepsilon}(o,v)\\
 &\quad\Longrightarrow\exists r,\quad
-o=\operatorname{ReturnedObservation}(r,v)\\
-&\qquad\land\ \operatorname{Return}_{M,e}(S_0,\bar u;r,v,A).
+ o=O(r,v)\ \land\ \operatorname{Return}_{M,e}(S_0,\bar u;r,v,A).
 \end{aligned}`
 
-The last predicate is only an abbreviation for the existing exported
-termination predicate, with all invocation arguments shown:
+We denote the program property by $`P_{\mathrm{success}}(p)`. It says that every
+finite successful source computation from an allowed input forces an actual
+export return with the same observation and the fixed result ABI. Fixing $`p`
+fixes a program, not its input. Source termination for all inputs would be a
+further theorem.
 
-$$`\begin{aligned}
-&\operatorname{Return}_{M,e}(S_0,\bar u;r,v,A)\equiv\\
-&\quad\operatorname{ConcreteExportTerminatesWith}\\
-&\qquad\bigl(M.\mathrm{env},M.\mathrm{wasm},e,S_0,\bar u,\\
-&\qquad\quad\operatorname{RefinedReturnPost}(r,v,A,[])\bigr).
-\end{aligned}`
+The existential runtime $`r` is part of the public statement. In the proved
+conditional argument, it is chosen to be the actual final runtime of the source
+execution. Observation equality by itself does not force that choice, because
+it omits globals and the location cursor. Keeping this distinction preserves
+the precise public guarantee while explaining how the proof establishes it.
 
-$`M.\mathrm{env}` is the resolved host environment `hosts.env`, and
-$`M.\mathrm{wasm}` is the adapted module's `wasmModule`.
+The entry conditions supply related starting data and the independent operation
+and resource contracts. The compiler proof must establish the semantic facts
+needed at later states. The current conditional theorem does this from a supplied
+*current-step admission* law: at every supported validated operation, the
+argument/result representations, operation behavior and resource accounting
+required by the step proof are available. Constructing that law from the actual
+compiled code and the maintained invariant is one of the open compiler
+obligations. Static validator acceptance supplies syntactic facts and does not
+alone establish those semantic properties.
 
-$`P_{\mathrm{success}}(p)` means that this
-statement holds for *all* its allowed invocations: fixing the program does not
-fix the input. It preserves every finite successful source evaluation and
-derives actual target export termination. It asserts no source totality. The
-empty list is the exported invocation's caller operand tail. The existing
-{bpref "return-post"}[] uses one terminal witness and physical value to relate
-the complete runtimes and exact result ABI, clear the target failure channel,
-and produce the singleton return stack. That witness need not equal $`w_0`.
-
-The displayed conclusion is exactly the wrapper's shape, with the fixed
-arguments abbreviated. The existing conditional proof chooses $`r` to be
-the actual source final runtime; observation equality alone records value, heap, world and trace,
-without identifying globals or the location cursor. The stronger path-resolved
-internal result is proof evidence, not an extra public conclusion.
-
-This property definition adds no Lean declaration. The fixed
-Stored instance and eventual general compiler theorem remain open.
-{bpref "conditional-return"}[] proves this conclusion *conditionally* on
-uniform current-step admission and address-space safety. Current-step admission
-is the semantic law supplying the argument/result representation, operation
-behavior and resource-accounting facts needed at each supported validated
-operation. Address-space safety is a separate law. That route must
-construct compiler-owned admission; address-space safety remains an explicit
-execution condition. Admission, reached-state provenance and
-heap-miss preservation are not hidden in the allowed entry clauses above.
+In Lean, $`A` is `spec.sourceResultKind`. The related-entry condition is
+{name FirTalos.Concrete.ConcreteReuseCapacityCacheAbiFrame}`ConcreteReuseCapacityCacheAbiFrame`;
+the target return predicate is
+{name FirTalos.Concrete.ConcreteExportTerminatesWith}`ConcreteExportTerminatesWith`
+with {bpref "return-post"}[] and an empty operand tail. Its module and host
+arguments are `adaptedModule.wasmModule` and `hosts.env`. The retained
+{name FirTalos.Concrete.ConcreteStructuredCurrentStepAddressSpaceSafety}`ConcreteStructuredCurrentStepAddressSpaceSafety`
+law checks admitted steps against each frame's current remaining budget.
+The conditional result
+is {bpref "conditional-return"}[]. The mathematical property above preserves
+that result's public observation-facing shape.
 
 # Follow the initializer through its actual states
 %%%
 tag := "worked-retained-initializer"
 %%%
 
-Return to the initializer call. Let $`d` be the caller's let destination and
-$`k` the code that follows that binding. The caller environment $`E`, join
-points $`J` and continuation frames are saved while the initializer runs. Write
-$`F_s,F_t` for its saved source and target frame stacks, respectively, and
-$`i` for the target local corresponding to destination $`d`.
-A join point is a local control destination; restoring the caller must restore
-these control facts as well as its variables.
+Let the caller's let destination be $`d` and the remaining code be $`k`. When
+the call begins, the source saves its environment $`E`, join points $`J` and
+continuation frames $`F_s`. The target has its own saved frame stack $`F_t`;
+its local $`i` corresponds to source variable $`d`. Saving these components
+lets each machine resume the same caller after the initializer returns.
 
-Two entries matter. The caller has a historical runtime/store/witness anchor
-$`(r_h,S_h,w_h)`. The initializer's construction starts at the current
-$`(r_0,S_0,w_0)`, which may be later. Set
-$`c=r_0.\mathrm{nextLocation}`: this source-location cutoff stays fixed for the
-whole construction. The new Array is allocated at $`c`. The tracked saved reuse-token locations
-are below it, by the related entry's semantic heap facts. It is not a concrete byte address and need not equal the caller's
-historical cutoff. A concrete address such as $`a` belongs to target memory.
+The caller's invariant was established at a historical entry with runtime,
+store and witness $`(r_h,S_h,w_h)`. The initializer begins later, at the current
+$`(r_0,S_0,w_0)`. Its fresh region starts at the source heap cursor of $`r_0`,
+which we call $`c`. This is the value of `r₀.nextLocation`. The proof keeps this
+entry and cutoff throughout construction, even as the current runtime and
+witness change. They provide the fixed reference point for the freshness
+argument.
 
-Write $`\operatorname{heap}(c)` for the source value referring to heap location
-$`c`. The caller may have retained reuse tokens: a tracked variable contains a
-token naming an older source cell and has a separate retained-capacity fact.
-The tracked cell must remain ordinary (nonpersistent) for the saved reuse facts
-to hold. Publication must preserve those facts. An *owned edge* is a heap-reference field whose
-ownership the parent retains. Owned reachability follows such edges from a
-root, including sharing and cycles. Tagged zero is immediate data and creates
-no heap edge. Here the new Array's only element is tagged zero, so the returned
-graph stays entirely at or above $`c`. More generally, region closure means
-that every owned edge from any parent at or above $`c` stays at or above $`c`.
-This prevents publication of the fresh graph from reaching an older saved token.
+The newly allocated Array occupies source location $`c`. Write
+$`\operatorname{heap}(c)` for the source value referring to that location.
+Its only element will be tagged zero, an immediate value with no owned heap
+edge. An owned edge is a heap-reference field whose ownership the parent
+retains; owned reachability follows those fields from a root. Thus the Array
+has no older child that publication could reach. The proof will also preserve
+closure of the whole fresh region, meaning that every owned edge from a parent
+at or above $`c` stays at or above $`c`.
 
-The following states and diagrams describe the conditional proof family. They
-assume a related supported caller with a cold cache, the specified source
-Array laws, installed host-handler laws and enough finite allocation headroom.
-Let $`B` be the caller's byte budget and
-$`\Delta=\operatorname{residentArrayAllocationBytes}(5)` the physical cost of
-the five-slot Array. The precise contracts follow after the pictures.
+Let $`B` be the available concrete byte budget and $`\Delta` the allocation
+cost of an Array with five slots. The following execution uses that allocation
+once. Boxing the zero and pushing it into the empty Array require no additional
+physical allocation. Assuming the related caller, cold cache, operation laws
+and $`\Delta\le B`, the proof follows these states:
 
 :::table +header
 *
-  * Milestone
-  * Source state
-  * Concrete target and representation
+  * Source step count
+  * Source computation
+  * Target computation
 *
-  * Caller before the call: step 0
-  * Code is the let binding of the initializer to $`d`; environment, joins and caller frames are saved. The cache is cold.
-  * Validated generated lazy-call code and related locals/store. The original root ABI is $`A`.
+  * 0: caller
+  * The caller is at the let binding of the initializer to $`d`.
+  * Generated lazy-call code and locals represent that caller; the export result kind is $`A`.
 *
-  * Cold callee entry: step 2
-  * Initializer code starts with empty local environment. Cache and destination-bind frames sit above the saved caller frames.
-  * The emitted call/label continuation is installed. The active construction scope is anchored at $`r_0,S_0,w_0` and cutoff $`c`.
+  * 2: callee entry
+  * Staging saves the caller, then the cold initializer begins with an empty local environment. Cache and bind frames sit above $`F_s`.
+  * The call and label continuation have been entered in three target steps. Construction is anchored at $`(r_0,S_0,w_0)`.
 *
-  * Six body steps completed: step 8
-  * The two literals, empty-Array call/bind and UInt8 boxing have run. The empty Array is at $`c` with capacity five, boxed tagged zero is bound, and the runtime is `afterMkEmpty` applied to $`r_0`.
-  * Allocation derives a witness $`w_1` mapping $`c` to a concrete address $`a`. A physical word $`z` represents tagged zero; its numeric encoding is not assumed.
+  * 8: allocation and boxing
+  * Six body steps evaluate the literals, call and bind the empty Array, and box tagged zero. The Array is at $`c` with capacity five.
+  * Allocation produces a witness mapping $`c` to a byte address $`a`; a word $`z` represents tagged zero.
 *
-  * Initializer's local return: step 12
-  * Three push steps and one return complete the ten-step body. The Array now contains one tagged zero; the runtime is `afterPush` applied to $`r_0`. Cache/bind frames remain above the caller.
-  * The fresh in-place push stores $`z` without a second allocation. The local-return fact supplies a physical result $`q` representing the heap object at $`c`, under the produced witness, and retains the original construction region.
+  * 12: local return
+  * Three push steps and one return finish the ten-step body. The Array contains one tagged zero, with cache and bind frames still pending.
+  * The push stores $`z` in place. A physical result $`q` represents the Array under the produced witness and original construction scope.
 *
-  * Publication: step 13
-  * The yielded heap object at $`c` is cached and marked persistent. Its source destination-bind frame is still pending.
-  * Publication executes cache/global updates and reloads the result representation. Caller target locals/frames are already restored, with the result on the operand head and destination `local.set` pending. The rooted relation at $`A` and `HeapRegionClosed c` hold.
+  * 13: publication
+  * The runtime caches $`\operatorname{heap}(c)` and marks the returned graph persistent. The destination bind is still pending.
+  * Seven target steps publish and reload the result. Caller locals and frames are already restored; the destination `local.set` remains pending.
 *
-  * Caller resumed: step 14
-  * Bind $`d` to the heap object at $`c` and continue with $`k`. Joins and caller frames are exactly the original ones.
-  * Execute the destination `local.set`; the original target frames remain restored. The validated caller relation has the updated environment/global, budget $`B-\Delta` and only $`d`'s old reuse fact erased.
+  * 14: caller resumption
+  * The bind installs the Array at $`d` and resumes $`k`, with the original joins and caller frames.
+  * One `local.set` writes the corresponding target local. The caller's remaining budget is $`B-\Delta` and only $`d`'s old reuse fact is erased.
 :::
 
-The runtime definitions
-[`afterMkEmpty` and `afterPush`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L59)
-append the two ordered events `Array.mkEmpty` and `Array.push`, with their exact
-source arguments/results. The primitive responses preserve world. Publication
-changes the global/persistence state; binding changes the environment. This
-local return has cache/bind frames and is not a completed export evaluation.
+The source runtime changes in two distinct ways. `Array.mkEmpty` and
+`Array.push` append their arguments and results to the external trace, in that
+order, while preserving the world. Publication then updates the cache and
+persistence metadata; the destination bind updates the environment. Tracking
+these changes separately lets the relation account for both effects and caller
+restoration. The initializer's local return still has a continuation to run;
+only the enclosing export's final return completes the successful evaluation.
 
 ## Source and target at four proof checkpoints
 
-These native Illuminate panels depict a *symbolic family of theorem
-checkpoints*, not a sampled execution or a universal proof. Assume the related
-supported caller/root, cold cache, source primitive laws, installed handler
-laws and $`\Delta\le B` described above and specified below. Each panel's derived facts are
-conditional on those inputs. The figures use schematic layout coordinates;
-source locations and concrete byte addresses have separate meanings.
+The panels show the symbolic states obtained by this proof family. A drawn
+token $`\ell` represents any tracked caller token, when one exists. Source
+locations and target byte addresses have separate axes. In each phase,
+$`q` represents the returned Array and $`z` its tagged element; the subscript
+identifies the checkpoint. The witnesses and addresses are derived at those
+checkpoints, while both entry anchors, $`c` and the export ABI $`A` stay fixed.
 
-Both entry anchors, cutoff $`c` and original export ABI $`A` stay fixed.
-Phase-indexed witnesses such as $`w_{12},w_{13},w_{14}` and corresponding
-addresses are existential; the panels
-do not assume a generic equality or extension law between them. The physical result $`q_{13}` represents the returned Array; the word
-$`z_{13}` represents its tagged-zero element. These are different roles. A drawn saved token $`\ell` stands for any tracked source location, if one exists.
-
-*Step 2 — cold entry.* The saved cache/bind and generated call/label
-continuations are installed; no fresh object mapping is asserted yet.
-The entry segment takes three target steps.
+At **step 2**, the machines have saved the cache and bind continuations and
+entered the callee. The target entry segment has three steps. The fresh Array
+has not yet been allocated.
 
 ```diagram
 FirBlueprint.RetainedInitializerScene.entered
 ```
 
-*Step 12 — local return.* Ten body source steps have produced the singleton
-Array and a fresh-yield relation. The tagged element is data, with no owned
-heap edge. The body target-path length $`T` is existential.
+At **step 12**, the ten source body steps have produced the singleton and its
+represented target result. The body has a finite target path, whose length
+$`T` the proof derives. The local-return relation still remembers the original
+construction region and the suspended caller.
 
 ```diagram
 FirBlueprint.RetainedInitializerScene.returned
 ```
 
-*Step 13 — publication.* The source still has its callee environment/joins
-and pending bind capturing caller $`E,J`. The target has already restored
-caller locals/frames and reloaded $`q_{13}`; only its destination `local.set`
-remains pending. This is the thirteen-step theorem's rooted/closed endpoint.
-Publication contributes seven target steps.
+At **step 13**, publication has restored the target caller's locals and frames
+and reloaded the Array result. The source still has the callee environment and
+joins, followed by the bind frame carrying $`d,k,E,J`. This asymmetry is why
+publication and caller resumption have separate statements. The relation at
+$`A` and fresh-region closure hold at this checkpoint.
 
 ```diagram
 FirBlueprint.RetainedInitializerScene.published
 ```
 
-*Step 14 — caller resumption.* The companion theorem restores source
-$`E[d\mapsto\operatorname{heap}(c)]`, caller joins and frames. The target writes
-the corresponding local index $`i` in one step; its frames remain restored.
-The public fourteen-step result exposes validated caller restoration, without
-a separate final `HeapRegionClosed` conjunct.
+At **step 14**, the source installs $`\operatorname{heap}(c)` at $`d` and
+restores the caller's joins and frames. The target writes local $`i` and keeps
+its already restored frames. We now have a validated caller ready to continue.
 
 ```diagram
 FirBlueprint.RetainedInitializerScene.resumed
@@ -365,435 +369,492 @@ FirBlueprint.RetainedInitializerScene.resumed
 
 # The common assumptions of the two local theorems
 
-Fix
-$`p=\mathrm{RetainedRC2.program}`, its captured initializer, a supported compiled
-package $`M`, source external implementation $`\varepsilon` and original root
-ABI $`A`. The two statements below then quantify **every** supported caller
-row and related source/target state $`\sigma,\tau`: caller context/function,
-active function ABI and expected caller result, label context, historical entry
-$`(r_h,S_h,w_h)`, current runtime/store/witness $`r_0,S_0,w_0`, source environment
-$`E`, target locals/code, retained reuse-capacity facts $`F`, byte budget $`B`, destination $`d`
-and continuation $`k`. Fixing the captured program does not select a finite
-family of caller heaps or inputs.
+These are families of executions of the same captured initializer,
+`RetainedRC2.initializer` in `RetainedRC2.program`. The compiled package $`M`,
+source external implementation $`\varepsilon` and original export ABI $`A`
+are fixed. The supported caller is arbitrary: its function and compilation
+context, active result kind, expected result, labels, historical entry,
+current states, environment, target locals and code may vary. So may its reuse
+facts $`F`, budget $`B`, let destination $`d` and continuation $`k`.
 
-Write $`\mathcal V` for the existing validated current-code relation at this
-caller row and let binding. It abbreviates
-{name FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome}`ConcreteStructuredValidatedCodeOutcome`
-with all those indices. The allocation cost $`\Delta` is
-{InlineLean.lean}`Fir.Wasm.Concrete.residentArrayAllocationBytes 5`, with the
-construction cutoff $`c` fixed at the current entry as above.
+The first assumption is a related, validated caller at precisely this let
+binding. Its source let value is the initializer applied to no arguments.
+The relation connects the actual caller function to its compiled and adapted
+code, accounts for the saved frames, and carries agreement with the original
+root result kind $`A`. The active-result equality is retained even though the
+initializer itself returns an object. The cache is cold: the initializer's
+entry is absent from the source globals.
 
-:::table +header
-*
-  * Retained premise
-  * Meaning in this example
-*
-  * Supported caller and validated current relation
-  * A supported caller specification and $`\mathcal V` relate the actual compiled/adapted function, current let and saved frames. Active-result equality and root agreement retain $`A`, even though the initializer returns an object. The let value is exactly the nullary application of the captured initializer.
-*
-  * Cold cache
-  * The initializer is absent from the source runtime globals. This proof takes the cache-miss branch.
-*
-  * `FreshArrayExternalContract`
-  * Uniform source laws specify empty allocation and the fresh empty-receiver push branch with spare capacity and a tagged element. The actual calls use capacity five and payload zero; wider Array behavior is outside this contract.
-*
-  * Installed concrete handler laws
-  * The empty handler conforms at $`S_0,w_0` for every related capacity-five request. The push law quantifies every concrete runtime/witness related to `afterMkEmpty` $`r_0`, every mapped address of $`c`, every word representing tagged zero, and every request with the exact `Array.push` name/arguments. It concludes the in-place handler equation. Source laws alone do not establish these implementation equations.
-*
-  * Finite headroom
-  * $`\Delta\le B`, where $`B` is the related allocation budget. Boxing and this push branch allocate no additional physical bytes.
-:::
+Next come the operation laws. The source contract specifies empty-Array
+allocation and pushing a tagged element into a fresh empty receiver with spare
+capacity. Its uniform laws are specialized here to capacity five and payload
+zero. The concrete host must implement those operations at the representations
+that the proof encounters. For allocation, its empty handler must satisfy the
+handler equation at $`S_0,w_0` for every related capacity-five request. For push,
+the law ranges over every concrete runtime and witness related to the source runtime after
+empty allocation, every mapped address of $`c`, every word representing tagged
+zero, and every request with the exact `Array.push` name and arguments. It then
+provides the in-place handler equation. This quantification is needed because
+the allocation proof produces a representation; the push must work at whichever
+related representation is produced.
 
-The client supplies neither a source execution nor a target path. Callee
-support, generated cache/continuation facts, the five binding-kind lookups and
-the post-body resource scope are derived inside the proof. The handler laws
-remain contracts for the installed concrete host; they do not prove execution
-of a resident W7 helper or JavaScript implementation.
+Finally, the concrete allocation must fit: $`\Delta\le B`. This is a physical
+resource assumption, since the source semantic heap is unbounded. The code
+uses no further allocation in boxing or in this push branch, so the remaining
+budget is $`B-\Delta`.
+
+These assumptions describe the starting caller and operation behavior. The
+proof derives the source execution, target paths, callee support, generated
+cache and continuation facts, the five local binding-kind facts, and the
+post-body construction scope. A general current-step admission law is not a
+premise of this local derivation.
+
+The caller relation is
+{name FirTalos.Concrete.ConcreteStructuredValidatedCodeOutcome}`ConcreteStructuredValidatedCodeOutcome`;
+its root agreement is
+{name FirTalos.Concrete.ConcreteStructuredValidationAgreesAtRoot}`ConcreteStructuredValidationAgreesAtRoot`.
+The source operation laws form `FreshArrayExternalContract`, and $`\Delta`
+is {InlineLean.lean}`Fir.Wasm.Concrete.residentArrayAllocationBytes 5`.
+The concrete handler laws concern the installed host, whose replacement by
+resident code requires its own implementation refinement.
 
 # Publication and caller resumption are separate conclusions
 
-The accepted source theorem
-[`rootedLet_publishesAtBind`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1016)
-derives thirteen source steps, an actual finite target path, the rooted relation
-at the original export ABI, and closure of the fresh heap region. Its
-[`rootedLet_publishes_and_resumesCaller`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1100)
-companion adds the destination bind and derives the fourteen-step restored
-caller. The latter statement exposes caller restoration rather than a separate
-final region-closure conjunct. These are reviewed accepted theorem sources;
-this exposition adds no Lean association or fresh retained-initializer proof
-build. Their statement/proof files at `f6850d79f` are unchanged at the `8cd93fd45`
-exposition base.
+We can now state what the two theorems prove. In both, the assumptions above
+range over every supported caller and related initial pair
+$`\sigma_0,\tau_0`. Here these are the caller states at the initializer let,
+before staging, rather than the enclosing export's entry states. The statements derive the execution from those starting
+data. The source path lengths are exact; the target lengths, intermediate
+states and final witnesses are obtained by the proof.
 
 ## Publication after thirteen source steps
 
-**Conclusion.** For every caller row and initial pair $`\sigma,\tau`
-satisfying *all* the named hypotheses above,
+Write $`h(\sigma)` for the source heap in state $`\sigma` and
+$`\operatorname{Closed}_c(h)` for closure of the whole region at or above $`c`:
+every owned edge from a parent in that region has its child there too. The
+publication theorem gives
 
 $$`\begin{aligned}
-&\exists m,w',\sigma',\tau',\quad
-\sigma\overset{13}{\leadsto}_{s}\sigma'\\
-&\quad\land\ \tau\overset{m}{\longrightarrow}_{M}\tau'\\
-&\quad\land\ R_{A,w'}(\sigma',\tau')
-\ \land\ \operatorname{Closed}_c(\sigma'.\mathrm{runtime.heap}).
+&\exists m,\sigma_{13},\tau_{13},w_{13},\quad
+  \sigma_0\overset{13}{\leadsto}_s\sigma_{13}\\
+&\quad\land\ \tau_0\overset{m}{\longrightarrow}_M\tau_{13}\\
+&\quad\land\ R_{A,w_{13}}(\sigma_{13},\tau_{13})\\
+&\quad\land\ \operatorname{Closed}_c(h(\sigma_{13})).
 \end{aligned}`
 
-Here $`\operatorname{Closed}_c(h)` abbreviates the *whole*
-{name FirTalos.Concrete.HeapRegionClosed}`HeapRegionClosed` $`c\ h` predicate:
-every owned heap-reference edge from a
-parent at or above $`c` leads to a child at or above $`c`. Closure concerns all
-such parents, not just the returned root. The rooted relation has the same
-fixed $`p,M,\varepsilon,A` and the existential *final* witness $`w'`.
+The relation says that publication has re-established the execution invariant
+at the export's original result kind. Region closure supplies the heap
+separation used to protect the suspended caller. Together these are enough to
+continue the compiler argument beyond local Array construction.
 
-**Reading and correspondence.** The exact source count is thirteen; the target
-count, final states and witness are derived existentially. This is the exposed
-conclusion of the source-reviewed
-[`rootedLet_publishesAtBind`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1016),
-with Lean arguments abbreviated. Its construction additionally identifies the
-published global and yielded root $`\operatorname{heap}(c)`: the source bind
-is pending while the target caller frames are already restored and its
-destination `local.set` is pending. Those are facts of the constructed
-endpoint, rather than extra conjuncts of the displayed top-level signature.
+The constructed endpoint also identifies the cached value as
+$`\operatorname{heap}(c)`. Its source bind is still pending, while the target
+has already restored caller locals and frames and has its destination
+`local.set` left to execute. These descriptions follow from the endpoint built
+in the proof. The displayed public conclusion consists of the paths, rooted
+relation and whole-region closure.
 
 ## Caller resumption after fourteen source steps
 
-Define the source runtime abbreviation
+One more source bind and one target local write complete the return to the
+caller. Under the same assumptions, the companion theorem provides
 
 $$`\begin{aligned}
-\operatorname{Pub}(r_0)\equiv{}&
-\operatorname{setGlobal}\bigl(\operatorname{afterPush}(r_0),\\
-&\qquad\mathrm{initializer},\operatorname{heap}(c)\bigr).
+&\exists m,\sigma_{14},\tau_{14},w_{14},\quad
+  \sigma_0\overset{14}{\leadsto}_s\sigma_{14}\\
+&\quad\land\ \tau_0\overset{m}{\longrightarrow}_M\tau_{14}\\
+&\quad\land\ R_{A,w_{14}}(\sigma_{14},\tau_{14}).
 \end{aligned}`
 
-It means the actual `afterPush` runtime with the initializer global set to the
-source object value at $`c`. The notation $`\operatorname{heap}(c)` denotes
-that source *value*, not the location by itself. Let $`\mathcal V'` abbreviate
-the same validated caller relation with the following indices:
+It also restores a validated caller with the following state. Let $`r_{\mathrm{pub}}`
+be the runtime after `Array.push`, with the initializer global set to
+$`\operatorname{heap}(c)`. This is its source runtime. The caller's environment is
+$`E[d\mapsto\operatorname{heap}(c)]`, its current code is $`k`, its budget is
+$`B-\Delta`, and its reuse facts are $`F` with only the old fact for $`d` erased.
+The source joins and continuation frames are exactly the initial caller's
+$`J,F_s`, and the target frame stack is exactly $`F_t`. The historical entry,
+caller context and function, labels, active ABI and expected result are retained.
+The proof supplies a new validated-code relation for these updated indices and
+agreement at the original root ABI $`A`.
 
-:::table +header
-*
-  * Preserved indices
-  * Updated indices
-*
-  * Historical entry $`r_h,S_h,w_h`, caller context/function, labels, active ABI and expected result
-  * Facts $`\operatorname{eraseFact}(F,d)`; budget $`B-\Delta`; runtime $`\operatorname{Pub}(r_0)`; environment $`E[d\mapsto\operatorname{heap}(c)]`; continuation $`k`
-*
-  * Compiled package and source implementation
-  * Existential target store $`S'`, locals $`L'`, remaining target code $`C'`, witness $`w'` and states $`\sigma',\tau'`
-:::
+This additional conclusion is what lets the caller's next operation use its
+restored invariant. The fourteen-step statement exposes caller validation and
+frame restoration; it has no separate final region-closure conjunct. The
+thirteen-step theorem is the statement that explicitly preserves that closure.
 
-$`\operatorname{eraseFact}(F,d)` abbreviates
-{name Fir.Wasm.eraseReuseCapacityFact}`eraseReuseCapacityFact` at the
-let destination. For a witness $`\nu:\mathcal V'`,
-$`\operatorname{RootAgreement}_A(\nu)` abbreviates
-{name FirTalos.Concrete.ConcreteStructuredValidationAgreesAtRoot}`ConcreteStructuredValidationAgreesAtRoot`
-for $`\nu`'s agreement and validated
-frames. $`A` stays fixed in the ambient root assertions, rather than indexing
-$`\mathcal V'`; it is not changed to the initializer's object ABI.
-
-**Conclusion.** For every caller row and initial pair satisfying the *same*
-named hypotheses,
-
-$$`\begin{aligned}
-&\exists m,S',L',C',w',\sigma',\tau',\quad
-\sigma\overset{14}{\leadsto}_{s}\sigma'\\
-&\quad\land\ \tau\overset{m}{\longrightarrow}_{M}\tau'\\
-&\quad\land\ \exists\nu:\mathcal V',\quad
-\operatorname{RootAgreement}_A(\nu)\\
-&\qquad\land\ R_{A,w'}(\sigma',\tau')\\
-&\quad\land\ \sigma'.\mathrm{joins}=\sigma.\mathrm{joins}
-\ \land\ \sigma'.\mathrm{frames}=\sigma.\mathrm{frames}\\
-&\quad\land\ \tau'.\mathrm{frames}=\tau.\mathrm{frames}.
-\end{aligned}`
-
-**Reading and correspondence.** The source binds $`d` and resumes $`k`;
-the target writes its corresponding local and retains the restored caller
-frames. This abbreviates the exposed signature of the source-reviewed
+The two results are
+[`rootedLet_publishesAtBind`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1016)
+and
 [`rootedLet_publishes_and_resumesCaller`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1100).
-Lean explicitly provides the new validated relation and its root agreement.
-There is no separate final $`\operatorname{Closed}_c` conjunct in this
-fourteen-step signature. Neither statement assumes intermediate paths,
-future publication separation or whole-program current-step admission.
+The closure predicate is
+{name FirTalos.Concrete.HeapRegionClosed}`HeapRegionClosed`; the erased fact uses
+{name Fir.Wasm.eraseReuseCapacityFact}`eraseReuseCapacityFact`.
+The cited accepted sources at `f6850d79f` provide the local theorem evidence
+here; this chapter adds no association or fresh
+initializer proof build.
 
 # Why fresh-region separation preserves the caller
 
-Write $`\operatorname{ownedReach}_h(v)` for the source locations $`j` satisfying
-{name Fir.LeanIR.Impure.Reachable}`Reachable` $`h\ [v]\ j`. This includes a heap
-root itself and follows owned edges, as introduced in the example.
+When the initializer returns, publication marks the returned Array and its
+owned graph persistent. The suspended caller may still hold a reuse token for
+an older cell. Its saved facts require that cell to remain ordinary, so the
+cell must be outside the graph being marked. Fresh allocation gives us a way
+to establish this separation.
 
-Transport from the historical caller witness into $`w_0`, followed by the
-related initializer-entry heap, puts saved retained-token locations $`\ell`
-below $`c`. No equality of the two entry cutoffs is assumed.
-The Array root is $`c` itself, and its only element is tagged zero, which has no
-owned heap edge. Allocation, the in-place push and publication maintain closure
-at the original cutoff. In the notation of the
-{ref "heap-caller-invariant"}[heap/caller argument],
+Recall that $`c` is the source heap cursor at initializer entry. The saved
+token's representation can be transported from the historical caller witness
+to the initializer-entry witness $`w_0`. The related entry heap at $`r_0`
+then places its source location
+$`\ell` below $`c`. At entry, all existing source heap cells lie below $`c`, so the region at or
+above $`c` is empty. The initializer allocates its Array at $`c`, and its only
+stored element is tagged zero. This element has no heap reference to follow.
+The local operation proofs establish and preserve whole-region closure at
+the original cutoff: every owned edge from a parent at or above $`c` stays in
+that region. Allocation and the in-place push preserve this edge condition. Starting at the returned root, every location $`j` reached through
+owned edges is at or above $`c`. Thus a tracked cell and a location in the
+returned graph satisfy
 
 $$`\ell<c\le j.`
 
-Here $`j\in\operatorname{ownedReach}_{h}(\operatorname{heap}(c))`, with $`h`
-the returned source heap, is distinct from the physical target result $`q`.
-For the tracked set, use two partial maps, undefined outside these exact cases:
-
-* $`\operatorname{cap}_F(x)=b` exactly when the authoritative
-  {name Fir.Wasm.findReuseCapacityEvidence?}`findReuseCapacityEvidence?`
-  query at $`F,x` returns a retained-at-least capacity bound $`b\in\mathbb N`.
-* $`\operatorname{tok}_E(x)=\ell` exactly when source environment lookup at
-  $`E,x` returns a reuse token containing source location $`\ell`.
-
-These abbreviate the precise results `some (.retainedAtLeast b)` and
-`some (.reuseToken (some ℓ))`, respectively. The identifier $`x` may be any
-tracked variable, not only the let destination. $`\operatorname{cap}_F`
-reports the retained-capacity evidence; it does not by itself assert an actual
-heap capacity. Thus
+To state the consequence for all of the caller's tokens, let $`\mathcal T(F,E)`
+be its tracked source locations. A location belongs to this set when some
+variable in environment $`E` contains a reuse token naming it and that variable
+has a retained-capacity fact in $`F`. Let $`\operatorname{ownedReach}_h(v)` be
+the locations reached from value $`v` in source heap $`h` by following owned
+heap-reference fields, including the root itself. Sharing and cycles are
+allowed; immediate tagged data contributes no edge. For the publication heap
+$`h`, the proof gives
 
 $$`\begin{aligned}
-\operatorname{Tracked}(F,E)=\{\ell\mid{}&\exists x,b,\quad
-\operatorname{cap}_F(x)=b\\
+\mathcal T(F,E)&\subseteq\{\ell\mid\ell<c\},\\
+\operatorname{ownedReach}_h(\operatorname{heap}(c))
+&\subseteq\{j\mid c\le j\},\\
+\mathcal T(F,E)\cap\operatorname{ownedReach}_h(\operatorname{heap}(c))
+&=\varnothing.
+\end{aligned}`
+
+Publication can therefore make the fresh graph persistent without changing the
+persistence of any tracked cell. This is the fact needed to carry the caller's
+ordinary-token facts through the operation. Together with representation and
+capacity transport, it lets the proof restore the caller's retained facts.
+
+The heap argument maintains a stronger property than disjointness of these two
+sets. The whole region above $`c` is closed: an owned edge from any parent in
+that region has its child in the same region. From this edge condition, an
+induction along an owned path proves the second inclusion. The thirteen-step
+publication theorem preserves this whole-region closure. Disjointness is its
+caller-facing consequence.
+
+Keeping the original cutoff is essential. If we replaced $`c` with the cursor
+after allocation, the returned root would lie below the new cutoff. We would
+lose the bound that separates its graph from the caller's tracked cells. The
+current witness may evolve as the target allocates and returns, but the saved
+caller anchor and initializer-entry anchor stay fixed throughout the argument.
+This allows each new representation to be related back to the same separation
+claim.
+
+## The exact tracked set in Lean
+
+The tracked set uses two partial lookups. Write $`\operatorname{cap}_F(x)=b`
+when {name Fir.Wasm.findReuseCapacityEvidence?}`findReuseCapacityEvidence?`
+returns `some (.retainedAtLeast b)` for variable $`x`; write
+$`\operatorname{tok}_E(x)=\ell` when environment lookup returns
+`some (.reuseToken (some ℓ))`. Then
+
+$$`\begin{aligned}
+\mathcal T(F,E)=\{\ell\mid{}&\exists x,b,\quad\operatorname{cap}_F(x)=b\\
 &\land\ \operatorname{tok}_E(x)=\ell\}.
 \end{aligned}`
 
-For this exact tracked set, the historical facts, witness transport, entry
-heap relation and region closure give
-
-$$`\begin{aligned}
-&\operatorname{Tracked}(F,E)\subseteq\{\ell\mid\ell<c\},\\
-&\operatorname{ownedReach}_{h}(\operatorname{heap}(c))
-\subseteq\{j\mid c\le j\},\\
-&\operatorname{Tracked}(F,E)\cap
-\operatorname{ownedReach}_{h}(\operatorname{heap}(c))=\varnothing.
-\end{aligned}`
-
-The disjointness is the caller-facing consequence. It is weaker than the
-whole-region $`\operatorname{Closed}_c(h)` proved at publication; it does not
-replace that predicate in the thirteen-step statement. Its Lean counterpart is
-{name FirTalos.Concrete.ReuseTokenPublicationDisjoint}`ReuseTokenPublicationDisjoint`.
-
-Consequently marking the returned graph persistent cannot reach the caller's
-saved token locations. {bpref "fresh-publication-separation"}[] derives this
-separation and transports the retained facts. Representation at the object ABI
-alone would not imply it: an arbitrary older object could reach a saved token.
-
-The current witness may evolve, while the historical caller and initializer
-entry runtime/store/witness anchors remain fixed. Transport to the produced
-witness is legitimate. Resetting the construction entry to the post-allocation
-runtime/store/witness would move its cutoff past $`c` and invalidate the
-returned-root lower bound. The proof transports the original caller facts
-through the active construction scope, then consumes it to restore the caller.
+The capacity lookup supplies evidence about a tracked variable; the related-state invariant
+certifies that the corresponding concrete allocation has the required room. The reachability set
+is {name Fir.LeanIR.Impure.Reachable}`Reachable` from the singleton root list.
+{name FirTalos.Concrete.ReuseTokenPublicationDisjoint}`ReuseTokenPublicationDisjoint`
+is the disjointness predicate, and {bpref "fresh-publication-separation"}[]
+provides the separation and caller transport used here. The
+{ref "heap-caller-invariant"}[heap and caller chapter] develops these relations
+for general fresh constructions.
 
 # Why these invariants are needed
 %%%
 tag := "w6-invariant-design"
 %%%
 
-The initializer shows why the execution relation needs semantic information
-about both the current computation and its saved callers. General compilation
-must retain the same kinds of facts at each intermediate state:
+The initializer shows why a compiler invariant has to connect the running
+computation to the callers waiting behind it. Allocating a correctly represented
+Array is one obligation. Returning it while preserving the caller's reuse
+facts is another. The invariant provides the information needed for both,
+so that each operation can leave behind a state in which the next operation
+is justified.
 
-:::table +header
-*
-  * Preservation question
-  * Required information and destination
-*
-  * Does each value have the representation its next use expects?
-  * Precise facts about the representation a value's producer establishes and its next use requires: {bpref "provenance-closure"}[] and the {ref "provenance-design"}[provenance account].
-*
-  * Can an allocation or mutation safely advance the related heap?
-  * Live roots, reuse/capacity facts and finite resource guards. Fresh heap results need a construction region and publication back into the saved caller: {bpref "heap-miss-closure"}[] and the {ref "heap-caller-invariant"}[heap/caller account].
-*
-  * Does a call, cache lookup or external operation preserve the continuation and effects?
-  * Exact argument/result ABI rows, saved frames/cache state and primitive/handler laws: {bpref "external-spec"}[], {bpref "external-admission"}[] and the {ref "admission-coverage"}[operation map].
-:::
+Representation facts must be precise enough for a value's next use. A producer
+can establish one encoding while a later projection, call or return requires
+another property of that encoding. The compiler proof has to connect them.
+This is the purpose of {bpref "provenance-closure"}[] and the
+{ref "provenance-design"}[provenance argument]: they track where the needed
+semantic facts come from and why they survive between production and use.
 
-For a first program instance, prove the semantic facts from its actual code
-and checked blocks, then discharge the conditional consumer's full admission
-interface. These instance proofs can expose the right general invariant.
-Later, {bpref "admission-closure"}[] must construct admission uniformly from
-supported compilation and the maintained relation. That future result cannot
-be a premise of the independent instance proof used to guide it.
+Heap operations add lifetime and resource questions. A mutation needs live
+roots and appropriate ownership; reuse needs a valid retained cell and enough
+physical room. An allocation needs a finite budget. The fresh initializer
+also needs a construction region in which it can build a result before
+publishing it to the caller. The {ref "heap-caller-invariant"}[heap and caller
+argument] develops this mechanism, while {bpref "heap-miss-closure"}[] identifies
+the general lazy-call obligation it must discharge.
 
-The graph gives the mathematical dependencies among these obligations;
-{bpref "closed-export"}[] and {bpref "resident-linking"}[] identify extensions
-of the successful-return result. Prose navigation links describe the future
-specialization route without making it a current proof edge. The {ref "w6-formal-catalog"}[formal catalog] expands these branches with their
-checked associations and open statements.
+Calls and external operations bring these facts together. Arguments and results
+must have the encodings expected at their boundaries, saved frames and caches
+must be restored appropriately, and external effects must obey their source
+and implementation laws. The {ref "admission-coverage"}[operation map] organizes
+these cases. A complete proof must derive the relevant facts from supported
+compilation and preserve them through execution; the
+{ref "w6-formal-catalog"}[formal catalog] records the associated results and
+remaining obligations.
 
 # From one step to an executable return
 %%%
 tag := "w6-proof-mechanism"
 %%%
 
-The conditional proof has four stages. They explain what the invariant must
-retain and where the missing compiler facts are consumed.
+The general execution argument builds a target path by following a given
+finite source computation. Its central lemma says that a successful source
+step from related states has a matching finite target segment, after which
+the states are related again. Once that lemma applies at every intermediate
+state, induction can carry the relation all the way to a return.
 
 ## 1. Establish the entry relation
 
-Supported compilation fixes the entry/export, adapted function, hosts and
-selected result kind. Cache alignment and the existing runtime/parameter
-contract give $`R_{A,w_0}(\sigma_0,\tau_0)` through the checked
-{bpref "rooted-entry"}[].
+Supported compilation identifies the source entry, selected export, adapted
+function, host environment and result kind. The entry data relate encoded
+parameters to the source environment and runtime, and the cache-alignment
+condition identifies the globals used by the compiled code. These facts give
+$`R_{A,w_0}(\sigma_0,\tau_0)` through {bpref "rooted-entry"}[]. The execution
+proof therefore starts with the actual compiled entry, rather than a supplied
+simulation of its future behavior.
 
 ## 2. Match a successful source step
 
-The proved
-{name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step}`advance_of_step`
-has the following schematic form under uniform current-step admission and
-address-space safety. The successful source transition is an explicit premise.
-A control rank decreases whenever matching takes zero target steps:
+Consider a source step $`\sigma\leadsto_s\sigma'` from a state related to
+$`\tau`. The current-step admission law supplies the semantic facts for the
+operation at this validated code point. A separate address-space law ensures
+that its admitted resource cost fits the current frame's remaining budget.
+Under these laws, the step theorem derives
 
 $$`\begin{aligned}
-&R_{A,w}(\sigma,\tau)\land(\sigma\leadsto_s\sigma')\\
+&R_{A,w}(\sigma,\tau)\ \land\ \sigma\leadsto_s\sigma'\\
 &\quad\Longrightarrow\exists m,\tau',w',\quad
- \tau\overset{m}{\longrightarrow}_{M}\tau'\ \land\ R_{A,w'}(\sigma',\tau')\\
-&\qquad\land\bigl(m=0\Longrightarrow
-\operatorname{rank}(\sigma')<\operatorname{rank}(\sigma)\bigr).
+ \tau\overset{m}{\longrightarrow}_M\tau'
+ \ \land\ R_{A,w'}(\sigma',\tau').
 \end{aligned}`
 
-The guards are real hypotheses, not conclusions of validator acceptance.
-The rank is {name FirTalos.Concrete.compilerStructuredControlRank}`compilerStructuredControlRank`.
-A source administrative step may take zero target steps; strict rank decrease
-prevents an infinite sequence of zero-target-step matches. It gives no uniform
-bound on finite stuttering bursts between positive target paths. Other steps
-may require several target instructions. This theorem handles successful source
-advancement, not the general fault case.
+The segment length $`m` can be zero. For example, a source administrative
+transition can change its continuation without executing a Wasm instruction.
+The theorem controls such stuttering with a natural-valued control rank
+$`\kappa`: when the derived match takes zero target steps,
+
+$$`m=0\quad\Longrightarrow\quad\kappa(\sigma')<\kappa(\sigma).`
+
+Strict decrease prevents an infinite consecutive sequence of zero-step matches.
+Other source steps may require several target instructions. The rank gives no
+uniform bound on the lengths of finite stuttering bursts, and neither machine
+uses the other's step count as its fuel.
+
+The matching lemma is
+{name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step}`advance_of_step`;
+$`\kappa` is {name FirTalos.Concrete.compilerStructuredControlRank}`compilerStructuredControlRank`.
+Its source-step premise and its two uniform laws are essential. Validator
+acceptance alone does not establish these semantic and resource facts.
 
 ## 3. Compose a finite path
 
-Induction concatenates the derived target paths and carries the relation at
-each new witness, with the same original ABI. Its observation component gives
-world and ordered-trace agreement at every finite prefix. No new entry
-invariant is requested at intermediate states. The proved conditional
-consumer is {bpref "rooted-steps"}[].
+Now follow a finite source path. Apply the matching lemma to its first step,
+then to its second step using the relation just produced, and continue by
+induction. Concatenating the target segments gives one target path. At each
+checkpoint, the new witness relates the new states while the original export
+kind $`A` stays fixed.
+
+This is why preservation matters: an intermediate state need not satisfy a
+new entry assumption. It satisfies the invariant carried from the preceding
+step. The runtime part of that invariant preserves the world and ordered
+external trace along each finite prefix. {bpref "rooted-steps"}[] is the
+conditional finite-path theorem obtained by this composition.
 
 ## 4. Extract the terminal value and use adequacy
 
-A successful source endpoint has a yielded value and an empty source
-continuation. The rooted relation identifies its representation at $`A`.
-Target-only administrative labels may still need unwinding: terminal extraction
-and executable adequacy derive the remaining target path and exported return.
-Adequacy converts the structured-machine path into an actual executable export
-return in Talos.
-The public conclusion is the observation-facing postcondition of
-$`P_{\mathrm{success}}`, with the observation and {bpref "return-post"}[]
-already stated in the successful-return guarantee. This is the checked conclusion of
-{bpref "conditional-return"}[].
+A successful source evaluation ends with a yielded value and no source
+continuation left to run. The rooted relation then supplies the result's
+representation at $`A`. The target may still have administrative labels to
+unwind, so terminal extraction derives the remaining target steps needed to
+return through them.
 
-The internal path theorem uses the actual source endpoint runtime. The public
-wrapper constructs that runtime as its existential witness; equality of the
-public observations alone does not identify globals or the location cursor.
-Thus the path theorem is proof evidence for the wrapper, not a reason to
-silently strengthen the stated property.
+Finally, adequacy connects that structured-machine path to executable Talos
+termination of the selected export. We have now derived the target execution,
+its result representation and its observation from the source evaluation.
+This gives the successful-return property through {bpref "conditional-return"}[],
+with the existential runtime described in its statement. The path proof chooses
+the actual final source runtime to witness that conclusion.
 
-Faults require a separate terminal argument. The existing certificate
-consumer {bpref "conditional-fault"}[] is proved, while {bpref "fault-closure"}[]
-must construct its evidence and executable trap correspondence internally.
+A source fault requires a different terminal argument. The proved
+{bpref "conditional-fault"}[] uses a supplied fault certificate to obtain a
+refined executable trap. {bpref "fault-closure"}[] must construct that evidence
+for general compiler execution; the {ref "fault-safety"}[fault and safety
+account] explains the additional boundary.
 
 # How the initializer proof composes its local steps
 
-The uniform argument above uses a supplied admission law. The initializer
-instead derives its paths directly from local operation laws. Its actual
-composition is:
+The uniform argument above takes a current-step admission law as an input.
+For the initializer, the proof instead follows the actual code and derives
+each segment from local operation laws. This gives a concrete instance of the
+same preservation idea without using general admission as a premise.
 
-1. [`stageFreshLazyAtRoot`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L58) takes one source step and saves the validated caller/root/publication continuation; the target state is unchanged.
-2. [`ConcreteStructuredFreshLazyFrame.enter`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L109) takes one source step and three target steps into the cold initializer. [`initializer_bindingKinds`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L440) derives the actual five local ABI facts from supported compilation.
-3. [`literals_mkEmpty_box`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L545) supplies six body steps; [`push_stage_call_bind`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L303) supplies three more. [`body_returns`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L621) adds the return and composes their target paths. Region-indexed local/host transports derive the fresh-yield relation at the original entry; the yielded value is the initializer's local endpoint.
-4. [`ConcreteStructuredFreshLazyReturned.publish`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L199) consumes that fresh yield and saved frame: one source step and seven target steps reach the rooted pre-bind outcome, preserving region closure.
-5. The fourteen-step companion uses the actual source bind and target `local.set`, then reindexes the saved root agreement at the unchanged caller frame stacks.
+First the source stages the lazy call. It saves the validated caller and the
+continuations needed to cache and bind the result. This is one source step and
+no target step: the target is already at the generated lazy-call code. Entering
+the cold initializer then takes one source step and three target steps. The
+compilation facts identify the five local binding kinds in this actual body,
+so subsequent operations use the ABI information they need.
 
-Thus the source counts are $`1+1+10+1=13` and $`13+1=14`. Target paths are
-concatenated with their actual lengths; the top-level theorems quantify the
-total target count existentially. The source and target do not share a clock.
-The final caller statement retains the original export ABI $`A` throughout
-the local Array construction and caller restoration.
+The body begins by evaluating its literals, allocating an empty Array and
+boxing zero. These take six source steps. The empty handler law supplies the
+target allocation, after which the produced witness represents the source Array
+at $`c`. The next three source steps stage, call and bind the in-place push.
+The push handler law works at the representation produced by allocation and
+stores tagged zero without allocating a second block. One return step completes
+the ten-step body. The local proofs compose the corresponding target segments
+and retain the fresh-region invariant at the original initializer entry.
+
+Publication consumes that local return and the saved lazy-call frame. It takes
+one source step and seven target steps, re-establishing the rooted relation and
+preserving region closure. The target caller's frames have now been restored,
+while the source bind remains pending. The companion proof executes that bind
+and the target's destination `local.set`, then restores validation of the caller
+under the updated environment, cache, facts and budget. The source counts are
+therefore
+
+$$`1+1+10+1=13,\qquad 13+1=14.`
+
+The target paths are concatenated with their derived lengths; their total count
+is existential in each theorem. The construction retains $`A` from the original
+export throughout entry, Array return, publication and caller resumption.
+
+The source composition uses
+[`stageFreshLazyAtRoot`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L58)
+and
+[`enter`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L109)
+for staging and entry;
+[`initializer_bindingKinds`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L440)
+derives the local ABI facts.
+[`literals_mkEmpty_box`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L545),
+[`push_stage_call_bind`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L303)
+and
+[`body_returns`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/retained-initializer/RetainedArrayCalls.lean#L621)
+compose the body;
+[`publish`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/integration/talos/FirTalos/ConcreteFreshLazyFrame.lean#L199)
+returns it to the rooted caller. These references identify the proof steps
+behind the execution just described.
 
 # From a selected program to the general compiler theorem
 %%%
 tag := "retained-example-boundary"
 %%%
 
-The initializer proof supplies source/target paths and caller preservation
-from local operation laws. It does not assume the general current-step
-admission law. This is the kind of semantic block that can guide an independent
-proof for a selected program, while testing whether the maintained relation
-contains the right information. It proves neither that the Stored export
-reaches the block nor correctness of that whole export.
+The initializer proof demonstrates that the execution relation can support a
+real construction and return to an arbitrary related caller. We want to extend
+this kind of reasoning across a selected program's actual code. Such a proof
+would establish compiler correctness for that program on every allowed input,
+while revealing which operation and preservation lemmas the general theorem
+will need.
 
-The selected source function is `Zip.Wasm.compressStored : ByteArray → ByteArray`.
-At the immutable lean-zip nomination `273d0d6cd9cab77c7f3489b0b0b1f6e543315d21`,
-its [definition](https://github.com/kim-em/lean-zip/blob/273d0d6cd9cab77c7f3489b0b0b1f6e543315d21/Zip/Wasm/Stored.lean#L8)
-calls `Zip.Spec.DeflateStoredCorrect.deflateStoredPure`. The
-[source roundtrip theorem](https://github.com/kim-em/lean-zip/blob/273d0d6cd9cab77c7f3489b0b0b1f6e543315d21/Zip/Spec/DeflateStoredCorrect.lean#L751)
-proves the application property $`Q_{\mathrm{stored}}`:
+The selected application is stored compression. The Lean function
+`Zip.Wasm.compressStored : ByteArray → ByteArray` produces DEFLATE stored
+blocks using `Zip.Spec.DeflateStoredCorrect.deflateStoredPure`. There is already
+a source roundtrip theorem: if $`\beta` is an arbitrary byte array and $`N`
+is the decoder's output-size limit, then
 
 $$`\begin{aligned}
-&\forall a,N,\quad |a|\le N\Longrightarrow\\
-&\operatorname{inflateReference}(\operatorname{compressStored}(a),N)
-=\operatorname{ok}(a).
+&\forall\beta,N,\quad |\beta|\le N\Longrightarrow\\
+&\operatorname{inflateReference}(\operatorname{compressStored}(\beta),N)
+=\operatorname{ok}(\beta).
 \end{aligned}`
 
-This is a theorem over arbitrary source byte arrays with the decoder's explicit
-output-size bound. Its Lean 4.33 source was reviewed on 2026-10-05; no fresh
-build, transitive-axiom audit or Blueprint association is claimed here.
-The pinned zip-common source is `4425bab1f9522307d77e8d485bc536149ba31c36`.
+Call this application property $`Q_{\mathrm{stored}}`. It says what the source
+compression algorithm does. To obtain the corresponding statement for compiled
+execution, we also need the compiler property
+$`P_{\mathrm{success}}(p_{\mathrm{stored}})` for the captured final-LCNF program.
+The initializer supplies a local family of compiler-semantic results,
+$`Q_{\mathrm{init}}`, but it does not establish the whole-export property or
+prove that the selected export reaches that block.
 
-FIR captures this program's actual final impure LCNF. Kernel quotation installs
-[`RetainedRC2.program`](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/Fir/Compiler/LCNF/retained-example/RetainedRC2.lean.in#L10),
-a closed {name Fir.LeanIR.ImpureProgram}`ImpureProgram`; checked lookup/body equations identify the
-real initializer. Production lowering reads back that same definition.
-Constructor re-quotation and fresh-process readback establish structural capture
-identity. Lean-source-to-LCNF semantic correspondence is a further bridge.
-Embedded expressions remain data and unsupported metadata is rejected.
-Historical oleans and diagnostic JSON remain provenance evidence; a newer
-toolchain requires its recorded capture/setup identity.
+FIR's capture installs `RetainedRC2.program` as a closed impure program.
+Checked lookup and body equations identify the initializer, and production
+lowering reads back that same definition. Constructor re-quotation and
+fresh-process readback establish structural identity of the capture. Relating
+the original Lean source semantics to the captured program remains an
+additional bridge. The capture's embedded expressions are data, unsupported
+metadata is rejected, and its setup identity must be recorded when the toolchain
+changes.
 
-The source roundtrip property $`Q_{\mathrm{stored}}` and local initializer
-family $`Q_{\mathrm{init}}` have different conclusions. The first is an
-application theorem in source Lean; the second is a compiler-semantic block
-for the captured initializer. The open {bpref "stored-export-instance"}[]
-asks for $`P_{\mathrm{success}}(p_{\mathrm{stored}})` at the captured
-`Zip.Wasm.compressStored` export, universally over its allowed entries and
-inputs. Closed static equations about captured code, export, ABI and supported
-compilation can be computational. Primitive behavior, related ByteArray entries,
-finite resources and semantic preservation still require proofs or retained
-execution contracts. Validator acceptance alone does not provide them.
+The present plan for {bpref "stored-export-instance"}[] constructs the semantic
+facts needed by {bpref "conditional-return"}[] from this actual program and
+its local proofs. The consumer's admission interface quantifies every supported
+function and recursively validated current outcome of the program. This is
+stronger than a law only about the selected entry's reached states, and the
+local initializer proof is not a proof of that uniform law. The remaining code
+needs operation coverage, producer/use-site representation facts and preservation
+through nested heap misses. A direct proof for the selected entry could use a
+different simulation route.
 
-The current independent route constructs those semantic facts from the actual
-captured program and then uses {bpref "conditional-return"}[]. Its present
-admission interface is stronger than a law just about the selected entry's
-reached states: it quantifies every supported function and recursively validated
-current outcome of the program. The initializer block derives its own paths
-and does not discharge this uniform interface. Remaining operation coverage,
-producer/use-site provenance and nested heap-miss preservation must be proved
-before that consumer yields a whole-export result. A direct selected-entry
-proof could use a different route.
+The same obligations appear in the intended general theorem,
 
-The eventual general theorem is
-$`\forall p,\ H(p)\Longrightarrow P_{\mathrm{success}}(p)`.
-Here $`H(p)` is production supported-export and static compilation, adaptation
-and host-resolution evidence. External, resource and entry contracts still
-scope the invocations in $`P_{\mathrm{success}}`; compiler-owned admission,
-provenance and heap-miss preservation must be derived internally.
-{bpref "validated-return"}[] is checked local assembly for that target, with
-unfinished {bpref "external-spec"}[] and {bpref "admission-closure"}[].
-The independent instance proof can shape those general constructions. Once
-they are complete, the same fixed-program statement can instead follow by
-specialization, with its input scope and retained conditions preserved.
+$$`\forall p,\quad H(p)\Longrightarrow P_{\mathrm{success}}(p).`
 
-A released-output roundtrip would additionally compose source/capture semantic
-correspondence, ByteArray entry/result refinement, resident-helper refinement
-and link preservation, and exact-byte encoding/release preservation. The
-{ref "proof-scope"}[evidence boundaries] keep these extensions distinct from
-the contracted successful-return property.
+Here $`H(p)` records supported-export and static compilation, adaptation and
+host-resolution evidence. The external, resource and entry contracts continue
+to define the allowed invocations in $`P_{\mathrm{success}}`. The general proof
+must derive compiler-owned admission and preserve the representation and heap
+facts internally. {bpref "validated-return"}[] provides checked local assembly
+for this argument, while {bpref "external-spec"}[] and
+{bpref "admission-closure"}[] remain unfinished.
+
+The independent instance proof can guide those general constructions. When the
+general theorem is available, the same fixed-program statement could instead
+follow by specialization and discharge of its premises. Its input scope and
+retained conditions would be unchanged. Computational checks can establish
+closed equations about the code, export and successful compilation; semantic
+behavior, related ByteArray entry data and finite resources still need their
+own proofs or stated execution contracts.
+
+A released-byte roundtrip goes further. It would compose the source roundtrip
+with source-to-capture correspondence, the compiler instance and ByteArray
+entry/result refinement, resident-helper and semantic-link refinement, and
+encoding/release preservation for the exact artifact. The
+{ref "proof-scope"}[evidence boundaries] describe those additional interfaces.
+The successful-return property has a successful source run as its antecedent;
+totality and complete failure coverage require further arguments. This selected
+application is stored compression, rather than a theorem about Level-1 or all
+DEFLATE implementations.
+
+The source nomination is lean-zip `273d0d6cd9cab77c7f3489b0b0b1f6e543315d21`
+with zip-common `4425bab1f9522307d77e8d485bc536149ba31c36`. The
+[compression definition](https://github.com/kim-em/lean-zip/blob/273d0d6cd9cab77c7f3489b0b0b1f6e543315d21/Zip/Wasm/Stored.lean#L8)
+and
+[source roundtrip theorem](https://github.com/kim-em/lean-zip/blob/273d0d6cd9cab77c7f3489b0b0b1f6e543315d21/Zip/Spec/DeflateStoredCorrect.lean#L751)
+were reviewed as Lean 4.33 source on 2026-10-05.
+[The captured program](https://github.com/ejgallego/lean-fir/blob/f6850d79ff5a530ffa8bacbf804b6dfe95969912/Fir/Compiler/LCNF/retained-example/RetainedRC2.lean.in#L10)
+identifies the final-LCNF object used by FIR. These are source and capture
+references; no fresh external build, transitive-axiom audit or Blueprint
+association of the lean-zip theorem is claimed here.
 
 # What is proved and what remains open
 %%%
 tag := "w6-theorem-menu"
 %%%
 
-The first goal is successful-return correctness, written
-$`P_{\mathrm{success}}(p)`. Fixing $`p` fixes a program, not an input: a program
-instance must cover every related admitted entry and input. The source
-application theorem and the initializer proofs above are already useful
-semantic examples, but have different conclusions from the whole-export goal.
+The preceding argument distinguishes three kinds of result: an application
+property in source Lean, local or conditional compiler execution theorems, and
+a complete compiler guarantee for a selected program or all supported programs.
+The current proof boundary is summarized below. The formal catalog records each
+statement and the trust chapter explains its evidence.
 
 :::table +header
 *

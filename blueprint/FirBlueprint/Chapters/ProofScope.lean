@@ -135,24 +135,41 @@ Resident linking is the separate {bpref "resident-linking"}[] layer.
 tag := "observable-contract"
 %%%
 
-The impure machine has an exhaustive relational {name Fir.LeanIR.Impure.Step}`Step` and an executable runner
-over the same core transition. Runner soundness produces relational execution.
-A returned value or runtime fault is source behavior; exhausted interpreter
-fuel is a backend limit. The legacy evaluator remains a differential fixture,
-while ordinary native Lean execution is validation's source-language oracle.
+An allocation-removing pass can change heap locations while preserving the
+returned data and external effects. Requiring raw equality of its before and
+after heaps would therefore reject transformations that leave the program's
+observable behavior unchanged. The observation relation instead compares the
+parts of the heaps that the returned value and external events can reach,
+allowing a partial renaming of addresses.
 
-For observations $`o,o'`, {name Fir.LeanIR.Impure.ObservationRel}`ObservationRel` requires a partial address renaming
-$`\rho` such that
+Two observations $`o,o'` are related by
+{name Fir.LeanIR.Impure.ObservationRel}`ObservationRel` when there exists a
+partial address renaming $`\rho` satisfying
 
-$$`R_{\mathrm{outcome}}(\rho,o,o')\land o.\mathrm{world}=o'.\mathrm{world}
-\land R_{\mathrm{trace}}(\rho,o,o')\land R_{\mathrm{heap}}(\rho,o,o').`
+$$`\begin{aligned}
+&R_{\mathrm{outcome}}(\rho,o,o')\ \land\
+ o.\mathrm{world}=o'.\mathrm{world}\\
+&\quad\land\ R_{\mathrm{trace}}(\rho,o,o')\ \land\
+ R_{\mathrm{heap}}(\rho,o,o').
+\end{aligned}`
 
-Trace order and argument/result values are preserved. Heap agreement is only
-over roots reachable from returned values and external-event arguments/results;
-unreachable garbage may differ. Outcomes cannot swap return and fault, and
-address-bearing dead-object/underflow diagnostics are preserved exactly or
-related through $`\rho`.
-Raw heap equality would obstruct the intended allocation/reuse pass theorems.
+The outcome relation preserves whether execution returned or faulted and relates
+its returned values through $`\rho`. Fault diagnostics may be literally the
+same; address-bearing dead-object and underflow diagnostics can instead be
+related through $`\rho`. The trace relation preserves event names and order
+and relates each argument and result. The heap relation
+compares reachable roots from returned values and external-event arguments and
+results, so unreachable garbage may differ. World equality preserves the
+observable external state. Together these clauses express the behavior that
+pass correctness needs to preserve.
+
+FIR's impure machine provides both the relational
+{name Fir.LeanIR.Impure.Step}`Step` and an executable runner for the same core
+transition. Runner soundness lets an actual interpreter execution supply the
+relational path used by a proof. A returned value or runtime fault is source
+behavior; exhaustion of runner fuel is a backend limit. Validation uses native
+Lean execution as its source-language oracle and keeps the legacy evaluator
+as a differential fixture.
 
 The public {name FirTalos.Concrete.ConcreteFiniteTraceCorrect}`ConcreteFiniteTraceCorrect` interface exposes world and external
 trace agreement. Its sensitivity theorem
