@@ -33,6 +33,110 @@ theorem ConstructorArgumentsRelated.arrayPushOperands
           cases element <;> rename_i element <;> cases element
           exact ⟨_, _, rfl, found, .tobject ‹_›⟩
 
+/-- Derive the fresh non-full push response, unchanged witness, zero-cost
+budget and region preservation independently of call/bind control. -/
+theorem ConcreteStructuredRegionExternalCall.pushFreshTaggedEvidence
+    {program : Fir.LeanIR.ImpureProgram} {context : Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    {externals : ExternalImpl} {nextRuntime : RuntimeState}
+    {sourceEnv : Env} {sourceValue : Value} {entry : RuntimeState}
+    {capacity : Nat} {payload : UInt64}
+    {decl : Compiler.LCNF.LetDecl .impure}
+    {site : ExternalCallShape context externals (semanticArrayResult entry #[] capacity)
+      sourceEnv decl nextRuntime sourceValue}
+    {operation : ExternalOperation} {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl} {labels : LabelContext}
+    {continuation : Compiler.LCNF.Code .impure} {callerJoins : JoinEnv}
+    {sourceFrames : List Frame} {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals} {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program} {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness} {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex remainingBytes : Nat} {source : MachineState}
+    {target : StructuredWasmState Host}
+    {entryRuntime : RuntimeState} {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} {facts : ReuseCapacityFacts}
+    (ready : ConcreteStructuredRegionExternalCall program context sourceModule
+      sourceFunction targetModule hosts externals entryRuntime entryStore entryWitness
+      facts remainingBytes site operation resolvedResultKind
+      targetImport labels continuation callerJoins sourceFrames targetStore callerLocals
+      callerRemainder targetRest targetFrames witness physicalArgs callIndex resultIndex
+      source target)
+    (named : site.name = `Array.push)
+    (parameters : site.parameterKinds = #[.erased, .object, .tobject])
+    (arguments : site.semanticArgs =
+      #[.erased, .object (.heap entry.nextLocation), .object (.tagged payload)])
+    (resultKind : site.resultKind = .object)
+    (contract : FreshArrayExternalContract externals) (spare : 0 < capacity)
+    (handler : ∀ address word concreteArgs,
+      physicalArgs = [physicalOfLane (.word32 Word32.zero),
+        physicalOfLane (.word32 address), physicalOfLane (.word32 word)] →
+      decodePhysicalLanes 0 operation.signature.params.toList physicalArgs =
+        .ok concreteArgs →
+      witness.locations.lookup? entry.nextLocation = some address →
+      ValueRel witness .tobject (.word32 word) (.object (.tagged payload)) →
+      ArrayPushInPlaceHandlerAt targetStore.host.externals
+        (concreteExternalRequest operation .object concreteArgs.toArray)
+        targetStore.host.runtime address word) :
+    ∃ nextStore physicalResult,
+      ConcreteExternalCallEvidence operation resolvedResultKind targetStore physicalArgs
+        (semanticArrayResult entry #[] capacity) nextRuntime sourceValue witness
+        nextStore witness physicalResult ∧
+      nextStore.host.runtime.heap.AddressSpaceBudget remainingBytes ∧
+      (HeapRegionClosed entryRuntime.nextLocation
+        (semanticArrayResult entry #[] capacity).heap →
+        HeapRegionClosed entryRuntime.nextLocation nextRuntime.heap) := by
+  have related := ready.control
+  have budget := ready.scope.budgetedPureExternal.1.2
+  have resolved : resolvedResultKind = .object := by
+    have h := congrArg (fun results : Array AbiKind => results[0]?) related.resultSignature
+    simpa [related.parameterSignature, resultKind] using h.symm
+  obtain ⟨concreteArgs, decoded, requestRelated⟩ := related.decodeRequest
+  have parameterRelated := related.argumentsRelated.ofKindsRefine site.argumentsRefine
+  rw [parameters, arguments] at parameterRelated
+  obtain ⟨address, word, physicalEq, mapped, tagged⟩ := parameterRelated.arrayPushOperands
+  obtain ⟨nextStore, physicalResult, evidence, _cursor, residual⟩ :=
+    pushFreshTaggedExternalCallEvidence operation (related.operationName.trans named)
+      targetStore physicalArgs concreteArgs witness entry externals contract capacity
+      spare payload word tagged address remainingBytes decoded related.callerStateRelated.1
+      mapped (by simpa [resolved, arguments] using requestRelated)
+      (handler address word concreteArgs physicalEq decoded mapped tagged) budget
+  have requestEq : operation.request site.semanticArgs =
+      declarationExternalRequest site.declaration site.semanticArgs := by
+    have declarationName : site.name = site.declaration.name :=
+      related.operationName.symm.trans related.operationMatches.name
+    simp [ExternalOperation.request, declarationExternalRequest, related.operationName,
+      declarationName, related.operationMatches.paramTypes, related.operationMatches.resultType]
+  have called := contract.pushFreshTagged entry operation.paramTypes operation.resultType
+    capacity payload spare
+  have responseEq : site.response = arrayExternalResponse
+      (semanticArrayResult entry #[.object (.tagged payload)] capacity)
+      (.object (.heap entry.nextLocation)) := by
+    apply Except.ok.inj
+    rw [← site.semanticCalled, ← requestEq]
+    simpa [ExternalOperation.request, related.operationName, named, arguments] using called
+  have runtimeEq : nextRuntime = semanticArrayResult { entry with trace := entry.trace.push {
+        name := `Array.push,
+        args := #[.erased, .object (.heap entry.nextLocation), .object (.tagged payload)],
+        result := .object (.heap entry.nextLocation) } }
+        #[.object (.tagged payload)] capacity := by
+    rw [site.nextRuntimeEq, responseEq, ← requestEq]
+    simp [semanticExternalRuntimeAfter, arrayExternalResponse, semanticArrayResult,
+      semanticExternalEvent, ExternalOperation.request, related.operationName, named, arguments]
+  have valueEq : sourceValue = .object (.heap entry.nextLocation) := by
+    rw [site.sourceValueEq, responseEq]; rfl
+  have evidence' : ConcreteExternalCallEvidence operation resolvedResultKind targetStore
+      physicalArgs (semanticArrayResult entry #[] capacity) nextRuntime sourceValue witness
+      nextStore witness physicalResult := by
+    simpa [resolved, runtimeEq, valueEq] using evidence
+  have preservesRegion : HeapRegionClosed entryRuntime.nextLocation
+      (semanticArrayResult entry #[] capacity).heap →
+      HeapRegionClosed entryRuntime.nextLocation nextRuntime.heap := by
+    intro closed
+    rw [runtimeEq]
+    exact closed.pushFreshTagged
+  exact ⟨nextStore, physicalResult, evidence', residual, preservesRegion⟩
+
 /-- Fresh non-full Array push through the existing imported-call and bind
 machine rules. Operand addresses are reconstructed, not client premises. -/
 theorem ConcreteStructuredRegionExternalCall.advance_pushFreshTagged_bind
@@ -93,63 +197,16 @@ theorem ConcreteStructuredRegionExternalCall.advance_pushFreshTagged_bind
       nextStore.host.externals = targetStore.host.externals ∧
       RuntimeStepTransports (semanticArrayResult entry #[] capacity) nextRuntime
         targetStore nextStore witness witness := by
-  have related := ready.control
-  have budget := ready.scope.budgetedPureExternal.1.2
-  have resolved : resolvedResultKind = .object := by
-    have h := congrArg (fun results : Array AbiKind => results[0]?) related.resultSignature
-    simpa [related.parameterSignature, resultKind] using h.symm
-  obtain ⟨concreteArgs, decoded, requestRelated⟩ := related.decodeRequest
-  have parameterRelated := related.argumentsRelated.ofKindsRefine site.argumentsRefine
-  rw [parameters, arguments] at parameterRelated
-  obtain ⟨address, word, physicalEq, mapped, tagged⟩ := parameterRelated.arrayPushOperands
-  obtain ⟨nextStore, physicalResult, evidence, _cursor, residual⟩ :=
-    pushFreshTaggedExternalCallEvidence operation (related.operationName.trans named)
-      targetStore physicalArgs concreteArgs witness entry externals contract capacity
-      spare payload word tagged address remainingBytes decoded related.callerStateRelated.1
-      mapped (by simpa [resolved, arguments] using requestRelated)
-      (handler address word concreteArgs physicalEq decoded mapped tagged) budget
-  have requestEq : operation.request site.semanticArgs =
-      declarationExternalRequest site.declaration site.semanticArgs := by
-    have declarationName : site.name = site.declaration.name :=
-      related.operationName.symm.trans related.operationMatches.name
-    simp [ExternalOperation.request, declarationExternalRequest, related.operationName,
-      declarationName, related.operationMatches.paramTypes, related.operationMatches.resultType]
-  have called := contract.pushFreshTagged entry operation.paramTypes operation.resultType
-    capacity payload spare
-  have responseEq : site.response = arrayExternalResponse
-      (semanticArrayResult entry #[.object (.tagged payload)] capacity)
-      (.object (.heap entry.nextLocation)) := by
-    apply Except.ok.inj
-    rw [← site.semanticCalled, ← requestEq]
-    simpa [ExternalOperation.request, related.operationName, named, arguments] using called
-  have runtimeEq : nextRuntime = semanticArrayResult { entry with trace := entry.trace.push {
-        name := `Array.push,
-        args := #[.erased, .object (.heap entry.nextLocation), .object (.tagged payload)],
-        result := .object (.heap entry.nextLocation) } }
-        #[.object (.tagged payload)] capacity := by
-    rw [site.nextRuntimeEq, responseEq, ← requestEq]
-    simp [semanticExternalRuntimeAfter, arrayExternalResponse, semanticArrayResult,
-      semanticExternalEvent, ExternalOperation.request, related.operationName, named, arguments]
-  have valueEq : sourceValue = .object (.heap entry.nextLocation) := by
-    rw [site.sourceValueEq, responseEq]; rfl
-  have evidence' : ConcreteExternalCallEvidence operation resolvedResultKind targetStore
-      physicalArgs (semanticArrayResult entry #[] capacity) nextRuntime sourceValue witness
-      nextStore witness physicalResult := by
-    simpa [resolved, runtimeEq, valueEq] using evidence
-  have preservesRegion : HeapRegionClosed entryRuntime.nextLocation
-      (semanticArrayResult entry #[] capacity).heap →
-      HeapRegionClosed entryRuntime.nextLocation nextRuntime.heap := by
-    intro closed
-    rw [runtimeEq]
-    exact closed.pushFreshTagged
+  obtain ⟨nextStore, physicalResult, evidence, residual, preservesRegion⟩ :=
+    ready.pushFreshTaggedEvidence named parameters arguments resultKind contract spare handler
   obtain ⟨sourceMid, targetMid, sourceCall, targetCall, bound⟩ :=
-    ready.advance_call (cost := 0) evidence' (by simpa using residual) preservesRegion
+    ready.advance_call (cost := 0) evidence (by simpa using residual) preservesRegion
   obtain ⟨sourceAfter, targetAfter, updated, resumedLocals, sourceBind, targetBind,
       set, resumed, focus, joins, frames, targetFrames⟩ :=
     bound.advance (module := targetModule.wasmModule) (hostEnv := hosts.env)
   exact ⟨nextStore, physicalResult, sourceAfter, targetAfter, updated, resumedLocals,
     .step sourceCall (.step sourceBind (.refl _)), targetCall.trans targetBind,
     set, resumed, focus, joins, frames, targetFrames,
-    evidence'.externalsPreserved, evidence'.transports⟩
+    evidence.externalsPreserved, evidence.transports⟩
 
 end FirTalos.Concrete

@@ -38,7 +38,7 @@ This layering separates three claims:
 The concrete layout and many runtime refinements already exist. The original
 implementation sequence below is history, not an instruction to restart it.
 
-## Current verification frontier — 2026-09-29
+## Current verification frontier — 2026-10-11
 
 This section, ending at **Implementation history**, is the live W6 priority.
 Later chronological uses of "next", "remaining", "queue", or "immediate" are
@@ -69,7 +69,7 @@ bytes, or the complete lean-zip application.
 | First actual lean-zip initializer | `rootedLet_publishes_and_resumesCaller`: fourteen source steps and matching target path to validated continuation and rooted global relation at the original export ABI; admission/cache/callee/local facts derived | Installed Array handlers, intermediate heap-result lazy-frame closure, linking/encoding |
 | Entry-relative caller preservation | Central active/suspended scopes use `RetainedCodeEntryTransports`; return/pop composes to the original caller entry | Derive heap-publication transports at the lazy-miss consumer |
 | Fresh heap cache publication | `ConcreteFreshLazyFrame` retains the validated caller/root; `ConcreteFreshLazyExternal` preserves it through external staging/call/bind, and the retained framed body returns it directly to publication | Generalize to nested construction callers and wire central admission |
-| Active construction states | `ConcreteStructuredRegionCodeCore` carries the original cutoff/scope through all retained operations; the framed body uses individual empty-allocation transitions and lifts the existing push block with the saved caller intact | Consume the framed external rules for individual push transitions; compose the general dispatcher |
+| Active construction states | `ConcreteStructuredRegionCodeCore` carries the original cutoff/scope through all retained operations; the framed body uses individual allocation and push staging/call/bind transitions with the saved caller intact | Compose the general intermediate/nested construction dispatcher |
 | Executable publication and bind | `lazyMiss_publishes_and_resumesCaller` includes the whole generated prefix and publication/bind suffix, with original caller scope and suspended stack | Production external contracts, central heap-miss admission and residual validation |
 | Whole `compressStored` boundary | Roadmap and conditional backend infrastructure | ByteArray relation/operations, remaining admission, then linking/encoding/decoding |
 

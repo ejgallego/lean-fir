@@ -1,5 +1,15 @@
 # Checked retained initializer: source execution and publication
 
+The framed body now uses separate staging, host-response and destination-bind
+transitions for both `Array.mkEmpty` and `Array.push`. The reusable
+`ConcreteStructuredRegionExternalCall.pushFreshTaggedEvidence` derives the
+response refinement, unchanged witness, zero-allocation budget and region
+preservation without committing to a combined execution path. The actual
+`framed_body_returns` consumer retains its validated caller and root ABI at
+each intermediate transition; its ten-step source conclusion and deployment
+premises are unchanged. General nested construction and central heap-result
+lazy-miss admission remain open.
+
 This optional W6 proof cone consumes `RetainedRC2.program`, generated from the
 immutable lean-zip source snapshot by the W7 checked-capture recipe. It does
 not contain a copied initializer AST. `RetainedDeclarations` extracts the two

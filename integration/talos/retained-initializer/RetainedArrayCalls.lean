@@ -1032,8 +1032,8 @@ variable {context : Context} {functionCode : LCNF.Code .impure}
   {frame : ConcreteStructuredFreshLazyFrame saved rootResult declaration .object
     cacheIndex cacheSetId resultIndex rest}
 
-/-- The retained body now carries its caller through construction, including
-the separate external-ready and destination-bind states of allocation. The
+/-- The retained body carries its caller through construction, including
+the separate external-ready and destination-bind states of allocation and push. The
 returned frame is obtained from the framed return rule, not reconstructed
 after a whole-body proof. -/
 theorem framed_body_returns
@@ -1133,15 +1133,32 @@ theorem framed_body_returns
       mkEmptySite.fvarId = some (.object (.heap runtime.nextLocation)) := by
     simp [Fir.LeanIR.Impure.bind, lookup, boxSite, mkEmptyContinuation, mkEmptySite,
       RetainedRC2.initializer]
-  obtain ⟨pushLength, nextStore, s9, t9, resultLocals, returnCode,
-      pushSteps, pushPath, returnActive, _, fs9, ft9, _, _⟩ :=
-    push_stage_call_bind programEq calleeSpec contract arrayKind boxKind resultKind arrayValue
-      (lookup_bind_self _ _ _) framed6.active
-      (fun request address word mapped tagged named args => by
+  let pushShape := pushCallShape calleeContext programEq externals contract runtime
+    (bind (bind (literalEnv calleeEnv) mkEmptySite.fvarId
+      (.object (.heap runtime.nextLocation))) boxSite.fvarId (.object (.tagged 0)))
+    arrayKind boxKind resultKind arrayValue (lookup_bind_self _ _ _)
+  obtain ⟨args7, operation7, resolvedKind7, imp7, callIndex7, destination7,
+      argumentCode7, c7, s7, t7, step7, path7, ready7⟩ :=
+    framed6.stageExternal calleeSpec pushShape
+  obtain ⟨nextStore, physicalPush, pushEvidence, pushBudget, pushRegion⟩ :=
+    ready7.active.pushFreshTaggedEvidence (entry := arrayEntry runtime) (payload := 0)
+      rfl rfl rfl rfl contract (by decide)
+      (fun address word args physicalEq decoded mapped tagged => by
         rw [evidence.externalsPreserved]
-        exact pushHandler _ nextWitness request address word framed6.active.focus.stateRelated.1
-          mapped tagged named args)
-  have framed9 := framed6.suspension.resume returnActive fs9 ft9
+        apply pushHandler _ nextWitness _ address word framed6.active.focus.stateRelated.1
+          mapped tagged
+        · exact ready7.active.control.operationName
+        · have signature := ready7.active.control.parameterSignature
+          change operation7.signature =
+            { params := #[.erased, .object, .tobject], results := #[.object] } at signature
+          rw [signature, physicalEq] at decoded
+          simp [decodePhysicalLanes, decodePhysicalLane, physicalOfLane,
+            AbiKind.valueType, Bind.bind, Except.bind, Pure.pure, Except.pure] at decoded
+          cases decoded
+          rfl)
+  obtain ⟨s8, t8, step8, path8, bound8⟩ :=
+    ready7.advance_call (cost := 0) pushEvidence (by simpa using pushBudget) pushRegion
+  obtain ⟨s9, t9, updated9, resultLocals, step9, path9, _, _, framed9, _⟩ := bound8.advance
   have compiled : getLocal calleeContext pushSite.fvarId =
       .ok (.localGet pushSite.fvarId, .object) := by simp [getLocal, resultKind]
   obtain ⟨physical, sourceAfter, targetAfter, returnStep, returnPath, returned⟩ :=
@@ -1149,9 +1166,9 @@ theorem framed_body_returns
       (lookup_bind_self _ _ _) (Nat.le_refl _)
   exact ⟨_, nextStore, nextWitness, resultLocals, physical, sourceAfter, targetAfter,
     .step step1 (.step step2 (.step step3 (.step step4 (.step step5 (.step step6
-      (execSteps_trans_exact pushSteps (.step returnStep (.refl _)))))))),
+      (.step step7 (.step step8 (.step step9 (.step returnStep (.refl _)))))))))),
     path1.trans (path2.trans (path3.trans (path4.trans (path5.trans (path6.trans
-      (pushPath.trans returnPath)))))), returned⟩
+      (path7.trans (path8.trans (path9.trans returnPath)))))))), returned⟩
 
 end FramedBody
 

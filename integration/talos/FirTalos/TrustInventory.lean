@@ -250,6 +250,8 @@ def endpointInventory : Array (Lean.Name × Array String) := #[
     standardAxioms ++ referenceCountNativeDebt),
   (`FirTalos.Concrete.ConcreteStructuredRegionExternalCall.emptyArrayEvidence,
     standardAxioms ++ referenceCountNativeDebt),
+  (`FirTalos.Concrete.ConcreteStructuredRegionExternalCall.pushFreshTaggedEvidence,
+    standardAxioms ++ referenceCountNativeDebt),
   (`FirTalos.Concrete.ConcreteStructuredCodeFocus.advance_external_stage_of_shape,
     standardAxioms),
   (`FirTalos.Concrete.ConcreteStructuredExternalCallControl.advance_call,
