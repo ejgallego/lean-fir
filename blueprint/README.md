@@ -50,3 +50,32 @@ transcriptions as literal code. Inline Lean terms use the qualified
 `InlineLean.lean` role to avoid ambiguity with Blueprint's code role. A hover
 describes the loaded declaration; dated source references identify historical
 or newer source facts. Neither creates a proof association or changes status.
+
+## CI and Pages publication
+
+The existing Talos CI job builds this package and checks its persisted Blueprint
+data, local links, assets and section lookups. Pull requests run those checks
+with read-only repository permissions. The same checked `html-multi` output is
+uploaded for Pages only on a push to `main`; deployment waits for both repository
+and Talos checks to pass. Manual CI runs do not deploy.
+
+The repository's Pages source is configured as **GitHub Actions**, with the
+`github-pages` environment allowing deployments from `main` only. The expected
+public address is [the FIR Blueprint](https://ejgallego.github.io/lean-fir/).
+Publication requires this workflow on the remote `main` branch and a successful
+push-triggered CI run; configuring Pages alone does not deploy the site.
+
+The workflow uses GitHub's official Pages actions and grants Pages/OIDC write
+permissions only to the deployment job. No additional publication token is
+needed in the build jobs.
+
+To check an existing generated site locally:
+
+```sh
+python3 blueprint/test-site.py
+python3 blueprint/check-site.py blueprint/_out/site/html-multi --base-path /lean-fir/
+```
+
+The link check is network-free and exercises project-site URL resolution. It
+checks generated local targets; dated external evidence links retain their
+separate source-review role.
