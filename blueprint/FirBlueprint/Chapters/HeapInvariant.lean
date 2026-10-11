@@ -334,13 +334,24 @@ rejoins the rooted global relation at the pending destination bind. These
 results are cited source evidence; their names are not new associations in
 this Blueprint's accepted import environment.
 
-The next focused proof step is to carry this saved validated caller, its
-original export ABI and its construction scope through each push-argument
-staging step, host call and result bind. This would replace the lifted
-three-step push block with intermediate states that retain the same frame.
-That work is ongoing. It advances the local construction argument without
-claiming general heap-miss closure, resident linking or correctness of the
-whole Stored export.
+The saved caller now stays with the construction through each push phase.
+Local source `eab5934684a9252f797b73b0c83e87da67d749de`, reviewed on
+2026-10-11 and awaiting integration into FIR, replaces the lifted push
+block in `framed_body_returns` with explicit staging, host-call and bind states.
+`stageExternal`, `pushFreshTaggedEvidence`, the zero-cost `advance_call` and
+`bind.advance` retain the same saved validated caller, original export ABI and
+original construction anchor. The body's ten-step conclusion and client
+premises are unchanged. This is cited local source evidence, not a new
+association in the Blueprint's accepted import environment.
+
+The thirteen-step `rootedLet_publishesAtBind` proof consumes this revised
+framed body. The fourteen-step `rootedLet_publishes_and_resumesCaller` theorem
+retains its legacy `validatedLet` proof route and unchanged conclusion, with
+no separate closure conjunct. The new generic push evidence uses the standard
+axioms and the existing byte-assembly axiom dependency. The retained
+framed-body consumer keeps its prior exact inventory of standard axioms plus
+eleven generated axioms. This local result does not close resident linking or correctness of
+the whole Stored export.
 
 The central object/tobject restriction in {bpref "lazy-miss-boundary"}[] is
 still present. {bpref "heap-miss-closure"}[] must carry the saved frame and

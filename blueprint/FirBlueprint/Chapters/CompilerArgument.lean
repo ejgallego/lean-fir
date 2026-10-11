@@ -755,6 +755,14 @@ compose the body;
 returns it to the rooted caller. These references identify the proof steps
 behind the execution just described.
 
+The subsequently reviewed local successor, described in the
+{ref "heap-caller-invariant"}[heap/caller account], replaces the lifted push block
+in the thirteen-step publication proof
+with intermediate states preserving the same saved caller and construction
+scope. The fourteen-step resumption theorem still uses its legacy
+`validatedLet` route; its conclusion is unchanged and has no separate closure
+conjunct.
+
 # From a selected program to the general compiler theorem
 %%%
 tag := "retained-example-boundary"
