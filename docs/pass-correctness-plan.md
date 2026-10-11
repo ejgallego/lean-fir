@@ -1,7 +1,8 @@
 # FIR verification roadmap
 
-This is the live repository-wide verification roadmap for the Lean 4.34.0-rc2
-pipeline pinned by FIR. Detailed landed-proof chronology is archived in
+This is FIR's live repository-wide verification roadmap. The accepted Lean
+toolchain is recorded in the repository's `lean-toolchain`. Detailed
+landed-proof chronology is archived in
 [`pass-correctness-history.md`](pass-correctness-history.md); historical uses
 of "next", "remaining", or "immediate" there, and in later chronological
 sections of track plans, do not define current priority.
