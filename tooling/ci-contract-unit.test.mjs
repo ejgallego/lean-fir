@@ -83,6 +83,20 @@ test("artifact receipt regeneration provisions recorder and replay isolator", ()
     /sudo apt-get install -y ripgrep strace bubblewrap/u);
 });
 
+test("recording jobs provision a pinned recorder without dropping kill-on-exit", () => {
+  for (const name of ["ci.yml", "wasm-artifact.yml"]) {
+    const yaml = workflow(name);
+    assert.match(yaml, /Prepare compatible file-access recorder/u);
+    assert.match(yaml, /bash scripts\/setup-ci-strace\.sh/u);
+  }
+  const setup = readFileSync(join(root, "scripts/setup-ci-strace.sh"), "utf8");
+  assert.match(setup, /ba6950a96824cdf93a584fa04f0a733896d2a6bc5f0ad9ffe505d9b41e970149/u);
+  assert.match(setup, /sha256sum --check --status/u);
+  assert.match(setup, /strace" --kill-on-exit -qq/u);
+  assert.match(setup, /GITHUB_PATH/u);
+  assert.doesNotMatch(setup, /sudo|continue-on-error/u);
+});
+
 test("failure diagnostics expose bounded backend stderr/stdout without broad uploads", () => {
   for (const [name, title, output] of [
     ["ci.yml", "Report bounded check failure logs", "check.log"],
