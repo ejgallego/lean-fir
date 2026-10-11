@@ -47,18 +47,23 @@ yet a compiler ABI or runtime-validity predicate for every admitted payload.
 
 The existing definitions read as follows:
 
-For $`q` a request, $`s` an incoming runtime and $`x,y\in\mathbb{N}`,
-write $`A(s,v,n)` for {name FirBlueprint.Targets.NatArgument}`NatArgument` applied to $`s,v,n`. Then
+For $`\mathit{req}` a request, $`s` an incoming runtime and $`x,y\in\mathbb{N}`,
+write $`\operatorname{NatArg}(s,v,n)` for {name FirBlueprint.Targets.NatArgument}`NatArgument` applied to $`s,v,n`. Then
 
 $$`\begin{aligned}
-\operatorname{Inputs}(q,s,x,y)\iff{}&q.\mathrm{name}=\mathrm{Nat.add}\ \land\ \exists v_x,v_y,\\
-&q.\mathrm{args}=[v_x,v_y]\land A(s,v_x,x)\land A(s,v_y,y).
+&\operatorname{Inputs}(\mathit{req},s,x,y)\\
+&\quad\Longleftrightarrow\ \mathit{req}.\mathrm{name}=\mathrm{Nat.add}\\
+&\qquad\land\ \exists v_x,v_y,\quad\mathit{req}.\mathrm{args}=[v_x,v_y]\\
+&\qquad\qquad\land\ \operatorname{NatArg}(s,v_x,x)\land \operatorname{NatArg}(s,v_y,y).
 \end{aligned}`
 
 Writing $`N(s,n)` for {name FirTalos.Concrete.semanticNaturalExternalResponse}`semanticNaturalExternalResponse` applied to $`s,n`, the response
 relation is
 
-$$`\operatorname{Response}(q,s,r)\iff\exists x,y,\ \operatorname{Inputs}(q,s,x,y)\land r=N(s,x+y).`
+$$`\begin{aligned}
+\operatorname{Response}(\mathit{req},s,r)\iff{}&\exists x,y,\quad\operatorname{Inputs}(\mathit{req},s,x,y)\\
+&\land\ r=N(s,x+y).
+\end{aligned}`
 
 These are notation for the associated existing definitions, not new predicates.
 The complete response $`r` includes heap, allocation cursor and world.
@@ -70,7 +75,7 @@ tagged, heap and mixed arguments, and tagged or allocating results, with exact
 heap/cursor/world behavior. It uses the original private handler rather than
 a copy. Metadata is unrestricted because that handler ignores it.
 
-The original proposal also required `ValidNatBinaryMetadata(q)`. That predicate
+The original proposal also required `ValidNatBinaryMetadata(req)`. That predicate
 was schematic and remains unimplemented. Declaration type metadata, ABI
 compatibility and representation bounds require review at the compiler boundary;
 an ABI lane alone does not distinguish Nat from Int.
@@ -81,7 +86,12 @@ an ABI lane alone does not distinguish Nat from Int.
 
 For implementation $`I` and specification relation $`S`,
 
-$$`\operatorname{Implements}(I,S)\iff\forall q,s,r,\ I.\mathrm{call}(q,s)=\operatorname{ok}(r)\Rightarrow S(q,s,r).`
+$$`\begin{aligned}
+&\operatorname{Implements}(I,S)\\
+&\quad\Longleftrightarrow\ \forall\mathit{req},s,r,\\
+&\qquad I.\mathrm{call}(\mathit{req},s)=\operatorname{ok}(r)
+\ \Longrightarrow\ S(\mathit{req},s,r).
+\end{aligned}`
 
 It does not restrict that implication to compiler-valid requests. Since the
 checked Nat handler succeeds for arbitrary metadata, a clause requiring a

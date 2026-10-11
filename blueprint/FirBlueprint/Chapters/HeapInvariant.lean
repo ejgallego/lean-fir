@@ -1,6 +1,7 @@
 import Verso
 import VersoManual
 import VersoBlueprint
+import FirBlueprint.Notation
 import FirBlueprint.Chapters.W6
 import FirTalos.ConcreteRetainedTransports
 import FirTalos.ConcreteRegionTransport
@@ -14,16 +15,20 @@ open Verso.Genre.Manual.InlineLean
 tag := "heap-caller-invariant"
 %%%
 
-This chapter is the maintained mathematical account of the heap and caller
-argument previously spread through `integration/talos/PLAN.md`,
+A call can allocate an object without disturbing the caller's values, yet its
+return can change which objects the caller is allowed to reuse. A lazy
+initializer illustrates the problem: caching its result makes the result's
+owned graph persistent, while the suspended caller may retain a token for an
+older ordinary cell. The heap invariant must justify both the new persistent
+graph and the old token. This chapter explains how concrete representation,
+historical caller facts and fresh-region separation fit together.
+
+The associated declarations below use the accepted checkout and its official
+Talos overlay. The saved-caller and stepwise construction successor at
+`f6850d79f` is also described through cited source evidence. The corresponding
+implementation history remains in `integration/talos/PLAN.md`,
 `W6-THEOREM-ROADMAP.md`, `W6-COVERAGE.md` and
-`W6-RELEASED-BLOCK-REUSE-CONTRACT.md`. Current associations are checked against
-the accepted-main checkout and its official Talos overlay. A separate source
-review on 2026-10-05 at accepted main `8f4222cb2` includes the saved-caller and
-stepwise construction successor `f6850d79f`. That newer design is described
-below as dated source evidence; a source citation adds no Lean association.
-Historical checkpoints, command recipes and chronological
-implementation evidence remain in their source files.
+`W6-RELEASED-BLOCK-REUSE-CONTRACT.md`.
 
 # The representation that the invariant maintains
 
@@ -68,8 +73,8 @@ tagged, and ownership must preserve tagged behavior. Pointer shape and source
 heap provenance are therefore distinct.
 
 :::definition "concrete-value-relation" (parent := "contracts") (owner := "w6") (lean := "Fir.Wasm.Concrete.ValueRel") (autoDeps := true)
-For witness $`w`, ABI kind $`k`, concrete lane $`a` and source value $`v`,
-$`V_w(k,a,v)` denotes the existing {name Fir.Wasm.Concrete.ValueRel}`ValueRel`. It fixes both representation and
+For witness $`w`, ABI kind $`k`, physical Wasm value $`q` and source value $`v`,
+$`V_w(k,q,v)` denotes the existing {name Fir.Wasm.Concrete.ValueRel}`ValueRel`. It fixes both representation and
 semantic shape at the selected kind. Scalars retain their exact kind even if
 two kinds share one Wasm lane; floating-point lanes relate raw bits. A generic
 object-word carrier cannot supply the heap-sensitive fact needed by a
@@ -77,8 +82,8 @@ projection, mutation or retained reuse token.
 :::
 
 :::definition "concrete-heap-relation" (parent := "contracts") (owner := "w6") (lean := "Fir.Wasm.Concrete.LiveHeapRel") (autoDeps := true)
-Write $`H(m,w,s)` for {name Fir.Wasm.Concrete.LiveHeapRel}`LiveHeapRel` between concrete memory state $`m`, witness
-$`w` and source runtime $`s`. Every source cell has a mapped concrete cell, and
+Write $`\mathcal H_w(m,r)` for {name Fir.Wasm.Concrete.LiveHeapRel}`LiveHeapRel` between concrete memory state $`m`, witness
+$`w` and source runtime $`r`. Every source cell has a mapped concrete cell, and
 every mapped source location exists. Live payload and canonical dead-cell
 relations are distinct. Promoted tags have a separate relation.
 
@@ -90,7 +95,7 @@ header, so an ownership write can frame other decoded objects.
 :::
 
 {name Fir.Wasm.Concrete.ConcreteRuntimeRel}`ConcreteRuntimeRel` adds typed globals, equal world and the ordered
-{name Fir.Wasm.Concrete.ConcreteTraceRel}`ConcreteTraceRel` to $`H`. {name FirTalos.Concrete.StateRelated}`StateRelated` adds compiler-local representation
+{name Fir.Wasm.Concrete.ConcreteTraceRel}`ConcreteTraceRel` to $`\mathcal H_w`. {name FirTalos.Concrete.StateRelated}`StateRelated` adds compiler-local representation
 and environment agreement. The witness carries semantic-location mappings,
 promoted tags, allocation descriptors and immutable closure tables. Allocation
 can extend it; historical values must remain representable under the evolved
@@ -99,48 +104,74 @@ client certificate.
 
 # What must survive a call
 
-The active resource scope combines the concrete/cache/ownership frame,
-remaining byte budget, current reuse-capacity facts, closure ABI agreement and
-transports from its original entry. A suspended frame stores its historical
-caller environment and locals, continuation, result destination, exact ABI
-and original entry. Adjacent scopes share the actual call boundary: the inner
-entry is the endpoint of the saved caller scope. Case tests can add target-only
-label frames; return-pop unwinds those labels before consuming a source caller.
+When the caller suspends, its local values are represented using a particular
+heap and witness. The callee can allocate, update memory and produce a new
+witness before those locals are used again. Restoring the caller therefore
+requires a link from its saved representation to the current one. Rechecking
+only the callee's current values would lose the reason that a saved reuse token
+still names a suitable cell.
 
-Tracked-token ordinaryness means that a tracked cell, *if found*, is not
-persistent. It supplies neither existence, liveness, uniqueness, payload
-preservation nor physical capacity. {name FirTalos.Concrete.ReuseCapacityFactsRel}`ReuseCapacityFactsRel`, the live heap
-relation, and header-capacity transport provide those separate facts. In
-particular, a historical represented retained token maps to a location below
-the active initializer's entry frontier.
+Publication makes this link more delicate. A retained token requires its
+tracked cell to remain ordinary, meaning nonpersistent whenever the cell is
+found. The initializer's new Array, in contrast, becomes persistent when it is
+cached. We cannot demand that every location ordinary at entry remain ordinary:
+a location absent at entry satisfies that conditional statement vacuously and
+may later contain the persistent Array. The counterexample
+`RetainedInitializer.example_not_blanketOrdinary`
+([source](https://github.com/ejgallego/lean-fir/blob/340f4612ac622aa39d6a870528f96d6b827d97b8/integration/talos/retained-initializer/RetainedInitializer.lean#L560))
+exhibits exactly this situation.
+
+The transport law instead protects reuse facts represented at the saved
+caller's anchor. Combined with the related initializer-entry heap, the saved
+token representation identifies an existing source cell below that entry's
+cursor. Fresh allocation and publication may then affect the new region while
+preserving the older tracked cells. The law quantifies over every representable
+saved row, rather than asking a client to choose a convenient collection of
+tokens.
 
 :::definition "retained-caller-transport" (parent := "construction") (owner := "w6") (lean := "FirTalos.Concrete.RetainedCallerTransport") (autoDeps := true)
-For entry witness $`w_e` and source runtimes $`s_0,s_1`, the existing retained
-caller law quantifies over every saved fact row $`F`, bindings $`B`, fixed
+For entry witness $`w_e` and source runtimes $`r_0,r_1`, the existing retained
+caller law quantifies over every saved fact row $`F`, binding table $`\mathcal B`, fixed
 caller environment $`E`, saved locals $`L`, memory $`m_h` and witness $`w_h`:
 
 $$`\begin{aligned}
-&\operatorname{FactsRel}(F,B,E,L,m_h,w_h)\ \land\
-  \operatorname{WitnessTransport}(w_h,w_e)\\
-&\qquad\Longrightarrow\
-  \bigl(\operatorname{Ordinary}(F,s_0,E)
-  \ \Longrightarrow\ \operatorname{Ordinary}(F,s_1,E)\bigr).
+&\operatorname{FactsRel}(F,\mathcal B,E,L,m_h,w_h)\\
+&\quad\land\ \operatorname{WitnessTransport}(w_h,w_e)\\
+&\quad\land\ \operatorname{Ordinary}(F,r_0,E)\\
+&\qquad\Longrightarrow\ \operatorname{Ordinary}(F,r_1,E).
 \end{aligned}`
 
-The quantifiers are universal over representable saved facts; the client does
-not select a special map. Fresh allocations after entry may become persistent.
-This is a sufficient internal transport invariant, and may protect more facts
-than the frames actually on the stack. It does not prove arbitrary old
-ordinary-object publication safe.
+The premise ties a row to its historical representation and connects that
+representation to the fixed entry witness. The implication preserves the
+row's ordinary-token facts as execution changes the runtime. It may protect
+more representable rows than occur on the actual stack; it permits fresh
+objects to become persistent without permitting arbitrary old token cells to
+be published.
 :::
+
+Ordinaryness is only one part of the saved evidence. It does not establish
+that a cell exists or is live, that its reference count permits reuse, or that
+its concrete allocation has enough room. The live heap relation and
+{name FirTalos.Concrete.ReuseCapacityFactsRel}`ReuseCapacityFactsRel` supply the representation and capacity facts;
+header-capacity transport keeps the required extent valid across the call.
+Keeping these obligations separate allows publication to change persistence
+without pretending that memory allocation or payload preservation follows from
+ordinaryness alone.
 
 :::theorem "retained-caller-composition" (parent := "construction") (owner := "w6") (lean := "FirTalos.Concrete.RetainedCallerTransport.trans") (autoDeps := true)
 Suppose the first retained transport is indexed by $`w_0`, the next by $`w_1`,
 and $`\operatorname{WitnessTransport}(w_0,w_1)`. Their composition retains the
-original index $`w_0`. A saved row represented at $`w_0` is reindexed to the
-inner entry using witness transport, then both ordinaryness implications apply.
+original index $`w_0`. For each historical saved row, its transport to $`w_0`
+is composed with $`w_0\to w_1`; both ordinaryness implications then apply to
+that same row.
 The result carries the same fixed caller environment across nested calls.
 :::
+
+The active scope records the remaining byte budget $`B`, current reuse facts
+and exact ABI, together with transports from its original entry. A suspended
+scope retains the caller's environment, locals, continuation and destination.
+The inner scope starts at the actual call boundary, which is the endpoint of
+the outer scope; its entry does not replace the outer historical anchor.
 
 {name FirTalos.Concrete.RetainedCodeEntryTransports}`RetainedCodeEntryTransports` adds physical header-capacity transport,
 closure-allocation persistence, immutable dispatch and capture tables, witness
@@ -153,37 +184,35 @@ caller's entry.
 The central active and suspended resource scopes use this package. Named,
 closure and lazy entry begin an inner scope at the actual call boundary;
 {name FirTalos.Concrete.ConcreteStructuredResourceScope.restoreCaller}`restoreCaller` and {name FirTalos.Concrete.ConcreteStructuredBindFrameFocus.advance_popResourceStack}`advance_popResourceStack` compose back to the outer entry.
-Historical stack projection uses only the transported witness and current
-related state, without choosing replacement callers or rebuilding old local
-states. Older whole-declaration interfaces still prove their stronger
-all-location ordinaryness law.
-
-The stronger law fails for the actual fresh Array initializer:
-`RetainedInitializer.example_not_blanketOrdinary` ([source](https://github.com/ejgallego/lean-fir/blob/340f4612ac622aa39d6a870528f96d6b827d97b8/integration/talos/retained-initializer/RetainedInitializer.lean#L560)) exhibits a location absent
-at entry that becomes persistent after publication. The old implication's
-antecedent holds vacuously at that location. A sound caller invariant must
-protect saved representable facts while allowing the newly published graph.
+Historical stack projection uses the transported witness and current related
+state to recover the saved facts. Target-only labels introduced by case tests
+are unwound before a return consumes the corresponding source caller. Older
+whole-declaration interfaces retain their stronger all-location ordinaryness
+law; the facts-indexed law above explains how fresh publication can be handled
+without that restriction.
 
 # The fresh-region separation argument
 
-Fix the initializer entry runtime $`s_e` and cutoff
-$`c=s_e.\mathrm{nextLocation}`. This cutoff stays fixed as the heap grows.
+Let $`r_e` be the initializer entry runtime and $`c` its next source heap
+location. The cutoff $`c` stays fixed as the heap grows. At entry every existing
+cell lies below it, so the region at or above $`c` is empty. The local operation
+laws establish closure of this region as new cells are added.
 
 :::definition "construction-region" (parent := "construction") (owner := "w6") (lean := "FirTalos.Concrete.HeapRegionClosed") (autoDeps := true)
-For heap $`h`, write $`\operatorname{Closed}(c,h)` for the existing predicate.
-For all parent locations $`p`, cells $`x` and owned heap children $`q`,
+For heap $`h`, write $`\FirClosed{c}{h}` for the existing predicate.
+For all parent locations $`j`, cells $`x` and owned heap children $`j'`,
 
-$$`c\le p\ \land\ h[p]=x\ \land\ q\in\operatorname{owned}(x)
-  \ \Longrightarrow\ c\le q`.
+$$`c\le j\ \land\ h[j]=x\ \land\ j'\in\operatorname{owned}(x)
+  \ \Longrightarrow\ c\le j'`.
 
 This constrains outgoing owned edges of cells in the region. It makes no claim
 about edges from older cells, future returned roots, or arbitrary initializer
-programs. Entry initializes it because all represented source locations lie
+programs. Entry initializes it because every existing source heap cell lies
 strictly below $`c`.
 :::
 
 :::theorem "construction-region-reachability" (parent := "construction") (owner := "w6") (lean := "FirTalos.Concrete.HeapRegionClosed.reachable") (autoDeps := true)
-If $`\operatorname{Closed}(c,h)` and each heap root in a root list lies at or
+If $`\FirClosed{c}{h}` and each heap root in a root list lies at or
 above $`c`, every location reachable along owned edges from those roots also
 lies at or above $`c`. The proof follows reachability induction. Sharing and
 cycles are allowed; no acyclicity or traversal-fuel hypothesis is required.
@@ -206,11 +235,14 @@ compiled execution of that fixture.
 :::theorem "fresh-publication-separation" (parent := "construction") (owner := "w6") (lean := "FirTalos.Concrete.ReuseTokenPublicationDisjoint.of_freshRegion_of_witness") (autoDeps := true)
 Let a saved caller's facts be represented under $`w_h`, and transport that
 witness to the initializer entry witness $`w_e`. The related entry heap puts
-each saved retained-token location $`\ell` below $`c`. If the post-construction
-heap is closed at $`c` and the returned root $`r` satisfies $`c\le r`, then
+each saved retained-token location $`\ell` below $`c`. Let $`h` be the
+post-construction source heap. The value $`\FirHeap{\ell_0}` refers to the
+returned source location $`\ell_0`, and $`\FirOwnedReach{h}{v}` follows owned
+edges from $`v`, including its heap root. If $`\FirClosed{c}{h}` and
+$`c\le\ell_0`, then
 
-$$`\ell<c\le q\quad
-  \text{for every }q\text{ reachable from }r`.
+$$`\ell<c\le j\quad
+  \text{for every }j\in\FirOwnedReach{h}{\FirHeap{\ell_0}}`.
 
 Thus no tracked token location is reachable from the published result. The
 proof derives publication disjointness from historical representation and
@@ -281,9 +313,11 @@ execute a W7 resident helper or establish production JavaScript conformance.
 not a copied AST, old olean or substituted capture. The reproduce script and
 per-endpoint trust inventories stay with `integration/talos/retained-initializer/`.
 
-## Accepted successor reviewed on October 5
+## Keeping the caller through construction
 
-At main `8f4222cb2`, accepted `f6850d79f` makes literals and UInt8 boxing use
+Local binding must preserve the construction region and the facts saved at
+the original caller anchor. The reviewed successor at `f6850d79f`, included
+in source checkpoint `8f4222cb2`, makes literals and UInt8 boxing use
 [ConcreteStructuredRegionCodeCore.afterLocalBind](https://github.com/ejgallego/lean-fir/blob/8f4222cb2/integration/talos/FirTalos/ConcreteRegionCode.lean#L47) and gives empty allocation,
 push staging, host execution and binding explicit region-indexed intermediate
 states. Generic local binding supports arbitrary retained fact rows at the
@@ -298,8 +332,16 @@ stack equations are evidence about the installed continuation. The frame
 contains no promise that all future callee results will be fresh.
 `rootedLet_publishesAtBind` ([source](https://github.com/ejgallego/lean-fir/blob/8f4222cb2/integration/talos/retained-initializer/RetainedArrayCalls.lean#L1016)) exercises this path in thirteen source steps and
 rejoins the rooted global relation at the pending destination bind. These
-newer names are source-reviewed prose, not associations in the `93c2e7ec7`
-historical Blueprint environment.
+results are cited source evidence; their names are not new associations in
+this Blueprint's accepted import environment.
+
+The next focused proof step is to carry this saved validated caller, its
+original export ABI and its construction scope through each push-argument
+staging step, host call and result bind. This would replace the lifted
+three-step push block with intermediate states that retain the same frame.
+That work is ongoing. It advances the local construction argument without
+claiming general heap-miss closure, resident linking or correctness of the
+whole Stored export.
 
 The central object/tobject restriction in {bpref "lazy-miss-boundary"}[] is
 still present. {bpref "heap-miss-closure"}[] must carry the saved frame and

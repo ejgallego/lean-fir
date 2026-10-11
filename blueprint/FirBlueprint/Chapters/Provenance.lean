@@ -77,35 +77,55 @@ the stronger non-refining use obligation untouched.
 
 # Two pieces of evidence for the same precise row
 
-The physical lowering row and a compiler-produced precise row may differ.
-For example, lowering can store a value in a {name Fir.Wasm.AbiKind.tobject}`.tobject` lane while the precise
-row records that this particular binding is a heap object. The representation
-and target address do not change merely because more source information is known.
+Consider an argument stored in a {name Fir.Wasm.AbiKind.tobject}`.tobject` local. Its physical row allows
+either tagged data or a heap reference. A call requiring
+{name Fir.Wasm.AbiKind.object}`.object`, or a heap-sensitive projection, needs to know which possibility
+the current value satisfies. A precise row can record that this binding came
+from a heap-object producer. This additional information changes neither the
+target word nor its address; it justifies a stronger semantic use of that word.
 
-Let $`P` be a compiler-produced precise row, $`E` the current source environment,
-and $`k` a semantic ABI kind. The settled semantic interface is
+Two facts are needed for that justification. The static row must record
+{name Fir.Wasm.AbiKind.object}`.object` for the exact variable occurrence passed to the call. Its recorded
+kind must also be true of the current source value. A row that records the
+right kind without a truth proof could misclassify a tagged value; a truthful
+row that omits the required entry cannot justify this particular use.
+
+Let $`P` be the compiler-produced precise row and $`E` the current source
+environment. Write $`E\models x:k` when every value found at $`x` in $`E` has
+semantic ABI kind $`k`, as expressed by
+{name FirTalos.Concrete.SemanticBindingAtAbi}`SemanticBindingAtAbi`.
+Dynamic typing says that every selected kind is true of its binding:
 
 $$`\operatorname{Typed}(P,E)
  \quad\Longleftrightarrow\quad
  \forall x,k,\;P[x]=k\ \Longrightarrow\
- \operatorname{SemanticBindingAtAbi}(E,x,k)`.
+ E\models x:k.`
 
-For argument syntax $`A`, physical kinds $`K` and required kinds $`R`, static
-coverage is over exact occurrences in their zipped rows:
+For argument syntax $`\mathcal A`, physical kinds $`K` and required kinds $`R`,
+static coverage says that each non-refining variable occurrence has the kind
+required by its consumer:
 
-$$`((x,k),r)\in(A\mathbin{\mathrm{zip}}K)
-                  \mathbin{\mathrm{zip}}R\ \land\
- k\not\preceq r\quad\Longrightarrow\quad P[x]=r`.
+$$`\begin{aligned}
+&((x,k),r)\in(\mathcal A\mathbin{\mathrm{zip}}K)
+                  \mathbin{\mathrm{zip}}R\\
+&\quad\land\ k\not\preceq r\quad\Longrightarrow\quad P[x]=r.
+\end{aligned}`
 
 Here $`k\preceq r` abbreviates `k.refines r = true`, and $`x` is an FVar
-argument. This is the meaning of {name FirTalos.Concrete.NonRefiningArgumentsCoveredBy}`NonRefiningArgumentsCoveredBy`, not a newly
-chosen analysis. Return coverage makes the analogous selected-local claim.
-Coverage together with $`\operatorname{Typed}(P,E)` supplies the exact semantic
-binding on each non-refining edge. The common use-site predicate itself is
+argument. If the physical kind already refines the required kind, the ordinary
+typing proof suffices. Otherwise coverage selects $`P[x]=r`, and dynamic typing
+turns that selection into the semantic fact the call needs. The two cases are
+expressed by the common use-site predicate
 
 $$`\operatorname{Use}(E,x,k,r)
  \quad\Longleftrightarrow\quad k\preceq r\ \lor\
- \operatorname{SemanticBindingAtAbi}(E,x,r)`.
+ E\models x:r.`
+
+The static condition is {name FirTalos.Concrete.NonRefiningArgumentsCoveredBy}`NonRefiningArgumentsCoveredBy`; return coverage
+makes the analogous selected-local claim. These interfaces describe the
+evidence a compiler analysis must supply. Choosing the analysis and proving
+that its row remains truthful through execution are still separate open parts
+of the argument.
 
 :::table +header
 *
@@ -130,7 +150,7 @@ Coverage alone is a claim about entries in a list. Semantic typing alone does
 not show that the row contains the entries needed by a particular consumer.
 The checked {name FirTalos.Concrete.SemanticEnvAtLocalKinds.nonRefiningArgumentsAt}`SemanticEnvAtLocalKinds.nonRefiningArgumentsAt` combines them for
 the exact current argument occurrences. The return counterpart is
-{name FirTalos.Concrete.ConcreteStructuredReturnUseSiteProvenanceAt.ofCoverage}`ConcreteStructuredReturnUseSiteProvenanceAt.ofCoverage`.
+{name FirTalos.Concrete.ConcreteStructuredReturnUseSiteProvenanceAt.ofCoverage}`ofCoverage`.
 
 These observations separate {bpref "provenance-analysis"}[] from
 {bpref "provenance-preservation"}[]. Their signatures must be designed together

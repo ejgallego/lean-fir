@@ -1,6 +1,7 @@
 import Verso
 import VersoManual
 import VersoBlueprint
+import FirBlueprint.Notation
 import FirBlueprint.Targets.Admission
 import FirBlueprint.Targets.NatAdd
 import FirBlueprint.Targets.NatAddAdmission
@@ -76,7 +77,7 @@ derived for the desired compiler theorem.
 
 :::theorem "stored-export-instance" (parent := "execution") (owner := "w6") (tags := "open, statement-review") (priority := "high") (uses := "successful-export-property")
 For the actual captured final impure program with selected entry
-`Zip.Wasm.compressStored`, prove $`P_{\mathrm{success}}(p_{\mathrm{stored}})`
+`Zip.Wasm.compressStored`, prove $`\FirSuccess{p_{\mathrm{stored}}}`
 after its production supported-export assembly. The source nomination is
 lean-zip `273d0d6cd9cab77c7f3489b0b0b1f6e543315d21` with zip-common
 `4425bab1f9522307d77e8d485bc536149ba31c36`. The compiled module and result ABI
@@ -254,7 +255,22 @@ explicit. This establishes static export identity and alignment, not dynamic
 admission for all future states.
 :::
 
-:::theorem "rooted-entry" (parent := "compiler") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteSupportedExport.rootedPreciseCodeGlobalRoot") (autoDeps := true)
+:::definition "rooted-execution-relation" (parent := "compiler") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt") (uses := "concrete-value-relation, concrete-heap-relation") (autoDeps := false)
+For a fixed source program, compiled package and source external implementation, write
+$`\FirRooted{A}{w}(\sigma,\tau)` for the rooted execution relation between
+source state $`\sigma` and target state $`\tau`. Its original export ABI $`A`
+stays fixed while its current representation witness $`w` can change.
+
+The relation distinguishes seven current-control cases: ordinary code, staged
+direct, saturated, lazy and external calls, an external result awaiting its
+bind, and a returned value. Each case carries the validated continuation and
+saved caller facts needed for its next transition. The active callee can have
+its own result kind; root agreement connects its saved continuation to $`A`.
+This is the relation explained in the
+{ref "w6-rooted-relation"}[observation and representation argument].
+:::
+
+:::theorem "rooted-entry" (parent := "compiler") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteSupportedExport.rootedPreciseCodeGlobalRoot") (uses := "rooted-execution-relation") (autoDeps := true)
 A supported export constructs its initial rooted, precise relation from cache
 alignment and the entry runtime invariant. It retains the export's selected
 result kind. The caller supplies neither a new simulation invariant nor a
@@ -328,7 +344,7 @@ yield relation. Root freshness remains a hypothesis; ABI representation and
 the execution path are derived.
 :::
 
-:::theorem "publication" (parent := "construction") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteStructuredFreshYieldCore.publishAtRoot") (autoDeps := true)
+:::theorem "publication" (parent := "construction") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteStructuredFreshYieldCore.publishAtRoot") (uses := "rooted-execution-relation") (autoDeps := true)
 Fresh yield evidence and the saved caller/publication premises reconnect cache
 publication with the rooted global relation. This is an executable local
 consumer of construction evidence. The general heap-miss dispatcher does not
@@ -337,13 +353,47 @@ yet derive all of its inputs automatically.
 
 # What the current endpoints establish
 
-:::theorem "rooted-steps" (parent := "execution") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteSupportedExport.rootedExecSteps_of_currentStepAdmission") (autoDeps := true)
+:::theorem "rooted-step-matching" (parent := "execution") (owner := "w6") (tags := "conditional") (lean := "FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.advance_of_step") (uses := "rooted-execution-relation, admission-interface, address-space") (autoDeps := false)
+Let $`M` be the fixed compiled package. Assume uniform current-step admission
+and the separate address-space law. A successful source step from related
+states has a finite target match:
+
+$$`\begin{aligned}
+&\FirRooted{A}{w}(\sigma,\tau)\ \land\ \sigma\FirSourceStep\sigma'\\
+&\quad\Longrightarrow\exists m,\tau',w',\quad
+\tau\FirTargetSteps{M}{m}\tau'\ \land\ \FirRooted{A}{w'}(\sigma',\tau').
+\end{aligned}`
+
+The theorem also gives $`m=0\Longrightarrow\kappa(\sigma')<\kappa(\sigma)`,
+where $`\kappa` is the natural-valued source control rank. Ordinary code uses
+the two supplied laws; staged-call, bind and return cases use their retained
+validated evidence. This matches one step and preserves the root index; the
+{ref "w6-proof-mechanism"}[finite execution argument] explains its composition.
+:::
+
+:::theorem "rooted-steps" (parent := "execution") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteSupportedExport.rootedExecSteps_of_currentStepAdmission") (uses := "rooted-execution-relation") (autoDeps := true)
 Each finite successful source path from a related entry with cache alignment
 has a matching finite target path when uniform
 current-step admission and address-space safety are supplied. The
 proof concatenates the operation segments and preserves the rooted relation,
 including the original export ABI, world and ordered trace, along the path.
 
+:::
+
+:::proof "rooted-steps" (uses := "rooted-step-matching")
+Induction on the finite source path concatenates the matching target segments.
+:::
+
+:::theorem "rooted-terminal-extraction" (parent := "execution") (owner := "w6") (lean := "FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt.terminalYield_of_control") (uses := "rooted-execution-relation, concrete-value-relation") (autoDeps := false)
+Suppose $`\FirRooted{A}{w}(\sigma,\tau)`, the source control has yielded $`v`,
+and its source frame stack is empty. The theorem extracts a target yield focus
+representing $`v` at the original ABI $`A`, under the same endpoint witness
+$`w`, together with a supported target frame stack.
+
+Target-only case labels may remain. Extraction identifies the terminal value
+and the supported continuation; structured-return adequacy then handles those
+labels and establishes executable return. No empty-target-stack premise is
+needed.
 :::
 
 :::theorem "conditional-return" (parent := "execution") (owner := "w6") (tags := "conditional") (lean := "FirTalos.Concrete.ConcreteSupportedExport.terminatesWith_of_rootedExecEvaluates") (autoDeps := true)
@@ -354,6 +404,12 @@ from rooted simulation, then uses terminal extraction and adequacy. Uniform
 current-step admission, address-space safety and the entry/cache/arity
 conditions remain its premises.
 
+:::
+
+:::proof "conditional-return" (uses := "rooted-steps, rooted-terminal-extraction")
+The finite-prefix argument supplies related endpoint states. Terminal
+extraction identifies the result at the root ABI, and structured-return
+adequacy turns the target path and supported frames into executable return.
 :::
 
 :::theorem "conditional-fault" (parent := "execution") (owner := "w6") (tags := "conditional") (lean := "FirTalos.Concrete.ConcreteSupportedExport.faultCorrectOfSimulation") (autoDeps := true)

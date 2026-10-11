@@ -1,6 +1,7 @@
 import Verso
 import VersoManual
 import VersoBlueprint
+import FirBlueprint.Notation
 import FirBlueprint.Chapters.W6
 import FirBlueprint.RetainedInitializerScene
 
@@ -75,7 +76,7 @@ returns. Source heap references name locations rather than concrete addresses.
 
 A source step either advances to another state, reports a return, or reports a
 semantic fault. For successful advancement, write
-$`\sigma\leadsto_s\sigma'`; write $`\sigma\overset{n}{\leadsto}_s\sigma'` for
+$`\sigma\FirSourceStep\sigma'`; write $`\sigma\FirSourceSteps{n}\sigma'` for
 exactly $`n` such steps. The source external implementation $`\varepsilon` is
 fixed during an argument. It specifies the semantic response to calls such as
 `Array.mkEmpty` and `Array.push`. These arrows describe FIR's
@@ -98,7 +99,7 @@ concrete memory, while target locals and the operand stack contain physical
 Wasm values. Target frames record how execution returns through calls, blocks
 and loops. The structured target machine exposes this control flow and uses
 Talos to execute the individual instructions and imported calls. Its finite
-paths are written $`\tau\overset{m}{\longrightarrow}_M\tau'`, with $`m` target
+paths are written $`\tau\FirTargetSteps{M}{m}\tau'`, with $`m` target
 steps. They are defined by
 {name FirTalos.Correctness.StructuredWasmStep}`StructuredWasmStep`.
 
@@ -139,15 +140,15 @@ law between all witnesses.
 
 Representation alone is insufficient during a call. The two machines must
 also agree on what computation is running and what will happen when it returns.
-Write $`R_{A,w}(\sigma,\tau)` for this full execution relation. It combines
+Write $`\FirRooted{A}{w}(\sigma,\tau)` for this full execution relation. It combines
 value and runtime representation with validated current code, generated
 continuations, cache agreement and the facts saved for callers. The index $`A`
 remembers the original export's result kind. The active callee retains the
 representation facts appropriate to its own result, which may have a different
 kind. Hiding the witness gives the relation
 
-$$`R_A(\sigma,\tau)\quad\Longleftrightarrow\quad
-\exists w,\ R_{A,w}(\sigma,\tau).`
+$$`\FirRootedAt{A}(\sigma,\tau)\quad\Longleftrightarrow\quad
+\exists w,\ \FirRooted{A}{w}(\sigma,\tau).`
 
 The initial relation is obtained from the correspondence between source entry
 data and encoded target parameters. Carrying the saved caller facts through construction lets publication
@@ -158,13 +159,13 @@ by the export.
 At the end of a source execution, the public observation $`o` consists of its
 outcome, heap, world and ordered external trace. The world records the observable
 state of external operations; the trace records their names, arguments and
-results in order. Write $`O(r,v)` for the returned observation built from
+results in order. Write $`\FirReturned{r}{v}` for the returned observation built from
 runtime $`r` and value $`v`. Globals and the fresh-location cursor are parts of
 $`r`'s runtime state, but are absent from this public observation. Thus an
 observation describes more than a returned value, while identifying less than
 an entire runtime.
 
-The relation $`R_{A,w}` abbreviates
+The {bpref "rooted-execution-relation"}[relation $`\FirRooted{A}{w}`] abbreviates
 {name FirTalos.Concrete.ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt}`ConcreteStructuredRootedPreciseCodeGlobalOutcomeAt`.
 Its witness-hiding form is used by the conversion
 {name FirTalos.Concrete.ConcreteStructuredCompilerCurrentStepAdmission.toRootedTraceSimulation}`toRootedTraceSimulation`.
@@ -213,10 +214,10 @@ invocation:
 $$`\begin{aligned}
 &\forall o,v,\quad \sigma_0\Downarrow_{\varepsilon}(o,v)\\
 &\quad\Longrightarrow\exists r,\quad
- o=O(r,v)\ \land\ \operatorname{Return}_{M,e}(S_0,\bar u;r,v,A).
+ o=\FirReturned{r}{v}\ \land\ \operatorname{Return}_{M,e}(S_0,\bar u;r,v,A).
 \end{aligned}`
 
-We denote the program property by $`P_{\mathrm{success}}(p)`. It says that every
+We denote the program property by $`\FirSuccess{p}`. It says that every
 finite successful source computation from an allowed input forces an actual
 export return with the same observation and the fixed result ABI. Fixing $`p`
 fixes a program, not its input. Source termination for all inputs would be a
@@ -270,7 +271,7 @@ witness change. They provide the fixed reference point for the freshness
 argument.
 
 The newly allocated Array occupies source location $`c`. Write
-$`\operatorname{heap}(c)` for the source value referring to that location.
+$`\FirHeap{c}` for the source value referring to that location.
 Its only element will be tagged zero, an immediate value with no owned heap
 edge. An owned edge is a heap-reference field whose ownership the parent
 retains; owned reachability follows those fields from a root. Thus the Array
@@ -307,7 +308,7 @@ and $`\Delta\le B`, the proof follows these states:
   * The push stores $`z` in place. A physical result $`q` represents the Array under the produced witness and original construction scope.
 *
   * 13: publication
-  * The runtime caches $`\operatorname{heap}(c)` and marks the returned graph persistent. The destination bind is still pending.
+  * The runtime caches $`\FirHeap{c}` and marks the returned graph persistent. The destination bind is still pending.
   * Seven target steps publish and reload the result. Caller locals and frames are already restored; the destination `local.set` remains pending.
 *
   * 14: caller resumption
@@ -359,7 +360,7 @@ $`A` and fresh-region closure hold at this checkpoint.
 FirBlueprint.RetainedInitializerScene.published
 ```
 
-At **step 14**, the source installs $`\operatorname{heap}(c)` at $`d` and
+At **step 14**, the source installs $`\FirHeap{c}` at $`d` and
 restores the caller's joins and frames. The target writes local $`i` and keeps
 its already restored frames. We now have a validated caller ready to continue.
 
@@ -430,16 +431,16 @@ states and final witnesses are obtained by the proof.
 ## Publication after thirteen source steps
 
 Write $`h(\sigma)` for the source heap in state $`\sigma` and
-$`\operatorname{Closed}_c(h)` for closure of the whole region at or above $`c`:
+$`\FirClosed{c}{h}` for closure of the whole region at or above $`c`:
 every owned edge from a parent in that region has its child there too. The
 publication theorem gives
 
 $$`\begin{aligned}
 &\exists m,\sigma_{13},\tau_{13},w_{13},\quad
-  \sigma_0\overset{13}{\leadsto}_s\sigma_{13}\\
-&\quad\land\ \tau_0\overset{m}{\longrightarrow}_M\tau_{13}\\
-&\quad\land\ R_{A,w_{13}}(\sigma_{13},\tau_{13})\\
-&\quad\land\ \operatorname{Closed}_c(h(\sigma_{13})).
+  \sigma_0\FirSourceSteps{13}\sigma_{13}\\
+&\quad\land\ \tau_0\FirTargetSteps{M}{m}\tau_{13}\\
+&\quad\land\ \FirRooted{A}{w_{13}}(\sigma_{13},\tau_{13})\\
+&\quad\land\ \FirClosed{c}{h(\sigma_{13})}.
 \end{aligned}`
 
 The relation says that publication has re-established the execution invariant
@@ -448,7 +449,7 @@ separation used to protect the suspended caller. Together these are enough to
 continue the compiler argument beyond local Array construction.
 
 The constructed endpoint also identifies the cached value as
-$`\operatorname{heap}(c)`. Its source bind is still pending, while the target
+$`\FirHeap{c}`. Its source bind is still pending, while the target
 has already restored caller locals and frames and has its destination
 `local.set` left to execute. These descriptions follow from the endpoint built
 in the proof. The displayed public conclusion consists of the paths, rooted
@@ -461,15 +462,15 @@ caller. Under the same assumptions, the companion theorem provides
 
 $$`\begin{aligned}
 &\exists m,\sigma_{14},\tau_{14},w_{14},\quad
-  \sigma_0\overset{14}{\leadsto}_s\sigma_{14}\\
-&\quad\land\ \tau_0\overset{m}{\longrightarrow}_M\tau_{14}\\
-&\quad\land\ R_{A,w_{14}}(\sigma_{14},\tau_{14}).
+  \sigma_0\FirSourceSteps{14}\sigma_{14}\\
+&\quad\land\ \tau_0\FirTargetSteps{M}{m}\tau_{14}\\
+&\quad\land\ \FirRooted{A}{w_{14}}(\sigma_{14},\tau_{14}).
 \end{aligned}`
 
 It also restores a validated caller with the following state. Let $`r_{\mathrm{pub}}`
 be the runtime after `Array.push`, with the initializer global set to
-$`\operatorname{heap}(c)`. This is its source runtime. The caller's environment is
-$`E[d\mapsto\operatorname{heap}(c)]`, its current code is $`k`, its budget is
+$`\FirHeap{c}`. This is its source runtime. The caller's environment is
+$`E[d\mapsto\FirHeap{c}]`, its current code is $`k`, its budget is
 $`B-\Delta`, and its reuse facts are $`F` with only the old fact for $`d` erased.
 The source joins and continuation frames are exactly the initial caller's
 $`J,F_s`, and the target frame stack is exactly $`F_t`. The historical entry,
@@ -519,7 +520,7 @@ $$`\ell<c\le j.`
 To state the consequence for all of the caller's tokens, let $`\mathcal T(F,E)`
 be its tracked source locations. A location belongs to this set when some
 variable in environment $`E` contains a reuse token naming it and that variable
-has a retained-capacity fact in $`F`. Let $`\operatorname{ownedReach}_h(v)` be
+has a retained-capacity fact in $`F`. Let $`\FirOwnedReach{h}{v}` be
 the locations reached from value $`v` in source heap $`h` by following owned
 heap-reference fields, including the root itself. Sharing and cycles are
 allowed; immediate tagged data contributes no edge. For the publication heap
@@ -527,9 +528,9 @@ $`h`, the proof gives
 
 $$`\begin{aligned}
 \mathcal T(F,E)&\subseteq\{\ell\mid\ell<c\},\\
-\operatorname{ownedReach}_h(\operatorname{heap}(c))
+\FirOwnedReach{h}{\FirHeap{c}}
 &\subseteq\{j\mid c\le j\},\\
-\mathcal T(F,E)\cap\operatorname{ownedReach}_h(\operatorname{heap}(c))
+\mathcal T(F,E)\cap\FirOwnedReach{h}{\FirHeap{c}}
 &=\varnothing.
 \end{aligned}`
 
@@ -628,23 +629,23 @@ Supported compilation identifies the source entry, selected export, adapted
 function, host environment and result kind. The entry data relate encoded
 parameters to the source environment and runtime, and the cache-alignment
 condition identifies the globals used by the compiled code. These facts give
-$`R_{A,w_0}(\sigma_0,\tau_0)` through {bpref "rooted-entry"}[]. The execution
+$`\FirRooted{A}{w_0}(\sigma_0,\tau_0)` through {bpref "rooted-entry"}[]. The execution
 proof therefore starts with the actual compiled entry, rather than a supplied
 simulation of its future behavior.
 
 ## 2. Match a successful source step
 
-Consider a source step $`\sigma\leadsto_s\sigma'` from a state related to
+Consider a source step $`\sigma\FirSourceStep\sigma'` from a state related to
 $`\tau`. The current-step admission law supplies the semantic facts for the
 operation at this validated code point. A separate address-space law ensures
 that its admitted resource cost fits the current frame's remaining budget.
-Under these laws, the step theorem derives
+Under these laws, {bpref "rooted-step-matching"}[] derives
 
 $$`\begin{aligned}
-&R_{A,w}(\sigma,\tau)\ \land\ \sigma\leadsto_s\sigma'\\
+&\FirRooted{A}{w}(\sigma,\tau)\ \land\ \sigma\FirSourceStep\sigma'\\
 &\quad\Longrightarrow\exists m,\tau',w',\quad
- \tau\overset{m}{\longrightarrow}_M\tau'
- \ \land\ R_{A,w'}(\sigma',\tau').
+ \tau\FirTargetSteps{M}{m}\tau'
+ \ \land\ \FirRooted{A}{w'}(\sigma',\tau').
 \end{aligned}`
 
 The segment length $`m` can be zero. For example, a source administrative
@@ -684,10 +685,11 @@ conditional finite-path theorem obtained by this composition.
 A successful source evaluation ends with a yielded value and no source
 continuation left to run. The rooted relation then supplies the result's
 representation at $`A`. The target may still have administrative labels to
-unwind, so terminal extraction derives the remaining target steps needed to
-return through them.
+unwind. {bpref "rooted-terminal-extraction"}[] extracts the represented yield
+and a supported target frame stack under the same endpoint witness.
 
-Finally, adequacy connects that structured-machine path to executable Talos
+Finally, structured-return adequacy unwinds the supported labels and connects
+that structured-machine path to executable Talos
 termination of the selected export. We have now derived the target execution,
 its result representation and its observation from the source evaluation.
 This gives the successful-return property through {bpref "conditional-return"}[],
@@ -780,7 +782,7 @@ $$`\begin{aligned}
 Call this application property $`Q_{\mathrm{stored}}`. It says what the source
 compression algorithm does. To obtain the corresponding statement for compiled
 execution, we also need the compiler property
-$`P_{\mathrm{success}}(p_{\mathrm{stored}})` for the captured final-LCNF program.
+$`\FirSuccess{p_{\mathrm{stored}}}` for the captured final-LCNF program.
 The initializer supplies a local family of compiler-semantic results,
 $`Q_{\mathrm{init}}`, but it does not establish the whole-export property or
 prove that the selected export reaches that block.
@@ -806,7 +808,7 @@ different simulation route.
 
 The same obligations appear in the intended general theorem,
 
-$$`\forall p,\quad H(p)\Longrightarrow P_{\mathrm{success}}(p).`
+$$`\forall p,\quad H(p)\Longrightarrow \FirSuccess{p}.`
 
 Here $`H(p)` records supported-export and static compilation, adaptation and
 host-resolution evidence. The external, resource and entry contracts continue
@@ -875,11 +877,11 @@ statement and the trust chapter explains its evidence.
   * Proved conditional theorems. Uniform compiler admission, address-space safety and the existing entry/cache/arity conditions are supplied.
 *
   * {bpref "stored-export-instance"}[]
-  * $`P_{\mathrm{success}}(p_{\mathrm{stored}})` for the selected captured program, universally over its allowed inputs.
+  * $`\FirSuccess{p_{\mathrm{stored}}}` for the selected captured program, universally over its allowed inputs.
   * Open. First construct this program's semantic facts and use the proved conditional consumer; the unfinished general theorem is not a prerequisite.
 *
   * {bpref "validated-return"}[]
-  * Eventually, $`\forall p,\ H(p)\Longrightarrow P_{\mathrm{success}}(p)` for supported compiled exports.
+  * Eventually, $`\forall p,\ H(p)\Longrightarrow \FirSuccess{p}` for supported compiled exports.
   * Local composition is checked, but the external specification and admission construction are explicit holes. $`H` is static supported-export/compilation evidence; compiler-owned admission must be derived.
 *
   * Faults, closed exports and resident linking
