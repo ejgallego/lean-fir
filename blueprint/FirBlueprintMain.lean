@@ -2,6 +2,7 @@ import VersoManual
 import VersoBlueprint.PreviewManifest
 import FirBlueprint.Blueprint
 import FirBlueprint.SourceLinks
+import FirBlueprint.Compatibility
 
 open Verso Doc
 open Verso.Genre Manual
@@ -14,4 +15,4 @@ def main (args : List String) : IO UInt32 := do
     args
     (extensionImpls := by exact extension_impls%)
     (model := model)
-    (extraSteps := [sources.emit])
+    (extraSteps := [sources.emit, FirBlueprint.Compatibility.emit])

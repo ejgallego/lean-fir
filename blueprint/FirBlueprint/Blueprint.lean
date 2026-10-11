@@ -9,7 +9,6 @@ import FirBlueprint.Chapters.Experiment
 import FirBlueprint.Chapters.Roadmap
 import FirBlueprint.Chapters.AdmissionMap
 import FirBlueprint.Chapters.Provenance
-import FirBlueprint.Chapters.Migration
 import FirBlueprint.Chapters.ExternalDomains
 import FirBlueprint.Chapters.Frontier
 import FirBlueprint.Chapters.HeapInvariant
@@ -48,8 +47,6 @@ dated source-reviewed evidence are identified separately.
 {include 0 FirBlueprint.Chapters.Roadmap}
 
 {include 0 FirBlueprint.Chapters.Contribution}
-
-{include 0 FirBlueprint.Chapters.Migration}
 
 {include 0 FirBlueprint.Chapters.Experiment}
 

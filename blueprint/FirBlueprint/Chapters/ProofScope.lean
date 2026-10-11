@@ -516,7 +516,7 @@ The Blueprint maintains mathematical statements, assumptions, dependencies and
 proof plans. Lean definitions, proofs and their compiled checks determine the
 formal results. The records below provide reproduction instructions, source
 censuses and dated audit evidence; they are not a parallel proof-status map.
-The {ref "documentation-migration"}[source and evidence boundaries] explain
+The {ref "documentation-migration"}[source-reading account] below explains
 how a checked association differs from a cited source review.
 
 The links in this inventory fix published snapshots at FIR `8f4222cb2`.
@@ -541,3 +541,37 @@ identifies the {ref "external-int-response-boundary"}[reviewed Int response
 discrepancy]. It has no published bug-card permalink at these revisions; the
 argument links to immutable published implementation sources instead. The
 record is supporting audit evidence, not a reading prerequisite.
+
+## Reading source evidence
+%%%
+tag := "documentation-migration"
+number := false
+htmlSplit := .never
+%%%
+
+A checked Lean association describes a declaration in the loaded package.
+A dated source citation identifies the revision inspected for a result outside
+that environment; it creates neither an association nor a fresh proof or trust
+receipt. Chapters distinguish this source identity from semantic correctness
+and the retained execution and resource assumptions. The
+{ref "retained-example-boundary"}[concrete-to-general account] illustrates
+these boundaries for lean-zip.
+
+The formal catalog's original declaration narrative was reviewed at FIR
+`81bb0e2ab`. Its current associations use accepted VBP `19451b009`, Lean 4.34.1
+and the official worktree-local Talos overlay. The accepted-main text review of
+2026-10-05 inspected FIR `8f4222cb2`, including W6 checkpoint `f6850d79f`.
+Later accepted construction and saved-caller results are explained in the
+{ref "heap-caller-invariant"}[heap/caller argument] as reviewed source evidence.
+Their absence from this catalog's association set does not mean the accepted
+proof is missing. General heap-miss admission and resident linking remain
+open at their own nodes. Historical PR475 candidate evaluations keep their
+separate revisions in the {ref "evaluation-findings"}[evaluation cases].
+
+Record new proof knowledge at its existing statement or chapter, with supporting
+source and consumer references. Owner-maintained records retain operational
+instructions, source inventories and dated audits; repository setup and
+integration follow the rules in the contributor's current checkout. The
+completed migration census and review chronology remain in Git history.
+Generated sites and local receipts are disposable working state, not a second
+proof-status registry.

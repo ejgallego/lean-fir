@@ -22,10 +22,9 @@ tag := "w6-formal-catalog"
 
 The {ref "compiler-argument"}[compiler argument] develops the first-reading
 account from a concrete call to the successful-return guarantee. This catalog
-records its contracts, checked Lean associations and open obligations. Node
-status describes the associated declaration or planned statement; the
-{ref "proof-trust"}[trust account] records the separate axiom and contract
-boundaries.
+records its contracts, checked Lean associations and open obligations. The
+{ref "w6-source-boundary"}[catalog key] explains how to read the associations,
+dependencies and status alongside the separate proof and trust evidence.
 
 :::author "w6" (name := "FIR W6 proof lane")
 :::
@@ -109,6 +108,24 @@ that general theorem and discharge this program's premises. That planned route
 does not form a current proof dependency. The statement, quantified input scope
 and retained conditions must stay the same when its proof route changes.
 :::
+
+## Reading this catalog
+%%%
+tag := "w6-source-boundary"
+number := false
+htmlSplit := .never
+%%%
+
+A checked Lean association describes a declaration in the loaded package; a
+cited source review can explain a result outside that environment without
+adding an association. A conditional theorem retains its hypotheses, while a
+separate obligation constructs or discharges those hypotheses. Graph arrows
+record mathematical dependencies, either inferred from Lean or explicitly
+authored, for checked nodes as well as open obligations. Editorial tags do not
+change computed status. Status does not replace the {ref "proof-trust"}[trust
+account] or integration evidence; the
+{ref "documentation-migration"}[source-reading account] collects the reviewed
+revisions and their evidence boundaries.
 
 # Contract and operation catalog
 
@@ -722,35 +739,3 @@ Compose helper implementation refinements and installation/import closure
 with the contracted compiler theorem. Generation tests and linked artifact
 tests supply separate evidence; they do not discharge the semantic proof.
 :::
-
-# Source and graph reading boundaries
-%%%
-tag := "w6-source-boundary"
-%%%
-
-This chapter's original declaration narrative was reviewed at FIR `81bb0e2ab`.
-The current package uses accepted VBP `19451b009` and Lean 4.34.1; its Lean
-associations are checked against the current FIR checkout and official
-worktree-local Talos overlay. Historical PR475 candidate evaluations retain
-their separate revisions in the {ref "evaluation-findings"}[evaluation cases].
-The accepted-main text review on 2026-10-05 uses FIR
-`8f4222cb2`, including W6 checkpoint `f6850d79f`. Newer accepted results are
-explained in the {ref "heap-caller-invariant"}[maintained heap/caller argument]
-as reviewed source evidence. A source citation does not itself add a Lean
-association. In particular, construction-step preservation and the
-fresh saved validated caller have advanced; general heap-miss admission and
-resident linking remain open. An absent association here is an artifact
-boundary, not evidence that the accepted proof is missing.
-
-The goal is to make assumptions and useful remaining contributions visible.
-The {ref "documentation-migration"}[source and evidence boundaries] identify
-the maintained argument and its production source/audit authorities.
-
-*Reading the graph.* An arrow is a mathematical dependency. Existing nodes
-use Lean dependency inference; open nodes have explicitly authored proof plans.
-A proved conditional result and a theorem eliminating its premise are separate
-nodes. The Blueprint is the specification and obligation map for these targets;
-its draft statements and admitted proofs evolve together. Tags describe our editorial classification; they do not change
-Blueprint's computed status. Resource contracts remain explicit execution
-conditions. Integration and axiom evidence are discussed in the evaluation
-chapter, separately from the graph's formalization colors.

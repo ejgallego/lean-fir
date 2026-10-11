@@ -42,3 +42,11 @@ The standing FIR root owns integration and package pins; W6 reviews its
 mathematical claims. Source, trust and artifact evidence remain with their
 production definitions and owner-maintained audits. The Blueprint distinguishes
 checked associations, rough obligations and explicitly dated source evidence.
+
+Use checked declaration references for constants in the imported environment,
+prose references for existing nodes and sections, and mathematical notation for
+schematic laws. Keep CLI/API strings, paths and immutable statement
+transcriptions as literal code. Inline Lean terms use the qualified
+`InlineLean.lean` role to avoid ambiguity with Blueprint's code role. A hover
+describes the loaded declaration; dated source references identify historical
+or newer source facts. Neither creates a proof association or changes status.

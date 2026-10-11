@@ -36,6 +36,18 @@ production contract and trust gates decide acceptance. This selected W6 map
 does not claim to cover the entire compiler development. A prose obligation
 remains open even when its anticipated dependencies are checked.
 
+Keep statements, assumptions, holes, proof plans, unresolved alternatives and
+consumer relationships at their existing Blueprint nodes or chapters, with
+supporting source references. A representation difficulty should become a
+concrete VBP acceptance case. Ordinary proof advancement remains with FIR's
+proof owners; a roadmap's missing mathematics is not an assignment.
+
+Repository setup and integration instructions stay with their operational
+owner. Follow the current checkout's ownership, worktree, cache and check
+rules, identified under {ref "source-disposition-inventory"}[repository protocol].
+The {ref "documentation-migration"}[source-reading account] distinguishes
+formal results from their supporting evidence.
+
 The first formal slice in `FirBlueprint/Targets/Admission.lean` separates three
 roles:
 
@@ -45,15 +57,15 @@ roles:
   * Role
   * Remaining review
 *
-  * {bpref "external-spec"}[]: {name FirBlueprint.Targets.externalSpec}`FirBlueprint.Targets.externalSpec`
+  * {bpref "external-spec"}[]: {name FirBlueprint.Targets.externalSpec}`externalSpec`
   * Explicit definition hole in the existing {name Fir.LeanIR.Impure.ExternalSpec}`ExternalSpec` interface
   * Specify actual primitive request/response behavior and check adequacy and satisfiability for intended implementations.
 *
-  * {bpref "admission-closure"}[]: {name FirBlueprint.Targets.admission_of_validation}`FirBlueprint.Targets.admission_of_validation`
+  * {bpref "admission-closure"}[]: {name FirBlueprint.Targets.admission_of_validation}`admission theorem`
   * Direct proof hole constructing the current-step compiler law from the external contract and finite-runtime safety
   * Review the statement and maintained heap-miss/schema-provenance relation before freezing a task.
 *
-  * {bpref "validated-return"}[]: {name FirBlueprint.Targets.return_of_validation}`FirBlueprint.Targets.return_of_validation`
+  * {bpref "validated-return"}[]: {name FirBlueprint.Targets.return_of_validation}`return assembly`
   * Checked composition preserving exact observation and result ABI, with admission supplied by the visible hole
   * Recheck consumers when either prerequisite changes; the composition does not establish the draft statements' provability.
 :::
@@ -388,26 +400,3 @@ consumer/integration evidence. Ordinary open/proved status does not express all
 four. Neither existing declaration should be labeled mathematically unproved.
 The dated counts and expected delta describe the reviewed revisions; they
 neither update today's trust inventory nor establish today's task readiness.
-
-# Working agreement
-
-Capture statements, assumptions, holes, proof plans, alternatives and consumer
-relationships in Blueprint, and turn representation difficulties into concrete
-VBP acceptance cases. Ordinary FIR proof advancement remains with the proof
-owners; a roadmap's missing mathematics is not an assignment.
-
-Maintain proof knowledge at its existing statement or chapter, with supporting
-source and consumer references. Keep repository setup and integration instructions with their operational
-owner; follow the current checkout's ownership, worktree, cache and check rules,
-linked under {ref "source-disposition-inventory"}[repository protocol]. The
-{ref "documentation-migration"}[source and evidence boundaries] explain which
-formal results and supporting evidence are kept distinct.
-
-Use checked declaration references for constants in the site's imported
-environment, prose references for existing nodes and sections, and mathematical
-notation for schematic laws. Preserve CLI/API strings, paths and immutable
-statement transcriptions as literal code. Inline Lean terms use the qualified
-`InlineLean.lean` role to avoid ambiguity with Blueprint's code role. A hover
-describes the loaded declaration; dated source references identify historical
-or newer source facts. Neither annotation creates a proof association nor
-changes completion status.
