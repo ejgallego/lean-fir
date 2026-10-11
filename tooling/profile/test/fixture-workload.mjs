@@ -32,7 +32,10 @@ export async function warmup({ entry }) {
 }
 
 export async function steady({ entry }) {
-  const result = entry(50_000_000);
+  // A fixed work budget, not a timed loop/retry: the former 50M capture could
+  // finish before V8 delivered the required 100 Wasm samples on CI runners.
+  // Stay below signed i32's maximum and retain the same zero endpoint/batches.
+  const result = entry(1_000_000_000);
   return { ok: result === 0,
-    observation: { result, rounds: 50_000_000 } };
+    observation: { result, rounds: 1_000_000_000 } };
 }

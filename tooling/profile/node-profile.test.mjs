@@ -74,6 +74,7 @@ test("CLI profiles only checked steady work and binds immutable evidence",
           `fixture must finish exact and partial batches for ${rounds} rounds`);
       }
       assert.equal(JSON.parse(receiptBefore).parameters.leafBatchSize, 1024);
+      assert.equal(JSON.parse(receiptBefore).parameters.steadyRounds, 1_000_000_000);
       const evidencePath = execFileSync(process.execPath, [
         profileTool,
         "--wasm", wasmPath,
@@ -92,7 +93,7 @@ test("CLI profiles only checked steady work and binds immutable evidence",
         firstCall: { result: 0, originalName: "Fixture.leaf",
           sidecarMutationBlocked: true },
         warmup: { result: 0, rounds: 1000 },
-        steady: { result: 0, rounds: 50_000_000 },
+        steady: { result: 0, rounds: 1_000_000_000 },
       });
       for (const value of Object.values(evidence.phases)) {
         assert(Number.isFinite(value) && value >= 0);
@@ -106,7 +107,10 @@ test("CLI profiles only checked steady work and binds immutable evidence",
       assert.equal(evidence.summary.unresolvedWasmMicros, 0);
       assert.equal(evidence.comparability.eligible, true);
       assert.match(evidence.comparability.key, /^[0-9a-f]{64}$/);
-      assert.equal(evidence.quality.classification, "checked-diagnostic");
+      assert.equal(evidence.quality.classification, "checked-diagnostic",
+        `profile quality: ${JSON.stringify({ quality: evidence.quality,
+          steadyProfiledMs: evidence.phases.steadyProfiledMs,
+          runtime: evidence.runtime })}`);
       assert.equal(evidence.workload.receipt.id, "fir-tooling-wasm-loop");
       assert.equal(evidence.workload.inputs[0].role,
         "wasm-source-fixture");

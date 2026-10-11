@@ -129,6 +129,15 @@ checks that a missing sampled parent is never reconstructed from the static
 Wasm call graph. This fixture is an attribution check, not a speed benchmark;
 its timings are not application performance evidence.
 
+The steady capture has a fixed one-billion-decrement budget, recorded in its
+workload receipt; first call (16), warmup (1,000), leaf batches (1,024), and the
+100 µs test sampling interval are unchanged. The previous 50-million budget
+could finish too quickly for the unchanged 100-Wasm-sample quality floor on a
+faster CI runner. This gives sampling headroom without a timed calibration loop,
+retry-until-pass, relaxed classifier, or manufactured caller. Sampling itself
+remains noisy: a failed quality assertion prints its limitations, sample counts,
+steady duration and Node/V8 identity, rather than hiding the actual reason.
+
 ## Cross-run final-function resolver
 
 `profile-aggregate.mjs` re-derives attribution from one or more untouched raw

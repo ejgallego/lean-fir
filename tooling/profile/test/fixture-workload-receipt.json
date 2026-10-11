@@ -6,7 +6,7 @@
   "parameters": {
     "leafBatchSize": 1024,
     "warmupRounds": 1000,
-    "steadyRounds": 50000000
+    "steadyRounds": 1000000000
   },
   "dependencies": [],
   "inputs": [
