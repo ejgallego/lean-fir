@@ -44,6 +44,32 @@ jobs:
         run: |
           git diff --check
           make check
+      - name: Report bounded check failure logs
+        if: failure()
+        run: |
+          mkdir -p .deps/ci-failure
+          {
+            count=0
+            for log in _build/validation-v8/*/build*/stderr.log \
+              _build/validation-v8/*/build*/stdout.jsonl \
+              .deps/tool-logs/*.log; do
+              if [[ ! -f "$log" || -L "$log" ]]; then continue; fi
+              printf '\n--- %s (last 80 lines, at most 8192 bytes) ---\n' "$log"
+              tail -n 80 "$log" | tail -c 8192
+              count=$((count + 1))
+              if (( count >= 12 )); then break; fi
+            done
+            if (( count == 0 )); then printf 'No check failure logs were produced.\n'; fi
+          } | tee .deps/ci-failure/check.log
+      - name: Upload bounded check failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: repository-check-failure
+          path: .deps/ci-failure/check.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
   talos:
     name: Talos proofs and trust audit

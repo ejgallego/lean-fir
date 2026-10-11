@@ -58,6 +58,17 @@ jobs:
         run: bash integration/lcnf-c-wasm/setup-emscripten.sh
       - name: Prepare pinned WASI SDK
         run: bash integration/lcnf-c-wasm/setup-wasi-sdk.sh
+      - name: Select the authenticated WASI SDK compiler and linker pair
+        run: |
+          source integration/lcnf-c-wasm/toolchain-pins.sh
+          read -r asset _ < <(fir_lcnf_c_wasi_sdk_asset)
+          sdk="$GITHUB_WORKSPACE/.deps/lcnf-c-wasm/${asset%.tar.gz}"
+          test -x "$sdk/bin/clang"
+          test -x "$sdk/bin/wasm-ld"
+          "$sdk/bin/clang" --version
+          "$sdk/bin/wasm-ld" --version
+          printf 'FIR_WASM_CLANG=%s\nFIR_WASM_LD=%s\n' \
+            "$sdk/bin/clang" "$sdk/bin/wasm-ld" >> "$GITHUB_ENV"
       - name: Run complete C/Wasm suite
         run: |
           git diff --check

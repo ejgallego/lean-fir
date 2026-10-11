@@ -67,7 +67,7 @@ jobs:
         run: |
           mkdir -p "$TMPDIR" .deps
           sudo apt-get update
-          sudo apt-get install -y ripgrep
+          sudo apt-get install -y ripgrep strace bubblewrap
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o .deps/elan-init.sh
           sh .deps/elan-init.sh -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
@@ -86,3 +86,29 @@ jobs:
         run: |
           git diff --check
           bash integration/talos/artifact/check.sh
+      - name: Report bounded artifact failure logs
+        if: failure()
+        run: |
+          mkdir -p .deps/ci-failure
+          {
+            count=0
+            for log in _build/validation-v8/*/build*/stderr.log \
+              _build/validation-v8/*/build*/stdout.jsonl \
+              .deps/tool-logs/*.log; do
+              if [[ ! -f "$log" || -L "$log" ]]; then continue; fi
+              printf '\n--- %s (last 80 lines, at most 8192 bytes) ---\n' "$log"
+              tail -n 80 "$log" | tail -c 8192
+              count=$((count + 1))
+              if (( count >= 12 )); then break; fi
+            done
+            if (( count == 0 )); then printf 'No artifact failure logs were produced.\n'; fi
+          } | tee .deps/ci-failure/artifact.log
+      - name: Upload bounded artifact failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wasm-artifact-failure
+          path: .deps/ci-failure/artifact.log
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
