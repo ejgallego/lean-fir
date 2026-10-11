@@ -155,6 +155,9 @@ also includes {name}`Nat.mul`, strings and arrays. Leaving a family unreviewed d
 not justify defining its successful executions away with a false clause.
 
 ## The Int representation decision
+%%%
+tag := "external-int-response-boundary"
+%%%
 
 The reviewed W6 {name Fir.Wasm.Concrete.semanticIntegerExternalResponse}`semanticIntegerExternalResponse` always allocates an integer
 at the incoming {name Fir.LeanIR.Impure.RuntimeState.nextLocation}`nextLocation`; its cost model includes that allocation even
@@ -167,8 +170,8 @@ and cost model representation-aware. The alternative is an explicit
 normalization bridge with proofs about observations and ownership. The former
 is the review recommendation; W6/root own the decision. Its first acceptance
 case is {InlineLean.lean}`Int.ofNat 0`, aligning response, heap effects, refinement and cost.
-The discrepancy is recorded in
-`bugs/FIR-BUG-impure-none-external-int-response-contract.md`. It blocks claiming
+The published [validation encoder](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/Fir/Validation/LCNF.lean#L232) and
+[W6 integer response](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/Fir/Wasm/Concrete/ExternalCorrectness.lean#L322) expose this difference. It prevents claiming
 that the current contract covers validation; it does not refute the conditional
 compiler theorem as stated.
 

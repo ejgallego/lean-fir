@@ -25,10 +25,9 @@ historical caller facts and fresh-region separation fit together.
 
 The associated declarations below use the accepted checkout and its official
 Talos overlay. The saved-caller and stepwise construction successor at
-`f6850d79f` is also described through cited source evidence. The corresponding
-implementation history remains in `integration/talos/PLAN.md`,
-`W6-THEOREM-ROADMAP.md`, `W6-COVERAGE.md` and
-`W6-RELEASED-BLOCK-REUSE-CONTRACT.md`.
+`f6850d79f` is also described through cited source evidence. The
+{ref "source-disposition-inventory"}[supporting evidence] records the exact
+source contracts and dated implementation history behind this argument.
 
 # The representation that the invariant maintains
 

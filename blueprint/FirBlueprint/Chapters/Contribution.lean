@@ -12,8 +12,8 @@ tag := "contribution-policy"
 %%%
 
 This chapter owns the FIR proof-development policy, contribution packet and
-statement-revision workflow. Proof work follows the owner assignments in
-`AGENTS.md`. The historical scalar trust-reduction case supplies an example of
+statement-revision workflow. Proof work follows the owner assignments in the current checkout, as explained
+under {ref "source-disposition-inventory"}[repository protocol]. The historical scalar trust-reduction case supplies an example of
 statement, trust and consumer review; its September 2026 scope is not a current
 assignment. Publishing an external task follows review of its exact statement
 and reproducible environment.
@@ -234,7 +234,7 @@ Use FIR's real definitions. An extracted portable mathematical subproblem is
 acceptable only with a checked bridge back to its FIR consumer in the acceptance
 criteria. Copies of definitions that silently drift cannot substitute for the
 pinned package. Reproduction must respect the worktree-local cache and scratch
-policy in `AGENTS.md`; a failed portable environment setup is an integration
+rules of the current checkout; a failed portable environment setup is an integration
 finding, not a reason to replace FIR with unrelated definitions.
 
 Prove2Me delivery is experimental. Before publication, verify that the service
@@ -397,10 +397,11 @@ VBP acceptance cases. Ordinary FIR proof advancement remains with the proof
 owners; a roadmap's missing mathematics is not an assignment.
 
 Maintain proof knowledge at its existing statement or chapter, with supporting
-source and consumer references. Keep repository setup in the Blueprint README
-and follow `AGENTS.md` for ownership, worktrees, checks and integration. The
+source and consumer references. Keep repository setup and integration instructions with their operational
+owner; follow the current checkout's ownership, worktree, cache and check rules,
+linked under {ref "source-disposition-inventory"}[repository protocol]. The
 {ref "documentation-migration"}[source and evidence boundaries] explain which
-production definitions and audits remain authoritative.
+formal results and supporting evidence are kept distinct.
 
 Use checked declaration references for constants in the site's imported
 environment, prose references for existing nodes and sections, and mathematical

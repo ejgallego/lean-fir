@@ -201,8 +201,8 @@ The first is the review recommendation; the semantic owners must settle it.
 This decision is still open in this Blueprint; it does not block documenting
 the other obligations.
 
-The discrepancy and checked example are in
-`bugs/FIR-BUG-impure-none-external-int-response-contract.md`.
+The {ref "external-int-response-boundary"}[Int representation decision] gives
+the discrepancy, checked example and implementation sources.
 {bpref "external-spec"}[] remains an explicit hole while this and the wider
 primitive coverage are reviewed. We must not make the specification reject
 successful supported calls just to obtain admission.
@@ -224,8 +224,8 @@ contract review is the {ref "external-domains"}[external-domain chapter].
 {bpref "provenance-closure"}[] and {bpref "heap-miss-closure"}[] can advance as
 independent design strands under their owners. Together with external coverage
 and the other branches of the source-admission audit, they feed
-{bpref "admission-closure"}[]. The graph is a selected overview; the 20-branch
-audit in `docs/w6-source-admission-audit.md` supplies the broader inventory.
+{bpref "admission-closure"}[]. The graph is a selected overview; the
+{ref "admission-coverage"}[twenty-branch inventory] gives the broader coverage.
 
 The selected endpoint is {bpref "validated-return"}[]. Its composition is
 already written; completing admission and the specification must be followed

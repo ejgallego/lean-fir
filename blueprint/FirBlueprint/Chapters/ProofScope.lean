@@ -76,8 +76,8 @@ purity index. {name Fir.LeanIR.CheckedProgram}`CheckedProgram` $`phase` adds the
 duplicated. The `Pipeline` module checks pass keys, occurrences and phase transitions
 against the pinned compiler. {name Fir.LeanIR.reverseProofCampaign}`reverseProofCampaign` derives the reverse order:
 final impure passes, late mono/impure, SCC/early mono, then base/frontend.
-The historical exact pass list stays in `docs/lcnf-to-c.md` and
-`docs/pass-correctness-history.md` as versioned compiler evidence.
+The historical exact pass list stays in the [captured compiler-pipeline account](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/docs/lcnf-to-c.md) and
+[versioned pass history](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/docs/pass-correctness-history.md) as versioned compiler evidence.
 
 For an original entry $`e`, arguments $`a` and observation $`o`, same-phase
 correctness has the form
@@ -104,24 +104,24 @@ alpha specialization retains the isolated upstream correspondence axiom.
 Its removal requires an upstream equation or proof-facing API and a proof of
 `UpstreamBridge`
 ([source](https://github.com/ejgallego/lean-fir/blob/340f4612ac622aa39d6a870528f96d6b827d97b8/Fir/LeanIR/Passes/AlphaEqvLocal.lean#L165)). The exact source boundary is
-`bugs/FIR-BUG-impure-simpCase-private-proof-interface.md`.
+[private simpCase correspondence case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-impure-simpCase-private-proof-interface.md).
 
 For `elimDeadVars`, deleted allocations demand a relation over reachable heaps
 with partial address renaming; retained/deleted instructions may take different
 numbers of steps. The exact compiler graph and ownership ledger must construct
 and preserve readiness for arbitrary checked entry states. The dated history
-records the intermediate hereditary-readiness premise; the live repository
-plan identifies general source-only allocation, mapped ownership and reset/reuse
-interfaces as the next generalization. Finite fixture enumeration cannot
+records the intermediate hereditary-readiness premise. The general argument
+still needs source-only allocation, mapped ownership and reset/reuse
+interfaces. Finite fixture enumeration cannot
 establish the arbitrary-entry endpoint.
 
 Three semantic boundaries remain explicit: effectful nullary full applications
 are conservatively excluded unless constant purity or stuttering is established;
 foreign semantics must respect the heap renaming; retained reuse tokens need
 reachable ownership. Their minimized evidence is respectively
-`bugs/FIR-BUG-impure-elimDeadVars-nullary-fap-effects.md`,
-`bugs/FIR-BUG-impure-none-external-spec-address-parametricity.md` and
-`bugs/FIR-BUG-impure-elimDeadVars-reuse-token-root-gap.md`.
+[effectful nullary-application case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-impure-elimDeadVars-nullary-fap-effects.md),
+[external address-parametricity case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-impure-none-external-spec-address-parametricity.md) and
+[retained-token root case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-impure-elimDeadVars-reuse-token-root-gap.md).
 
 Finite-stuttering and observable weak simulations compose through the common
 interface. The next compiler-chain test is one already-proved backward pass
@@ -231,15 +231,16 @@ by validation and reachability. The matrix is an operation inventory, not a
 closed compiler-fault theorem.
 
 Four dated discrepancy cases remain discoverable from the audit:
-`bugs/FIR-BUG-wasm-none-unreachable-fault-classification.md` (unreachable and
+[unreachable-fault classification case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-wasm-none-unreachable-fault-classification.md) (unreachable and
 missing alternatives collapse to an unclassified native trap),
-`bugs/FIR-BUG-wasm-none-uninitialized-scalar-projection.md` (missing semantic
+[uninitialized scalar-projection case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-wasm-none-uninitialized-scalar-projection.md) (missing semantic
 coordinate versus zero-filled storage),
-`bugs/FIR-BUG-wasm-none-constructor-arity-fault-classification.md` (malformed
+[constructor-arity fault case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-wasm-none-constructor-arity-fault-classification.md) (malformed
 allocation classification), and
-`bugs/FIR-BUG-wasm-none-reset-erased-child-release.md` (erased ownership slot).
-These are historical reproducer identities; current status belongs to each
-card and accepted source. The general {bpref "fault-closure"}[] also needs
+[erased-child release case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-wasm-none-reset-erased-child-release.md) (erased ownership slot).
+These links identify historical reproducers; they do not reopen fixed cases
+or determine current theorem status. Current behavior must be checked against
+accepted source. The general {bpref "fault-closure"}[] also needs
 trap-aware structured-machine transport and adequacy. Return-only closure
 does not discharge that obligation.
 
@@ -254,7 +255,7 @@ preserves the intended contract. FIR's maintained source scan sees textual
 axioms/placeholders; it cannot measure opaque imported/generated dependencies.
 Lean's {name Lean.collectAxioms}`collectAxioms` supplies the compiled endpoint footprint.
 
-`TrustInventory.lean` records exact axiom sets per endpoint, including removals.
+[The compiled-endpoint trust checker](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/FirTalos/TrustInventory.lean) records exact axiom sets per endpoint, including removals.
 Missing/non-theorem endpoints, changed sets and {name sorryAx}`sorryAx` are rejected.
 Standard logical axioms are {name propext}`propext`, {name Classical.choice}`Classical.choice` and {name Quot.sound}`Quot.sound`.
 The observation/trust report records the two legacy source-invariant export
@@ -264,7 +265,7 @@ measurements, not a fresh October audit or acceptance of that debt. Generic
 standard-only simulation/return assembly does not remove generated axioms
 in its actual classifier or application instance. The authoritative current
 sets live in the source inventory. The unresolved debt is tracked by
-`bugs/FIR-BUG-wasm-none-endpoint-native-axiom-audit.md`.
+[compiled endpoint-axiom audit](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-wasm-none-endpoint-native-axiom-audit.md).
 
 `ConcreteExportContractTests.lean` independently states rooted evaluation/run,
 fault and admission-prefix contracts. Ten same-axiom weakening mutations must
@@ -312,14 +313,14 @@ The resident-runtime audit at FIR `631fe8e1e3cbb8e2b4893db24231011b5ac78091`,
 2026-08-25, makes the remaining semantic boundary concrete. A reachable generic
 inhabited fallback cannot be replaced by an unreachable trap; checked Array
 out-of-bounds behavior must retain the recoverable panic observation; semantic
-Nat reference counts need finite-header headroom. Its corresponding cards are
-`bugs/FIR-BUG-wasm-none-generic-inhabited-fallback-trap.md`,
-`bugs/FIR-BUG-wasm-none-array-panic-observation.md` and
-`bugs/FIR-BUG-wasm-none-finite-trace-refcount-overflow.md`.
+Nat reference counts need finite-header headroom. Its dated cases and subsequent follow-up record are
+[dated generic-inhabited follow-up case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-wasm-none-generic-inhabited-fallback-trap.md),
+[Array panic-observation case](https://github.com/ejgallego/lean-fir/blob/631fe8e1e3cbb8e2b4893db24231011b5ac78091/bugs/FIR-BUG-wasm-none-array-panic-observation.md) and
+[finite-header reference-count case](https://github.com/ejgallego/lean-fir/blob/631fe8e1e3cbb8e2b4893db24231011b5ac78091/bugs/FIR-BUG-wasm-none-finite-trace-refcount-overflow.md).
 The retained-token ordinaryness/result-kind and tagged partial-application
-cases are in `bugs/FIR-BUG-wasm-none-reuse-retained-token-ordinary.md`,
-`bugs/FIR-BUG-wasm-none-reuse-retained-result-kind.md` and
-`bugs/FIR-BUG-wasm-none-partial-apply-tagged-result.md`.
+cases are in [retained-token ordinaryness case](https://github.com/ejgallego/lean-fir/blob/631fe8e1e3cbb8e2b4893db24231011b5ac78091/bugs/FIR-BUG-wasm-none-reuse-retained-token-ordinary.md),
+[retained-result kind case](https://github.com/ejgallego/lean-fir/blob/631fe8e1e3cbb8e2b4893db24231011b5ac78091/bugs/FIR-BUG-wasm-none-reuse-retained-result-kind.md) and
+[tagged partial-application case](https://github.com/ejgallego/lean-fir/blob/631fe8e1e3cbb8e2b4893db24231011b5ac78091/bugs/FIR-BUG-wasm-none-partial-apply-tagged-result.md).
 The {ref "heap-caller-invariant"}[maintained heap/reuse account] and
 {ref "provenance-design"}[provenance account] explain their invariant boundaries;
 the dated audit is not a fresh claim that its historical statuses still hold.
@@ -338,7 +339,7 @@ accepted host-versus-resident execution boundary: the unchanged
 `ResidentReplacement` post-{name FirTalos.Concrete.StateRelated}`StateRelated` premise, current negative boundary
 tests and the proposed ghost-execution versus product-observation projections.
 Its source discrepancy is
-`bugs/FIR-BUG-wasm-none-resident-host-observation-boundary.md`.
+[resident/host observation-boundary case](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/bugs/FIR-BUG-wasm-none-resident-host-observation-boundary.md).
 The bridge alternatives and their resident-linking consumer remain a shared
 semantic decision; rendered choice documentation does not prove either bridge.
 
@@ -347,9 +348,10 @@ semantic decision; rendered choice documentation does not prove either bridge.
 tag := "resident-numeric-helper-boundary"
 %%%
 
-This migrates the final numeric/typed-Array account in
-`integration/talos/W6-THEOREM-ROADMAP.md`, compared with accepted source
-`8f4222cb2` on 2026-10-05. Its old scratch-cast descriptions and “next”
+This section describes the numeric and typed-Array boundary, reviewed against
+accepted source `8f4222cb2` on 2026-10-05. The
+[reviewed runtime proof chronology](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/W6-THEOREM-ROADMAP.md) preserves the earlier development account. Its old
+scratch-cast descriptions and “next”
 BigNumeric/heap-sum instructions are historical. Accepted source already has
 the accessor and heap-addition results below; the following dated source
 account adds no new Lean association or stub.
@@ -365,16 +367,16 @@ non-import indices supply the actual defined helper bodies.
   * Premises and extent
 *
   * {name Nat.mod}`Nat.mod`: divisor zero returns the left word, matching $`n\bmod0=n`. Nonzero division decodes payloads, executes unsigned remainder and calls adapted immediate makeNatural.
-  * `terminatesWith_modFunctionImmediate_of_adapted` joins both immediate paths. Exact local writes and the result bridge preserve store and caller tail; the nonzero path retains needed scratch availability/restoration facts. The adapted checked fallback remains present but unexecuted under the immediate-pair premise.
+  * [The immediate remainder return theorem](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/FirTalos/ConcreteResidentNat.lean#L13213) joins both immediate paths. Exact local writes and the result bridge preserve store and caller tail; the nonzero path retains needed scratch availability/restoration facts. The adapted checked fallback remains present but unexecuted under the immediate-pair premise.
 *
   * Bounded {name Nat.add}`Nat.add`: the generic 64-bit sum chain proves low addition, carry, both high-word overflow guards, constructor-call composition and exact store threading.
-  * $`x+y\le B` derives no-carry facts in the adapted naturalSum/makeNatural chain. `terminatesWith_natAddFunctionImmediate_of_adapted` returns $`E(x+y)`, preserving store/tail. Its accepted typed result roundtrip is scratch-free; the physical helper layer retains semantic result validity instead of treating an arbitrary i32 as a Nat.
+  * $`x+y\le B` derives no-carry facts in the adapted naturalSum/makeNatural chain. [The bounded immediate addition theorem](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/FirTalos/ConcreteResidentNat.lean#L12503) returns $`E(x+y)`, preserving store/tail. Its accepted typed result roundtrip is scratch-free; the physical helper layer retains semantic result validity instead of treating an arbitrary i32 as a Nat.
 *
   * {name Nat.decEq}`Nat.decEq`, {name Nat.decLt}`Nat.decLt`, {name Nat.decLe}`Nat.decLe`: encoded-word equality and unsigned order equal payload equality/order.
-  * The three wasmWords correspondence laws feed `terminatesWith_decisionFunctionImmediate_of_adapted`. It returns exactly the source decision byte through the accepted scratch-free i32-to-i64-to-UInt8 suffix. The complete checked fallback for non-immediate/mixed/arbitrary-limb inputs is retained, without a correctness claim for that branch from this immediate theorem.
+  * The three wasmWords correspondence laws feed [the immediate decision theorem](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/FirTalos/ConcreteResidentNatDecision.lean#L323). It returns exactly the source decision byte through the accepted scratch-free i32-to-i64-to-UInt8 suffix. The complete checked fallback for non-immediate/mixed/arbitrary-limb inputs is retained, without a correctness claim for that branch from this immediate theorem.
 *
   * {name USize.ofNat}`USize.ofNat`, {name USize.ofNatLT}`USize.ofNatLT`: immediate decode/extension returns the exact USize word; ofNatLT's generated erased parameter is accounted for.
-  * The checked arm validates before zero-index high/low reads and uses a restored scratch cast. `ResidentUSize.CheckedNaturalCalls` requires these calls to preserve store/tail and to recombine to UInt64.ofNat of the source natural. The valid-input theorem retains the original invalid-representation failure path.
+  * The checked arm validates before zero-index high/low reads and uses a restored scratch cast. The `CheckedNaturalCalls` interface in `ResidentUSize` requires these calls to preserve store/tail and to recombine to UInt64.ofNat of the source natural. The valid-input theorem retains the original invalid-representation failure path.
 :::
 
 The decision laws and USize recombination can be read as
@@ -392,20 +394,19 @@ result is the source natural modulo $`2^{64}`. It does not require all natural
 values to fit 64 bits.
 
 Accepted source has advanced beyond the roadmap's old accessor task.
-`terminatesWith_validateNatural_of_naturalAdmission` derives installed
+[The installed validator theorem](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/FirTalos/ConcreteResidentBigNumeric.lean#L3009) derives installed
 validator execution from `NaturalValidatorAdmission` and `ResidentMemoryRel`,
 including header, ownership and top-limb checks. Installed low/high helpers
 execute at arbitrary in-range indices; natural-flavor magnitude count/read
-helpers provide exact words or out-of-range zero padding. The USize bridge
-`NaturalObjectRel.checkedNaturalCalls_of_validate` constructs the zero-index
-package for a related ordinary heap natural above {name Fir.LeanIR.Impure.maxTaggedPayload}`maxTaggedPayload`, retaining
+helpers provide exact words or out-of-range zero padding. The `checkedNaturalCalls_of_validate` theorem in `NaturalObjectRel` constructs
+the USize zero-index package for a related ordinary heap natural above {name Fir.LeanIR.Impure.maxTaggedPayload}`maxTaggedPayload`, retaining
 a validator call. `NaturalValidatorAdmission.heapBacked` supplies that strict
 bound when canonical validator admission is available; the validator theorem
 supplies the call when its admission and installation premises hold. This is not blanket promoted/mixed-representation coverage.
 
 Checked heap/heap addition likewise has actual allocator/header/writer and
 one-limb/multiple-limb producer composition, culminating in
-`NaturalAddInstallation.terminatesWith_heap_of_admissions`. It retains both
+the `terminatesWith_heap_of_admissions` theorem in `NaturalAddInstallation`. It retains both
 `NaturalObjectRel` and `NaturalValidatorAdmission` operand rows, frontier
 validity, `ResidentAllocatorRel`, `LiveHeapRel` and
 `CheckedNaturalAddProducerResources`. That branch-indexed package records
@@ -417,7 +418,7 @@ must not be described as missing because an older plan called them “next.”
 
 The shared consumer is `ResidentPrimitives.wp_definedCallResultSet`, the
 host-polymorphic termination bridge, then
-`ResidentReplacement.externalLetStepSimulates_of_definedCall`.
+the `externalLetStepSimulates_of_definedCall` theorem in `ResidentReplacement`.
 The replacement still takes a successful source external step, initial and
 *post* {name FirTalos.Concrete.StateRelated}`StateRelated`, physical argument readiness, exact helper termination
 and checked destination write. Helper execution supplies one input; it does
@@ -451,7 +452,7 @@ and poisoned-reuse plateau checks are executable evidence for this design;
 the general multiplication refinement remains W6 work.
 
 Source-prose correction, 2026-10-05 at accepted `8f4222cb2`:
-`Fir/Wasm/Emit/Tests/README.md` says nonzero operands need “at most one fewer”
+[reviewed multiplication test guide](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/Fir/Wasm/Emit/Tests/README.md) says nonzero operands need “at most one fewer”
 limb than the sum. That wording is incorrect: two maximal one-limb values
 produce a two-limb product, $`(2^{64}-1)^2`, with $`m=n=1`.
 `ResidentNatMultiplication` allocates $`m+n`; its `finish` handles at most
@@ -506,26 +507,37 @@ unsupported/fuel failures. Its historical source/native/V8 adapters' returned
 observations do not establish coverage of every protocol constructor.
 Counts and floors are regression evidence, not a theorem-completeness metric.
 
-# Source authorities
+# Supporting evidence
 %%%
 tag := "source-disposition-inventory"
 %%%
 
-The statements above use FIR's production definitions and the following
-owner-maintained evidence:
+The Blueprint maintains mathematical statements, assumptions, dependencies and
+proof plans. Lean definitions, proofs and their compiled checks determine the
+formal results. The records below provide reproduction instructions, source
+censuses and dated audit evidence; they are not a parallel proof-status map.
+The {ref "documentation-migration"}[source and evidence boundaries] explain
+how a checked association differs from a cited source review.
 
-* `docs/pass-correctness-plan.md` and `pass-correctness-history.md` retain the
-  pass-proof inventory and its reviewed compiler versions.
-* `integration/talos/PLAN.md`, `W6-THEOREM-ROADMAP.md`, `W6-COVERAGE.md`,
-  `W6-OBSERVABLE-CONTRACT-AND-TRUST.md` and `W6-FAULT-AUDIT.md` retain W6's
-  implementation plan, exact theorem/trust inventories and fault classifications.
-* `docs/w6-source-admission-audit.md` and
-  `docs/wasm-object-carrier-provenance-plan.md` retain the source census and
-  provenance design inputs to the admission and invariant chapters.
-* The retained-initializer source and artifact/package READMEs retain exact
-  capture, release and executable-validation identities. Tooling and build
-  instructions remain with their owning integrations and `AGENTS.md`.
+The links in this inventory fix published snapshots at FIR `8f4222cb2`.
+The admission census and provenance design match the records reviewed at the
+local base `93c2e7ec7`; that local review identity is retained in the chapters
+without implying that it is a published revision. Historical cases elsewhere
+retain their own reviewed source or follow-up revisions.
 
-Review these sources when their definitions or evidence change. The Blueprint
-maintains the argument and its consumers; the completed migration census and
-historical editorial dispositions remain in Git history.
+* *Compiler and pass evidence.* The [captured compiler-pipeline account](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/docs/lcnf-to-c.md), [pass campaign inventory](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/docs/pass-correctness-plan.md) and [versioned pass history](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/docs/pass-correctness-history.md) identify compiler versions, proof modules and earlier checkpoints. The
+  {ref "compiler-phases"}[compiler-phase argument] states their mathematical
+  role in the chain.
+* *Admission and heap evidence.* The [source-admission census](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/docs/w6-source-admission-audit.md) and [carrier/provenance design record](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/docs/wasm-object-carrier-provenance-plan.md) preserve extraction data and precise fixtures. The [runtime construction history](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/PLAN.md), [operation coverage record](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/W6-COVERAGE.md), [runtime proof chronology](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/W6-THEOREM-ROADMAP.md) and [released-block source contract](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/W6-RELEASED-BLOCK-REUSE-CONTRACT.md) retain implementation identities behind the
+  {ref "admission-coverage"}[admission] and
+  {ref "heap-caller-invariant"}[heap/caller] accounts.
+* *Trust and fault evidence.* The [compiled-endpoint trust checker](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/FirTalos/TrustInventory.lean), [dated observation and trust report](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/W6-OBSERVABLE-CONTRACT-AND-TRUST.md) and [operation fault audit](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/W6-FAULT-AUDIT.md) record checks and classifications supporting the
+  {ref "proof-trust"}[trust] and {ref "fault-safety"}[fault] boundaries.
+* *Reproduction and repository protocol.* The [retained-input recipe](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/retained-initializer/README.md) and [artifact-validation guide](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/integration/talos/artifact/README.md) identify captures, packages and executable gates. Follow your current
+  checkout's ownership, worktree, cache and integration rules; the [published repository protocol](https://github.com/ejgallego/lean-fir/blob/8f4222cb2b540b20020fd1c246da968e772295d6/AGENTS.md) is a reference snapshot of those operational rules.
+
+The local owner record FIR-BUG-impure-none-external-int-response-contract
+identifies the {ref "external-int-response-boundary"}[reviewed Int response
+discrepancy]. It has no published bug-card permalink at these revisions; the
+argument links to immutable published implementation sources instead. The
+record is supporting audit evidence, not a reading prerequisite.

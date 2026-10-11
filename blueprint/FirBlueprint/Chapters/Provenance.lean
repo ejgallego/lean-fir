@@ -12,14 +12,17 @@ open Verso.Genre.Manual.InlineLean
 tag := "provenance-design"
 %%%
 
-This is the shared argument behind admission audit rows 1 and 4: returns and
-ordinary direct calls. It migrates the cross-branch conclusions and PA1/PA2
-provenance narrative from `docs/w6-source-admission-audit.md` and the whole
-design in `docs/wasm-object-carrier-provenance-plan.md`. Interfaces were reviewed
-against `ConcreteFinalLcnfTyping.lean` at source base FIR `93c2e7ec7`; the
-October 5 review of main `8f4222cb2` leaves these interfaces unchanged. The
-chapter specifies the evidence flow and unresolved choices. It adds no
-production analysis, proof or public invariant.
+Returns and ordinary direct calls need more than compatible physical lanes:
+the value must have the semantic shape required by its consumer. This chapter
+explains that common provenance obligation and its role in
+{bpref "provenance-closure"}[] and the
+{ref "admission-coverage"}[admission inventory]. It specifies the evidence flow
+and unresolved choices without introducing a new analysis or public invariant.
+
+The interfaces were reviewed against `ConcreteFinalLcnfTyping.lean` at local
+source base FIR `93c2e7ec7`; the October 5 review at accepted `8f4222cb2` leaves
+them unchanged. The {ref "source-disposition-inventory"}[supporting evidence]
+identifies the published source census and design records used in that review.
 
 # Annotation, carrier and semantic evidence
 
@@ -352,11 +355,9 @@ rejection of malformed scalar/object crossings; and unchanged successful
 external-engine differentials. These are criteria for the proposed refactor,
 not a claim that the current global provenance closure is proved.
 
-The audit's source census, PA0 extraction history and exact negative/positive
-fixtures remain in `docs/w6-source-admission-audit.md`. The carrier plan's
-problem, model, evidence flow, W6 role, boundary rules, six slices and acceptance
-conditions are all represented here. What remains open is the mathematics and
-chosen maintained interface: canonical summary construction, recursive and join
-soundness, richer source schema preservation and closed-ingress coverage.
-Those open choices belong to the Blueprint argument, not an unfinished prose
-migration.
+The {ref "source-disposition-inventory"}[supporting evidence] preserves the
+source census, PA0 extraction history and exact negative/positive fixtures.
+The open mathematics remains here: canonical summary construction, recursive
+and join soundness, richer source schema preservation and closed-ingress
+coverage. These are choices in the provenance argument, rather than an
+unfinished prose migration.

@@ -1,8 +1,8 @@
 # FIR compiler correctness Blueprint
 
 This package records the selected W6 compiler argument, its assumptions and
-open obligations. Start with the [concrete lean-zip account](FirBlueprint/Chapters/ProofScope.lean),
-then the [proof map](FirBlueprint/Chapters/W6.lean) and
+open obligations. Start with the [compiler argument](FirBlueprint/Chapters/CompilerArgument.lean),
+then the [formal catalog](FirBlueprint/Chapters/W6.lean) and
 [development roadmap](FirBlueprint/Chapters/Roadmap.lean).
 
 ## Build
@@ -18,13 +18,15 @@ This prepares the official worktree-local Talos overlay and builds
 and manifests define its environment. For direct Lake commands, follow the
 cache and scratch policy in [AGENTS.md](../AGENTS.md) and run from `blueprint/`.
 
-The rendered reader entry is “From lean-zip programs to a general compiler
-theorem” under “Proof architecture, observations and evidence boundaries”.
+The rendered reader entry is “The compiler argument: from a concrete call to
+a theorem”. The [supporting-evidence section](FirBlueprint/Chapters/ProofScope.lean)
+identifies dated audits and reproduction guides; this README and the checkout's
+`AGENTS.md` provide operational instructions.
 The build also generates source snapshots captured from associated module
 paths during this build, including the Talos overlay, so declaration links
 work without a published Git revision or a path into ignored working state.
 
-The public [VBP manual](https://github.com/leanprover/verso-blueprint/blob/main/doc/MANUAL.md)
+The [VBP manual at the accepted package revision](https://github.com/leanprover/verso-blueprint/blob/19451b009e306e7436b82f4d9093c4d15f8cdfd8/doc/MANUAL.md)
 and `lake exe vbp --help` document CLI and authoring features. A user-local
 Codex skill is optional; it is not a contributor prerequisite.
 

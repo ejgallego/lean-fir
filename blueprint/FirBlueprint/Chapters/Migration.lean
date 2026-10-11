@@ -12,19 +12,19 @@ tag := "documentation-migration"
 
 The Blueprint contains the selected proof argument, assumptions, open
 obligations and contribution policy. Its maintained accounts are the
-{ref "proof-scope"}[proof architecture], W6 nodes,
+{ref "proof-scope"}[proof architecture], {ref "w6-formal-catalog"}[formal catalog],
 {ref "admission-coverage"}[admission coverage],
 {ref "heap-caller-invariant"}[heap/caller argument],
 {ref "external-domains"}[external contracts] and
 {ref "contribution-policy"}[contribution policy].
 
-Production definitions, proof/trust inventories, source audits and artifact
-identities remain authoritative in their owner-maintained files. In particular,
-`integration/talos/PLAN.md`, `W6-COVERAGE.md`, `W6-OBSERVABLE-CONTRACT-AND-TRUST.md`
-and `docs/w6-source-admission-audit.md` retain their own owners and purposes.
-Build, cache, worktree and handoff instructions remain in `AGENTS.md` and the
-small Blueprint README. Generic authoring and CLI behavior belongs to VBP's
-public documentation.
+Lean definitions, proofs and their compiled checks determine the formal
+results. Owner-maintained audits, case inventories and reproduction guides
+record how those results were investigated and checked; they do not form a
+parallel mathematical roadmap or proof-status registry. The single
+{ref "source-disposition-inventory"}[supporting-evidence section] identifies
+those records and their reviewed revisions. Repository setup and integration
+follow the operational rules in the contributor's current checkout.
 
 A checked Lean association describes a declaration in the loaded package.
 A dated source citation can explain an accepted or historical result outside

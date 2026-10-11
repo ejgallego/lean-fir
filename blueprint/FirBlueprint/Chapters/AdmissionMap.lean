@@ -12,21 +12,23 @@ open Verso.Genre.Manual.InlineLean
 tag := "admission-coverage"
 %%%
 
-This chapter maps every row of `docs/w6-source-admission-audit.md` to the
-Blueprint argument. Reviewed against source base FIR `93c2e7ec7`: the audit,
+Compiler correctness needs admission for every supported operation that can
+occur in a validated state. This chapter makes that coverage explicit: each
+of the twenty branches is connected to its existing ingredients and remaining
+obligations. The {ref "provenance-design"}[provenance argument],
+{ref "heap-caller-invariant"}[heap and caller argument] and
+{ref "external-domains"}[external contracts] explain the evidence those
+branches consume.
+
+The inventory was reviewed against local source base FIR `93c2e7ec7`, including
 `ConcreteFinalLcnfTyping`, `ConcreteStructuredValidation`,
 `ConcreteStructuredSimulation` and the closure-call interfaces in
-`ConcreteReuseCapacityCacheCorrectness`. This is source review and documentation
-of existing results, not a new proof of admission closure.
-
-The 2026-10-05 source review at accepted main `8f4222cb2` includes
-`f6850d79f`'s stepwise initializer/saved-caller successor, described in the
-{ref "heap-caller-invariant"}[heap chapter]. It leaves the twenty-branch
-admission inventory and its central heap-miss restriction unchanged. The
-operation subfamilies below migrate `integration/talos/W6-COVERAGE.md` and
-the structural runtime/work-order argument in `W6-THEOREM-ROADMAP.md`;
-their exact fixtures, runtime symbol inventories and chronological gate
-records remain in those source files.
+`ConcreteReuseCapacityCacheCorrectness`. The October 5 review at accepted
+`8f4222cb2` includes `f6850d79f`'s stepwise initializer/saved-caller successor;
+it leaves the twenty branches and central heap-miss restriction unchanged.
+These are reviews of existing results, not a new proof of admission closure.
+The {ref "source-disposition-inventory"}[supporting evidence] retains the source
+census, exact fixtures and dated implementation records behind this inventory.
 
 The selected endpoint is {bpref "validated-return"}[]. Its missing admission
 proof is {bpref "admission-closure"}[]. The table makes that proof plan's
