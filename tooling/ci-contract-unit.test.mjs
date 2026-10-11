@@ -97,6 +97,21 @@ test("recording jobs provision a pinned recorder without dropping kill-on-exit",
   assert.doesNotMatch(setup, /sudo|continue-on-error/u);
 });
 
+test("replay jobs provision maintained bubblewrap and preserve namespace restrictions", () => {
+  for (const name of ["ci.yml", "wasm-artifact.yml"]) {
+    assert.match(workflow(name), /bash scripts\/setup-ci-bwrap\.sh/u);
+    assert.match(workflow(name), /meson ninja-build libcap-dev pkg-config patch/u);
+  }
+  const setup = readFileSync(join(root, "scripts/setup-ci-bwrap.sh"), "utf8");
+  assert.match(setup, /c6347eaced49ac0141996f46bba3b089e5e6ea4408bc1c43bab9f2d05dd094e1/u);
+  assert.match(setup, /4d6c71db380bb69d19a09501bd5caec92e46bf54c7f505805e75687daf783939/u);
+  assert.match(setup, /sha256sum --check --status/u);
+  assert.match(setup, /patch -p1/u);
+  assert.match(setup, /--disable-userns --assert-userns-disabled --cap-drop ALL/u);
+  assert.match(setup, /GITHUB_PATH/u);
+  assert.doesNotMatch(setup, /sudo|continue-on-error/u);
+});
+
 test("failure diagnostics expose bounded backend stderr/stdout without broad uploads", () => {
   for (const [name, title, output] of [
     ["ci.yml", "Report bounded check failure logs", "check.log"],

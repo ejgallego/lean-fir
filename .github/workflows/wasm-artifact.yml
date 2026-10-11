@@ -67,12 +67,14 @@ jobs:
         run: |
           mkdir -p "$TMPDIR" .deps
           sudo apt-get update
-          sudo apt-get install -y ripgrep strace bubblewrap
+          sudo apt-get install -y ripgrep strace bubblewrap meson ninja-build libcap-dev pkg-config patch
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o .deps/elan-init.sh
           sh .deps/elan-init.sh -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Prepare compatible file-access recorder
         run: bash scripts/quiet-run.sh ci-strace -- bash scripts/setup-ci-strace.sh
+      - name: Prepare compatible build replay isolator
+        run: bash scripts/quiet-run.sh ci-bwrap -- bash scripts/setup-ci-bwrap.sh
       - name: Prepare pinned Binaryen tools
         run: bash integration/lcnf-c-wasm/setup-emscripten.sh --runtime-profile unthreaded
       - name: Check external tooling on Node 22
